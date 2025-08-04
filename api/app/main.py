@@ -1,6 +1,6 @@
 """
 FastAPI application for Personal Wealth Management.
-Version: 1.0.1
+Version: 1.0.2
 """
 from contextlib import asynccontextmanager
 from datetime import datetime
