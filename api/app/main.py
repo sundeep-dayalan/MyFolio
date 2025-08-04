@@ -84,14 +84,27 @@ def create_app() -> FastAPI:
     # Health check endpoint
     @app.get("/health")
     async def health_check():
-        """Health check endpoint."""
-        return {
-            "status": "healthy",
-            "service": settings.project_name,
-            "version": settings.version,
-            "environment": settings.environment,
-            "firebase_connected": firebase_client.is_connected
-        }
+        """Health check endpoint for Cloud Run."""
+        try:
+            # Test Firebase connection
+            firebase_status = "connected" if firebase_client.get_client() else "disconnected"
+            
+            return {
+                "status": "healthy",
+                "service": settings.project_name,
+                "version": settings.version,
+                "environment": settings.environment,
+                "firebase": firebase_status,
+                "firebase_connected": firebase_client.is_connected,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        except Exception as e:
+            logger.error(f"Health check failed: {e}")
+            return {
+                "status": "unhealthy",
+                "error": str(e),
+                "timestamp": datetime.utcnow().isoformat()
+            }
     
     # Root endpoint
     @app.get("/")
@@ -103,27 +116,6 @@ def create_app() -> FastAPI:
             "docs_url": "/docs" if settings.debug else None
         }
 
-    @app.get("/health")
-    async def health_check():
-        """Health check endpoint for Cloud Run."""
-        try:
-            # Test Firebase connection
-            firebase_status = "connected" if firebase_client.get_client() else "disconnected"
-            
-            return {
-                "status": "healthy",
-                "environment": settings.environment,
-                "firebase": firebase_status,
-                "timestamp": datetime.utcnow().isoformat()
-            }
-        except Exception as e:
-            logger.error(f"Health check failed: {e}")
-            return {
-                "status": "unhealthy",
-                "error": str(e),
-                "timestamp": datetime.utcnow().isoformat()
-            }
-    
     return app
 
 
