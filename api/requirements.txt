@@ -1,0 +1,54 @@
+# Core dependencies
+fastapi>=0.104.0,<1.0.0
+uvicorn[standard]>=0.24.0,<1.0.0
+
+# Firebase
+firebase-admin>=6.2.0,<7.0.0
+google-cloud-firestore>=2.13.0,<3.0.0
+
+# Google OAuth
+google-auth>=2.14.0,<3.0.0
+google-auth-oauthlib>=1.1.0,<2.0.0
+google-auth-httplib2>=0.2.0,<1.0.0
+
+# FastAPI and core dependencies
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+
+# Authentication and security
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+google-auth==2.23.4
+google-auth-oauthlib==1.1.0
+google-auth-httplib2==0.2.0
+httpx==0.25.2
+
+# Database
+firebase-admin==6.2.0
+
+# Data validation
+pydantic==2.5.0
+pydantic-settings==2.1.0
+
+# Environment and configuration
+python-dotenv==1.0.0
+
+# Logging and monitoring
+structlog==23.2.0
+
+# Session management
+starlette==0.27.0
+itsdangerous==2.2.0
+
+# Testing (dev dependencies)
+pytest==7.4.3
+pytest-asyncio==0.21.1
+
+# Data validation
+pydantic>=2.4.0,<3.0.0
+pydantic-settings>=2.0.0,<3.0.0
+email-validator>=2.1.0,<3.0.0
+
+# Environment management
+python-dotenv>=1.0.0,<2.0.0

@@ -1,0 +1,87 @@
+import firebase_admin
+from firebase_admin import credentials, firestore
+from fastapi import FastAPI, HTTPException
+
+# --- Configuration ---
+# Replace 'path/to/your/serviceAccountKey.json' with the actual path
+SERVICE_ACCOUNT_KEY_PATH = 'service-account.json'
+
+# --- FastAPI App Initialization ---
+app = FastAPI()
+
+# Global variable to hold the Firestore client
+db = None
+
+@app.on_event("startup")
+async def startup_event():
+    """
+    Initializes Firebase Admin SDK when the FastAPI application starts up.
+    """
+    global db
+    try:
+        # Load the service account credentials
+        cred = credentials.Certificate(SERVICE_ACCOUNT_KEY_PATH)
+
+        # Initialize the Firebase Admin SDK
+        firebase_admin.initialize_app(cred, {
+            'projectId': 'fit-guide-465001-p3'
+        })
+        print("Firebase Admin SDK initialized successfully!")
+
+        # Get a Firestore client instance for your SPECIFIC NAMED DATABASE
+        # This parameter *should* be available after the upgrade
+        db = firestore.client(database_id="personal-wealth-management")
+        print("Firestore client obtained for 'personal-wealth-management'!")
+
+    except Exception as e:
+        print(f"Error initializing Firebase or Firestore: {e}")
+        raise HTTPException(status_code=500, detail="Failed to initialize Firebase services.")
+
+
+@app.get("/")
+async def read_root():
+    return {"message": "Welcome to your Firebase-connected FastAPI app!"}
+
+@app.get("/users/{user_id}")
+async def get_user_data(user_id: str):
+    """
+    Example endpoint to retrieve a user document from Firestore.
+    """
+    if db is None:
+        raise HTTPException(status_code=500, detail="Firestore client not initialized.")
+
+    doc_ref = db.collection('users').document(user_id)
+    doc = doc_ref.get()
+
+    if doc.exists:
+        return {"user_id": user_id, "data": doc.to_dict()}
+    else:
+        raise HTTPException(status_code=404, detail=f"User '{user_id}' not found.")
+
+@app.post("/users")
+async def create_user_data(user: dict):
+    """
+    Example endpoint to add or update a user document in Firestore.
+    Expects a JSON body like: {"id": "some_id", "name": "John Doe", "email": "john@example.com"}
+    """
+    if db is None:
+        raise HTTPException(status_code=500, detail="Firestore client not initialized.")
+
+    user_id = user.get("id")
+    if not user_id:
+        raise HTTPException(status_code=400, detail="User ID is required.")
+
+    try:
+        # Set a document with a specific ID
+        doc_ref = db.collection('users').document(user_id)
+        doc_ref.set(user) # This will create or overwrite the document
+
+        return {"message": f"User '{user_id}' created/updated successfully!"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error writing user data: {e}")
+
+
+# To run this FastAPI app:
+# 1. Save the code above as, for example, 'main.py'.
+# 2. Make sure your 'serviceAccountKey.json' is in the specified path.
+# 3. Run from your terminal: uvicorn main:app --reload

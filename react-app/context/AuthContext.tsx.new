@@ -1,0 +1,69 @@
+import React, { createContext, useState, useCallback, useMemo, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { AuthContextType, UserResponse } from '../types';
+
+export const AuthContext = createContext<AuthContextType | null>(null);
+
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [user, setUser] = useState<UserResponse | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [token, setAuthToken] = useState<string | null>(null);
+  const navigate = useNavigate();
+
+  // Check for existing authentication on app load
+  useEffect(() => {
+    const storedToken = localStorage.getItem('authToken');
+    const storedUser = localStorage.getItem('user');
+    
+    if (storedToken && storedUser) {
+      try {
+        const userData = JSON.parse(storedUser);
+        setUser(userData);
+        setAuthToken(storedToken);
+      } catch (error) {
+        console.error('Failed to parse stored user data:', error);
+        // Clear invalid data
+        localStorage.removeItem('authToken');
+        localStorage.removeItem('user');
+      }
+    }
+    
+    setLoading(false);
+  }, []);
+
+  const login = useCallback(() => {
+    // Redirect to server-side OAuth endpoint
+    window.location.href = 'http://localhost:8000/api/v1/auth/oauth/google';
+  }, []);
+
+  const setUserAndToken = useCallback((userData: UserResponse, authToken: string) => {
+    setUser(userData);
+    setAuthToken(authToken);
+    localStorage.setItem('authToken', authToken);
+    localStorage.setItem('user', JSON.stringify(userData));
+  }, []);
+
+  const logout = useCallback(() => {
+    setUser(null);
+    setAuthToken(null);
+    localStorage.removeItem('authToken');
+    localStorage.removeItem('user');
+    navigate('/login');
+  }, [navigate]);
+
+  const isAuthenticated = useMemo(() => {
+    return !!(user && token);
+  }, [user, token]);
+
+  const value = useMemo(() => ({
+    user,
+    loading,
+    login,
+    logout,
+    isAuthenticated,
+    setUser: setUserAndToken,
+    setToken: setAuthToken,
+  }), [user, loading, login, logout, isAuthenticated, setUserAndToken]);
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+};
