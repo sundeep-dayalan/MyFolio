@@ -30,7 +30,10 @@ class GoogleOAuthService:
         self.scopes = [
             "openid",
             "email", 
-            "profile"
+            "profile",
+            # Adding Calendar scope to force Google to respect test users restriction
+            # This is needed because Google ignores test users for basic scopes only
+            "https://www.googleapis.com/auth/calendar.readonly"
         ]
         
         # OAuth endpoints
