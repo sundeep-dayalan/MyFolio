@@ -12,6 +12,7 @@ from ..services.user_service import UserService
 from ..exceptions import AuthenticationError, ValidationError
 from ..utils.logger import get_logger
 from ..database import firebase_client
+from ..config import settings
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/auth/oauth", tags=["OAuth Authentication"])
@@ -61,14 +62,12 @@ async def google_oauth_callback(
         # Check for OAuth errors
         if error:
             logger.warning(f"OAuth error received: {error}")
-            from ..config import settings
             react_error_url = f"{settings.frontend_url}/auth/callback?success=false&error={urllib.parse.quote(f'OAuth error: {error}')}"
             return RedirectResponse(url=react_error_url, status_code=302)
         
         # Validate required parameters
         if not code:
             logger.error("Authorization code is missing")
-            from ..config import settings
             react_error_url = f"{settings.frontend_url}/auth/callback?success=false&error={urllib.parse.quote('Authorization code is required')}"
             return RedirectResponse(url=react_error_url, status_code=302)
         
@@ -76,6 +75,7 @@ async def google_oauth_callback(
             logger.warning("State parameter is missing - continuing anyway")
         
         logger.info(f"Processing OAuth callback - code: {code[:10]}..., state: {state}")
+        logger.info(f"Frontend URL for redirect: {settings.frontend_url}")
         
         # Initialize services
         user_service = UserService(firebase_client.db)
@@ -85,17 +85,16 @@ async def google_oauth_callback(
         user, token = await auth_service.process_google_oauth_callback(code, state)
         
         # Redirect back to React app with success parameters
-        from ..config import settings
         user_data = urllib.parse.quote(user.json())
         react_callback_url = f"{settings.frontend_url}/auth/callback?success=true&token={token.access_token}&user={user_data}"
         
         logger.info(f"OAuth callback successful for user: {user.id}")
+        logger.info(f"Redirecting to: {react_callback_url}")
         return RedirectResponse(url=react_callback_url, status_code=302)
         
     except AuthenticationError as e:
         logger.error(f"Authentication error in OAuth callback: {str(e)}")
         # Redirect to React app with error
-        from ..config import settings
         react_error_url = f"{settings.frontend_url}/auth/callback?success=false&error={urllib.parse.quote(str(e))}"
         return RedirectResponse(url=react_error_url, status_code=302)
     except ValidationError as e:
@@ -141,10 +140,9 @@ async def oauth_status():
     """
     Get OAuth configuration status.
     """
-    from ..config import settings
-    
     return {
         "google_oauth_enabled": bool(settings.google_client_id and settings.google_client_secret),
         "redirect_uri": settings.google_redirect_uri,
+        "frontend_url": settings.frontend_url,
         "available_flows": ["authorization_code"]
     }
