@@ -24,22 +24,27 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting Personal Wealth Management API...")
     
-    try:
-        await firebase_client.connect()
-        logger.info("Application startup complete")
-    except Exception as e:
-        logger.error(f"Failed to start application: {e}")
-        raise
+    # Skip Firebase connection in test environment
+    if settings.environment != "test":
+        try:
+            await firebase_client.connect()
+            logger.info("Application startup complete")
+        except Exception as e:
+            logger.error(f"Failed to start application: {e}")
+            raise
+    else:
+        logger.info("Skipping Firebase connection in test environment")
     
     yield
     
     # Shutdown
     logger.info("Shutting down Personal Wealth Management API...")
-    try:
-        await firebase_client.disconnect()
-        logger.info("Application shutdown complete")
-    except Exception as e:
-        logger.error(f"Error during shutdown: {e}")
+    if settings.environment != "test":
+        try:
+            await firebase_client.disconnect()
+            logger.info("Application shutdown complete")
+        except Exception as e:
+            logger.error(f"Error during shutdown: {e}")
 
 
 def create_app() -> FastAPI:

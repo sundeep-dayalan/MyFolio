@@ -49,7 +49,18 @@ jobs:
         pip install -r requirements.txt
         pip install -r requirements-dev.txt
 
+    - name: Set up environment for tests
+      run: |
+        echo "PYTHONPATH=$PYTHONPATH:$(pwd)" >> $GITHUB_ENV
+
     - name: Run tests
+      env:
+        PYTHONPATH: ${{ github.workspace }}/api:${{ env.PYTHONPATH }}
+        SECRET_KEY: "test-secret-key-for-ci"
+        DEBUG: "true"
+        ENVIRONMENT: "test"
+        GOOGLE_CLOUD_PROJECT: "test-project"
+        FIREBASE_PROJECT_ID: "test-project"
       run: |
         pytest tests/ -v
 

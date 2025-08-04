@@ -40,13 +40,13 @@ class Settings(BaseSettings):
         return [origin.strip() for origin in self.allowed_origins.split(",") if origin.strip()]
     
     # Firebase Configuration
-    firebase_project_id: str = Field(..., env="FIREBASE_PROJECT_ID")
+    firebase_project_id: str = Field(default="test-project", env="FIREBASE_PROJECT_ID")
     firebase_credentials_path: Optional[str] = Field(default=None, env="FIREBASE_CREDENTIALS_PATH")
     firebase_database_id: str = Field(default="personal-wealth-management", env="FIREBASE_DATABASE_ID")
     
     # Google OAuth Configuration
-    google_client_id: str = Field(..., env="GOOGLE_CLIENT_ID")
-    google_client_secret: str = Field(..., env="GOOGLE_CLIENT_SECRET")
+    google_client_id: str = Field(default="test-client-id", env="GOOGLE_CLIENT_ID")
+    google_client_secret: str = Field(default="test-client-secret", env="GOOGLE_CLIENT_SECRET")
     google_redirect_uri: str = Field(default="http://localhost:8000/api/v1/auth/oauth/google/callback", env="GOOGLE_REDIRECT_URI")
     
     # Logging
