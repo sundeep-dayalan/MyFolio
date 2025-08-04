@@ -89,8 +89,9 @@ async def google_oauth_callback(
         user, token = await auth_service.process_google_oauth_callback(code, state)
         
         # Redirect back to React app with success parameters
+        from ..config import settings
         user_data = urllib.parse.quote(user.json())
-        react_callback_url = f"http://localhost:5173/auth/callback?success=true&token={token.access_token}&user={user_data}"
+        react_callback_url = f"{settings.frontend_url}/auth/callback?success=true&token={token.access_token}&user={user_data}"
         
         logger.info(f"OAuth callback successful for user: {user.id}")
         return RedirectResponse(url=react_callback_url, status_code=302)
@@ -98,17 +99,18 @@ async def google_oauth_callback(
     except AuthenticationError as e:
         logger.error(f"Authentication error in OAuth callback: {str(e)}")
         # Redirect to React app with error
-        react_error_url = f"http://localhost:5173/auth/callback?success=false&error={urllib.parse.quote(str(e))}"
+        from ..config import settings
+        react_error_url = f"{settings.frontend_url}/auth/callback?success=false&error={urllib.parse.quote(str(e))}"
         return RedirectResponse(url=react_error_url, status_code=302)
     except ValidationError as e:
         logger.error(f"Validation error in OAuth callback: {str(e)}")
         # Redirect to React app with error
-        react_error_url = f"http://localhost:5173/auth/callback?success=false&error={urllib.parse.quote(str(e))}"
+        react_error_url = f"{settings.frontend_url}/auth/callback?success=false&error={urllib.parse.quote(str(e))}"
         return RedirectResponse(url=react_error_url, status_code=302)
     except Exception as e:
         logger.error(f"Unexpected error in OAuth callback: {str(e)}")
         # Redirect to React app with error
-        react_error_url = f"http://localhost:5173/auth/callback?success=false&error={urllib.parse.quote('OAuth callback failed')}"
+        react_error_url = f"{settings.frontend_url}/auth/callback?success=false&error={urllib.parse.quote('OAuth callback failed')}"
         return RedirectResponse(url=react_error_url, status_code=302)
 
 
