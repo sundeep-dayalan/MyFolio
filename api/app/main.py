@@ -55,9 +55,9 @@ def create_app() -> FastAPI:
         title=settings.project_name,
         version=settings.version,
         description="A comprehensive personal wealth management API with portfolio tracking, transaction management, and financial analytics.",
-        docs_url="/docs" if settings.debug else None,
-        redoc_url="/redoc" if settings.debug else None,
-        openapi_url="/openapi.json" if settings.debug else None,
+        docs_url="/docs",
+        redoc_url="/redoc", 
+        openapi_url="/openapi.json",
         lifespan=lifespan
     )
     
@@ -113,7 +113,7 @@ def create_app() -> FastAPI:
         return {
             "message": f"Welcome to {settings.project_name}!",
             "version": settings.version,
-            "docs_url": "/docs" if settings.debug else None
+            "docs_url": "/docs"
         }
 
     return app
