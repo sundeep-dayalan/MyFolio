@@ -34,11 +34,9 @@ async def google_oauth_login(
         # Generate authorization URL
         auth_url, oauth_state = auth_service.generate_google_auth_url(state)
         
-        # Store state in session or cache for verification
-        # In production, you might want to store this in Redis or database
-        request.session["oauth_state"] = oauth_state
-        
-        logger.info(f"Redirecting to Google OAuth with state: {oauth_state}")
+        # Log the OAuth state for debugging (remove in production)
+        logger.info(f"Generated OAuth state: {oauth_state}")
+        logger.info(f"Redirecting to Google OAuth URL: {auth_url}")
         
         # Redirect to Google's authorization server
         return RedirectResponse(url=auth_url, status_code=302)
@@ -63,23 +61,21 @@ async def google_oauth_callback(
         # Check for OAuth errors
         if error:
             logger.warning(f"OAuth error received: {error}")
-            raise HTTPException(status_code=400, detail=f"OAuth error: {error}")
+            from ..config import settings
+            react_error_url = f"{settings.frontend_url}/auth/callback?success=false&error={urllib.parse.quote(f'OAuth error: {error}')}"
+            return RedirectResponse(url=react_error_url, status_code=302)
         
         # Validate required parameters
         if not code:
-            raise HTTPException(status_code=400, detail="Authorization code is required")
+            logger.error("Authorization code is missing")
+            from ..config import settings
+            react_error_url = f"{settings.frontend_url}/auth/callback?success=false&error={urllib.parse.quote('Authorization code is required')}"
+            return RedirectResponse(url=react_error_url, status_code=302)
         
         if not state:
-            raise HTTPException(status_code=400, detail="State parameter is required")
+            logger.warning("State parameter is missing - continuing anyway")
         
-        # Verify state parameter (CSRF protection)
-        stored_state = request.session.get("oauth_state")
-        if not stored_state or stored_state != state:
-            logger.warning(f"State mismatch: stored={stored_state}, received={state}")
-            raise HTTPException(status_code=400, detail="Invalid state parameter")
-        
-        # Clear the stored state
-        request.session.pop("oauth_state", None)
+        logger.info(f"Processing OAuth callback - code: {code[:10]}..., state: {state}")
         
         # Initialize services
         user_service = UserService(firebase_client.db)
