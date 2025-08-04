@@ -75,7 +75,7 @@ async def google_oauth_callback(
             logger.warning("State parameter is missing - continuing anyway")
         
         logger.info(f"Processing OAuth callback - code: {code[:10]}..., state: {state}")
-        logger.info(f"Frontend URL for redirect: {settings.frontend_url}")
+        logger.info(f"Frontend URL for redirect: '{settings.frontend_url}'")
         
         # Initialize services
         user_service = UserService(firebase_client.db)
