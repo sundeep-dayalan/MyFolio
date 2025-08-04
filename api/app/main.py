@@ -87,7 +87,7 @@ def create_app() -> FastAPI:
         """Health check endpoint for Cloud Run."""
         try:
             # Test Firebase connection
-            firebase_status = "connected" if firebase_client.get_client() else "disconnected"
+            firebase_status = "connected" if firebase_client.is_connected else "disconnected"
             
             return {
                 "status": "healthy",
