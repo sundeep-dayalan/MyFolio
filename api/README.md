@@ -113,9 +113,52 @@ Key environment variables:
 | `FIREBASE_PROJECT_ID` | Firebase project ID | Required |
 | `FIREBASE_CREDENTIALS_PATH` | Path to service account JSON | Required |
 | `FIREBASE_DATABASE_ID` | Firestore database ID | `personal-wealth-management` |
+| `GOOGLE_CLIENT_ID` | Google OAuth client ID | Required |
+| `GOOGLE_CLIENT_SECRET` | Google OAuth client secret | Required |
+| `GOOGLE_REDIRECT_URI` | OAuth redirect URI | Auto-configured |
 | `ENVIRONMENT` | Environment (development/production) | `development` |
 | `DEBUG` | Enable debug mode | `false` |
 | `LOG_LEVEL` | Logging level | `INFO` |
+
+## Deployment
+
+### Automatic Deployment (Recommended)
+
+This project is configured for automatic deployment to Google Cloud Run via GitHub Actions.
+
+**Prerequisites**: Configure GitHub repository secrets (see [GITHUB_ACTIONS_SETUP.md](../GITHUB_ACTIONS_SETUP.md))
+
+**How it works**:
+1. Push changes to the `api/` folder on the `main` branch
+2. GitHub Actions automatically:
+   - Runs tests
+   - Builds and pushes Docker image
+   - Deploys to Cloud Run
+   - Runs health checks
+
+**Production URL**: `https://myfolio-api-681015953939.us-central1.run.app`
+
+### Manual Deployment
+
+For manual deployment or local testing:
+
+```bash
+# Build and deploy
+cd api
+docker build --platform linux/amd64 -t gcr.io/fit-guide-465001-p3/myfolio-api .
+docker push gcr.io/fit-guide-465001-p3/myfolio-api
+
+# Deploy to Cloud Run
+gcloud run deploy myfolio-api \
+  --image gcr.io/fit-guide-465001-p3/myfolio-api \
+  --platform managed \
+  --region us-central1 \
+  --allow-unauthenticated \
+  --port 8000 \
+  --memory 1Gi \
+  --cpu 1 \
+  --service-account myfolio-api-service@fit-guide-465001-p3.iam.gserviceaccount.com
+```
 
 ## API Documentation
 

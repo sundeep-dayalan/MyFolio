@@ -32,11 +32,8 @@ class FirebaseClient:
             
             if not self._db:
                 # Get Firestore client
-                self._db = firestore.client(
-                    app=self._app,
-                    database_id=settings.firebase_database_id
-                )
-                logger.info(f"Firestore client connected to database: {settings.firebase_database_id}")
+                self._db = firestore.client(app=self._app)
+                logger.info(f"Firestore client connected successfully")
                 
         except Exception as e:
             logger.error(f"Failed to initialize Firebase: {e}")

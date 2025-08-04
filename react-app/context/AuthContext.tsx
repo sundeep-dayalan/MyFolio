@@ -1,6 +1,7 @@
 import React, { createContext, useState, useCallback, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AuthContextType, UserResponse } from '../types';
+import config from '../config/env';
 
 export const AuthContext = createContext<AuthContextType | null>(null);
 
@@ -50,7 +51,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = useCallback(() => {
     // Redirect to server-side OAuth endpoint
-    window.location.href = 'http://localhost:8000/api/v1/auth/oauth/google';
+    window.location.href = `${config.apiBaseUrl}/auth/oauth/google`;
   }, []);
 
   const setUserAndToken = useCallback((userData: UserResponse, authToken: string) => {

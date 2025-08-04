@@ -19,8 +19,8 @@ def add_cors_middleware(app: FastAPI) -> None:
             "http://127.0.0.1:5173",
         ]
     else:
-        # Production CORS settings - be more restrictive
-        origins = [settings.frontend_url] + settings.allowed_hosts_list
+        # Production CORS settings - use allowed_origins from settings
+        origins = settings.allowed_origins_list
     
     app.add_middleware(
         CORSMiddleware,

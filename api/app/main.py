@@ -2,6 +2,7 @@
 FastAPI application for Personal Wealth Management.
 """
 from contextlib import asynccontextmanager
+from datetime import datetime
 from fastapi import FastAPI
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -95,6 +96,27 @@ def create_app() -> FastAPI:
             "version": settings.version,
             "docs_url": "/docs" if settings.debug else None
         }
+
+    @app.get("/health")
+    async def health_check():
+        """Health check endpoint for Cloud Run."""
+        try:
+            # Test Firebase connection
+            firebase_status = "connected" if firebase_client.get_client() else "disconnected"
+            
+            return {
+                "status": "healthy",
+                "environment": settings.environment,
+                "firebase": firebase_status,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        except Exception as e:
+            logger.error(f"Health check failed: {e}")
+            return {
+                "status": "unhealthy",
+                "error": str(e),
+                "timestamp": datetime.utcnow().isoformat()
+            }
     
     return app
 

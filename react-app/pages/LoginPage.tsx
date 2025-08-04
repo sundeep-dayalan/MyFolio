@@ -5,6 +5,7 @@ import { AuthContext } from '../context/AuthContext';
 import { AuthContextType, OAuthStatusResponse } from '../types';
 import GoogleIcon from '../components/icons/GoogleIcon';
 import Spinner from '../components/Spinner';
+import config from '../config/env';
 
 const LoginPage: React.FC = () => {
     const auth = useContext(AuthContext) as AuthContextType;
@@ -13,7 +14,7 @@ const LoginPage: React.FC = () => {
     const [error, setError] = useState<string | null>(null);
     const [oauthStatus, setOauthStatus] = useState<OAuthStatusResponse | null>(null);
 
-    const API_BASE_URL = 'http://localhost:8000/api/v1';
+    const API_BASE_URL = config.apiBaseUrl;
 
     useEffect(() => {
         // Check if user is already authenticated
