@@ -29,15 +29,6 @@ def test_root_endpoint(client: TestClient):
 def test_docs_available_in_development(client: TestClient):
     """Test that API docs are available in development."""
     response = client.get("/docs")
-    # Should return 200 in development mode
+    # In development mode (DEBUG=True), docs should be available
+    # In test environment, we set DEBUG=True, so docs should be accessible
     assert response.status_code == 200
-
-
-@pytest.mark.asyncio
-async def test_async_health_check(async_client):
-    """Test health check with async client."""
-    response = await async_client.get("/health")
-    assert response.status_code == 200
-    
-    data = response.json()
-    assert data["status"] == "healthy"

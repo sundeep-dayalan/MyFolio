@@ -6,6 +6,7 @@ import asyncio
 from typing import AsyncGenerator
 from httpx import AsyncClient
 from fastapi.testclient import TestClient
+from unittest.mock import Mock, patch
 
 from app.main import app
 from app.config import settings
@@ -20,14 +21,25 @@ def event_loop():
 
 
 @pytest.fixture
-def client():
-    """Create a test client."""
+def mock_firebase_client():
+    """Mock Firebase client for testing."""
+    with patch('app.database.firebase_client') as mock_client:
+        # Mock the client methods
+        mock_client.connect = Mock()
+        mock_client.disconnect = Mock()
+        mock_client.db = Mock()
+        yield mock_client
+
+
+@pytest.fixture
+def client(mock_firebase_client):
+    """Create a test client with mocked Firebase."""
     return TestClient(app)
 
 
 @pytest.fixture
-async def async_client() -> AsyncGenerator[AsyncClient, None]:
-    """Create an async test client."""
+async def async_client(mock_firebase_client):
+    """Create an async test client with mocked Firebase."""
     async with AsyncClient(app=app, base_url="http://test") as ac:
         yield ac
 
