@@ -75,6 +75,7 @@ def create_app() -> FastAPI:
         https_only=not settings.debug  # Use secure cookies in production
     )
     
+    
     # Add routers
     app.include_router(auth_router, prefix=settings.api_v1_prefix)
     app.include_router(oauth_router, prefix=settings.api_v1_prefix)
