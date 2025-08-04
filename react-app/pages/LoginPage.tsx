@@ -5,7 +5,7 @@ import { AuthContext } from '../context/AuthContext';
 import { AuthContextType, OAuthStatusResponse } from '../types';
 import GoogleIcon from '../components/icons/GoogleIcon';
 import Spinner from '../components/Spinner';
-import config from '../config/env';
+import { config } from '../config/env';
 
 const LoginPage: React.FC = () => {
     const auth = useContext(AuthContext) as AuthContextType;

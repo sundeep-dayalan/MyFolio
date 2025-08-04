@@ -1,7 +1,7 @@
 import React, { createContext, useState, useCallback, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AuthContextType, UserResponse } from '../types';
-import config from '../config/env';
+import { config } from '../config/env';
 
 export const AuthContext = createContext<AuthContextType | null>(null);
 

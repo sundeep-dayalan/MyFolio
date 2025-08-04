@@ -2,7 +2,7 @@
  * Updated React authentication service for secure server-side OAuth
  */
 import { UserResponse, Token, OAuthCallbackResponse } from '../types';
-import config from '../config/env';
+import { config } from '../config/env';
 
 const API_BASE_URL = config.apiBaseUrl;
 
