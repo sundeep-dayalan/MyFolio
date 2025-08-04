@@ -72,6 +72,7 @@ class Settings(BaseSettings):
                 "GOOGLE_CLIENT_ID": secret_manager.get_secret("GOOGLE_CLIENT_ID"),
                 "GOOGLE_CLIENT_SECRET": secret_manager.get_secret("GOOGLE_CLIENT_SECRET"),
                 "GOOGLE_REDIRECT_URI": secret_manager.get_secret("GOOGLE_REDIRECT_URI"),
+                "ALLOWED_ORIGINS": secret_manager.get_secret("ALLOWED_ORIGINS"),
             }
             
             # Set up Firebase credentials path for Cloud Run
