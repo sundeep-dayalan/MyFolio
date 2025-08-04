@@ -189,7 +189,7 @@ const LoginPage: React.FC = () => {
                     {/* Footer */}
                     <div className="text-center text-slate-400 text-xs mt-8 pt-6 border-t border-white/10">
                         <p>© {new Date().getFullYear()} MyFolio. Secure & Private.</p>
-                        <p className="mt-1">Your financial data is protected</p>
+                        <p className="mt-1">Your financial data is protected V1.0</p>
                     </div>
                 </div>
 
