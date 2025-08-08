@@ -2,6 +2,7 @@ import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import ProtectedRoute from './components/ProtectedRoute';
 import HomePage from './pages/HomePage';
+import AccountsPage from './pages/AccountsPage';
 import LoginPage from './pages/LoginPage';
 import NoPermissionPage from './pages/NoPermissionPage';
 import OAuthCallbackPage from './pages/OAuthCallbackPage';
@@ -24,6 +25,18 @@ function App() {
             ) : (
               <ProtectedRoute>
                 <HomePage />
+              </ProtectedRoute>
+            )
+          }
+        />
+        <Route
+          path="/accounts"
+          element={
+            DEV_MODE ? (
+              <AccountsPage />
+            ) : (
+              <ProtectedRoute>
+                <AccountsPage />
               </ProtectedRoute>
             )
           }

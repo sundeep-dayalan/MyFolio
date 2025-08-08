@@ -265,6 +265,21 @@ const HomePage: React.FC = () => {
             </a>
 
             <a
+              href="/accounts"
+              className="flex items-center space-x-3 px-4 py-3 text-slate-300 hover:text-white hover:bg-white/5 rounded-xl transition-colors"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"
+                />
+              </svg>
+              <span>Accounts</span>
+            </a>
+
+            <a
               href="#"
               className="flex items-center space-x-3 px-4 py-3 text-slate-300 hover:text-white hover:bg-white/5 rounded-xl transition-colors"
             >
@@ -723,6 +738,81 @@ const HomePage: React.FC = () => {
                 </p>
               </div>
             </div>
+
+            {/* Bank Accounts Section */}
+            {plaidData && accounts.length > 0 && (
+              <div className="mt-8 bg-white/10 backdrop-blur-md rounded-2xl p-6 border border-white/20">
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="text-xl font-bold text-white">Your Bank Accounts</h3>
+                  <a
+                    href="/accounts"
+                    className="text-emerald-400 hover:text-emerald-300 text-sm font-medium flex items-center space-x-1 transition-colors"
+                  >
+                    <span>Manage Accounts</span>
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M9 5l7 7-7 7"
+                      />
+                    </svg>
+                  </a>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
+                  {accounts.slice(0, 3).map((account) => (
+                    <div
+                      key={account.account_id}
+                      className="bg-white/5 rounded-xl p-4 border border-white/10 hover:border-white/20 transition-all duration-200"
+                    >
+                      <div className="flex items-center space-x-3 mb-3">
+                        <div className="text-xl">
+                          {account.type === 'depository'
+                            ? '🏦'
+                            : account.type === 'credit'
+                            ? '💳'
+                            : '🏛️'}
+                        </div>
+                        <div>
+                          <h4 className="text-white font-medium text-sm">{account.name}</h4>
+                          <p className="text-slate-400 text-xs capitalize">
+                            {account.subtype || account.type}
+                            {account.mask && ` •••• ${account.mask}`}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-emerald-400 font-semibold">
+                          {formatCurrency(account.balances.current || 0)}
+                        </p>
+                        <p className="text-slate-400 text-xs">
+                          Available: {formatCurrency(account.balances.available || 0)}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex items-center justify-between pt-4 border-t border-white/10">
+                  <div>
+                    <p className="text-white font-medium">
+                      Total Balance: {formatCurrency(plaidData.total_balance)}
+                    </p>
+                    <p className="text-slate-400 text-sm">
+                      {plaidData.account_count} account{plaidData.account_count !== 1 ? 's' : ''}{' '}
+                      connected
+                    </p>
+                  </div>
+                  <a
+                    href="/accounts"
+                    className="bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 border border-emerald-500/30"
+                  >
+                    View All
+                  </a>
+                </div>
+              </div>
+            )}
 
             {/* Connect Bank Section */}
             <div className="mt-8 bg-white/10 backdrop-blur-md rounded-2xl p-6 border border-white/20">
