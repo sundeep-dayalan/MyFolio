@@ -80,3 +80,33 @@ def get_balance_legacy(
         return {"accounts": result["accounts"]}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/items")
+def get_plaid_items(
+    user_id: str = Depends(get_current_user_id),
+    plaid_service: PlaidService = Depends(get_plaid_service),
+):
+    """Get summary of user's connected Plaid items (institutions)."""
+    try:
+        result = plaid_service.get_user_plaid_items(user_id)
+        return {"items": result}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/items/{item_id}")
+def revoke_plaid_item(
+    item_id: str,
+    user_id: str = Depends(get_current_user_id),
+    plaid_service: PlaidService = Depends(get_plaid_service),
+):
+    """Revoke access to a specific Plaid item."""
+    try:
+        success = plaid_service.revoke_token(user_id, item_id)
+        if success:
+            return {"message": "Item revoked successfully"}
+        else:
+            raise HTTPException(status_code=400, detail="Failed to revoke item")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
