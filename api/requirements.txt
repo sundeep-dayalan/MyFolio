@@ -39,8 +39,8 @@ itsdangerous==2.2.0
 pytest==7.4.3
 pytest-asyncio==0.21.1
 
-# Plaid SDK - Fix version constraint
-plaid-python>=9.9.0,<10.0.0
+# Plaid SDK - Use the version that works locally
+plaid-python==35.0.0
 
 # Task scheduling
 APScheduler>=3.10.4,<4.0.0
