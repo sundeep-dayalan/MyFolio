@@ -55,3 +55,9 @@ email-validator>=2.1.0,<3.0.0
 
 # Environment management
 python-dotenv>=1.0.0,<2.0.0
+
+# Plaid SDK
+plaid-python>=9.9.1,<10.0.0
+
+# Task scheduling
+APScheduler>=3.10.4,<4.0.0

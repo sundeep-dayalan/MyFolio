@@ -1,7 +1,8 @@
 """
 Application dependencies.
 """
-from fastapi import Depends, HTTPException, status
+
+from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from firebase_admin import firestore
 
@@ -20,19 +21,24 @@ async def get_firestore_client() -> firestore.Client:
     return firebase_client.db
 
 
-def get_user_service(db: firestore.Client = Depends(get_firestore_client)) -> UserService:
+def get_user_service(
+    db: firestore.Client = Depends(get_firestore_client),
+) -> UserService:
     """Get user service dependency."""
     return UserService(db)
 
 
-def get_auth_service(user_service: UserService = Depends(get_user_service)) -> AuthService:
+def get_auth_service(
+    user_service: UserService = Depends(get_user_service),
+) -> AuthService:
     """Get auth service dependency."""
     return AuthService(user_service)
 
 
 async def get_current_user_id(
+    request: Request,
     credentials: HTTPAuthorizationCredentials = Depends(security),
-    auth_service: AuthService = Depends(get_auth_service)
+    auth_service: AuthService = Depends(get_auth_service),
 ) -> str:
     """
     Get current user ID from authentication token.
@@ -43,7 +49,7 @@ async def get_current_user_id(
             detail="Authentication credentials required",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
     user = await auth_service.verify_access_token(credentials.credentials)
     if not user:
         raise HTTPException(
@@ -51,13 +57,13 @@ async def get_current_user_id(
             detail="Invalid or expired token",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
     return user.id
 
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
-    auth_service: AuthService = Depends(get_auth_service)
+    auth_service: AuthService = Depends(get_auth_service),
 ):
     """
     Get current user from authentication token.
@@ -68,7 +74,7 @@ async def get_current_user(
             detail="Authentication credentials required",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
     user = await auth_service.verify_access_token(credentials.credentials)
     if not user:
         raise HTTPException(
@@ -76,5 +82,5 @@ async def get_current_user(
             detail="Invalid or expired token",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
     return user

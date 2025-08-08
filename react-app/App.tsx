@@ -1,8 +1,9 @@
-
 import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import ProtectedRoute from './components/ProtectedRoute';
 import HomePage from './pages/HomePage';
+import AccountsPage from './pages/AccountsPage';
+import TransactionsPage from './pages/TransactionsPage';
 import LoginPage from './pages/LoginPage';
 import NoPermissionPage from './pages/NoPermissionPage';
 import OAuthCallbackPage from './pages/OAuthCallbackPage';
@@ -22,7 +23,23 @@ function App() {
             </ProtectedRoute>
           }
         />
-        <Route path="*" element={<Navigate to="/login" replace />} />
+        <Route
+          path="/accounts"
+          element={
+            <ProtectedRoute>
+              <AccountsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/transactions"
+          element={
+            <ProtectedRoute>
+              <TransactionsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route path="*" element={<Navigate to="/home" replace />} />
       </Routes>
     </div>
   );
