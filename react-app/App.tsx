@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import ProtectedRoute from './components/ProtectedRoute';
 import HomePage from './pages/HomePage';
 import AccountsPage from './pages/AccountsPage';
+import TransactionsPage from './pages/TransactionsPage';
 import LoginPage from './pages/LoginPage';
 import NoPermissionPage from './pages/NoPermissionPage';
 import OAuthCallbackPage from './pages/OAuthCallbackPage';
@@ -27,6 +28,14 @@ function App() {
           element={
             <ProtectedRoute>
               <AccountsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/transactions"
+          element={
+            <ProtectedRoute>
+              <TransactionsPage />
             </ProtectedRoute>
           }
         />

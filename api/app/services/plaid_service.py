@@ -1,6 +1,6 @@
 from typing import Tuple, List, Dict, Any, Optional
 from plaid.api import plaid_api
-from plaid.model.transactions_get_request import TransactionsGetRequest
+from plaid.model.transactions_sync_request import TransactionsSyncRequest
 from plaid.model.accounts_balance_get_request import AccountsBalanceGetRequest
 from plaid.model.item_public_token_exchange_request import (
     ItemPublicTokenExchangeRequest,
@@ -523,11 +523,11 @@ class PlaidService:
             for token in tokens:
                 # Handle status field - it might be string or enum
                 status_value = token.status
-                if hasattr(status_value, 'value'):
+                if hasattr(status_value, "value"):
                     status_str = status_value.value
                 else:
                     status_str = str(status_value)
-                
+
                 items.append(
                     {
                         "item_id": token.item_id,
@@ -866,3 +866,277 @@ class PlaidService:
         except Exception as e:
             logger.error(f"Failed to generate token analytics: {e}")
             raise Exception(f"Token analytics failed: {e}")
+
+    def get_transactions(
+        self, user_id: str, days: int = 30, account_ids: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
+        """Fetch transactions for a user with simple, robust serialization."""
+        try:
+            logger.info(f"Fetching transactions for user {user_id}")
+
+            access_tokens = self.get_user_access_tokens(user_id)
+
+            if not access_tokens:
+                logger.warning(f"No access tokens found for user {user_id}")
+                return {
+                    "transactions": [],
+                    "account_count": 0,
+                    "transaction_count": 0,
+                    "items": [],
+                }
+
+            all_transactions = []
+            items_data = []
+
+            for token_obj in access_tokens:
+                if token_obj.status != PlaidTokenStatus.ACTIVE:
+                    continue
+
+                try:
+                    decrypted_token = TokenEncryption.decrypt_token(
+                        token_obj.access_token
+                    )
+
+                    # Use traditional API for better sandbox compatibility
+                    end_date = datetime.now(timezone.utc).date()
+                    start_date = end_date - timedelta(days=days)
+
+                    from plaid.model.transactions_get_request import (
+                        TransactionsGetRequest,
+                    )
+
+                    traditional_request = TransactionsGetRequest(
+                        access_token=decrypted_token,
+                        start_date=start_date,
+                        end_date=end_date,
+                    )
+                    traditional_response = self.client.transactions_get(
+                        traditional_request
+                    )
+
+                    # Extract transactions with manual field extraction to avoid serialization issues
+                    transactions = []
+                    for tx in traditional_response.transactions:
+                        try:
+                            # Manually extract only essential fields to ensure JSON compatibility
+                            simple_tx = {
+                                "transaction_id": (
+                                    str(tx.transaction_id) if tx.transaction_id else ""
+                                ),
+                                "account_id": (
+                                    str(tx.account_id) if tx.account_id else ""
+                                ),
+                                "amount": float(tx.amount) if tx.amount else 0.0,
+                                "date": str(tx.date) if tx.date else "",
+                                "name": (
+                                    str(tx.name) if tx.name else "Unknown Transaction"
+                                ),
+                                "merchant_name": (
+                                    str(tx.merchant_name) if tx.merchant_name else ""
+                                ),
+                                "category": (
+                                    list(tx.category) if tx.category else ["Other"]
+                                ),
+                                "account_owner": (
+                                    str(tx.account_owner) if tx.account_owner else ""
+                                ),
+                                "transaction_type": (
+                                    str(tx.transaction_type)
+                                    if hasattr(tx, "transaction_type")
+                                    else "other"
+                                ),
+                                "iso_currency_code": (
+                                    str(tx.iso_currency_code)
+                                    if tx.iso_currency_code
+                                    else "USD"
+                                ),
+                                "institution_name": token_obj.institution_name,
+                                "institution_id": token_obj.institution_id,
+                            }
+                            transactions.append(simple_tx)
+                        except Exception as e:
+                            logger.warning(
+                                f"Failed to process transaction {tx.transaction_id}: {e}"
+                            )
+                            # Add a minimal transaction record even if there's an error
+                            transactions.append(
+                                {
+                                    "transaction_id": f"error_{len(transactions)}",
+                                    "account_id": "",
+                                    "amount": 0.0,
+                                    "date": str(end_date),
+                                    "name": "Transaction Processing Error",
+                                    "merchant_name": "",
+                                    "category": ["Error"],
+                                    "account_owner": "",
+                                    "transaction_type": "other",
+                                    "iso_currency_code": "USD",
+                                    "institution_name": token_obj.institution_name,
+                                    "institution_id": token_obj.institution_id,
+                                }
+                            )
+
+                    all_transactions.extend(transactions)
+
+                    # Track item data
+                    items_data.append(
+                        {
+                            "item_id": token_obj.item_id,
+                            "institution_name": token_obj.institution_name,
+                            "transaction_count": len(transactions),
+                        }
+                    )
+
+                    self._update_token_last_used(token_obj.item_id)
+
+                    logger.info(
+                        f"Successfully fetched {len(transactions)} transactions for institution {token_obj.institution_name}"
+                    )
+
+                except Exception as e:
+                    logger.error(
+                        f"Failed to fetch transactions for token {token_obj.item_id}: {e}"
+                    )
+                    continue
+
+            # Sort transactions by date (most recent first)
+            all_transactions.sort(key=lambda x: x.get("date", ""), reverse=True)
+
+            result = {
+                "transactions": all_transactions,
+                "transaction_count": len(all_transactions),
+                "account_count": len(
+                    set(t.get("account_id") for t in all_transactions)
+                ),
+                "items": items_data,
+            }
+
+            logger.info(
+                f"Successfully fetched {len(all_transactions)} total transactions for user {user_id}"
+            )
+            return result
+
+        except Exception as e:
+            logger.error(f"Failed to fetch transactions for user {user_id}: {e}")
+            raise Exception(f"Failed to fetch transactions: {e}")
+
+    def get_transactions_by_account(
+        self, user_id: str, account_id: str, days: int = 30
+    ) -> Dict[str, Any]:
+        """Fetch transactions for a specific account."""
+        try:
+            return self.get_transactions(user_id, days=days, account_ids=[account_id])
+        except Exception as e:
+            logger.error(f"Failed to fetch transactions for account {account_id}: {e}")
+            raise Exception(f"Failed to fetch account transactions: {e}")
+
+    def refresh_transactions(
+        self, user_id: str, item_id: str, days: int = 30
+    ) -> Dict[str, Any]:
+        """Refresh transactions for a specific item/bank using traditional API for compatibility."""
+        try:
+            logger.info(f"Refreshing transactions for user {user_id}, item {item_id}")
+
+            # Get the specific access token
+            access_tokens = self.get_user_access_tokens(user_id)
+            target_token = next(
+                (token for token in access_tokens if token.item_id == item_id), None
+            )
+
+            if not target_token:
+                raise Exception(f"Access token not found for item {item_id}")
+
+            if target_token.status != PlaidTokenStatus.ACTIVE:
+                raise Exception(f"Access token for item {item_id} is not active")
+
+            decrypted_token = TokenEncryption.decrypt_token(target_token.access_token)
+
+            # Use traditional API for better sandbox compatibility
+            end_date = datetime.now(timezone.utc).date()
+            start_date = end_date - timedelta(days=days)
+
+            from plaid.model.transactions_get_request import TransactionsGetRequest
+
+            traditional_request = TransactionsGetRequest(
+                access_token=decrypted_token,
+                start_date=start_date,
+                end_date=end_date,
+            )
+            traditional_response = self.client.transactions_get(traditional_request)
+
+            # Extract transactions with manual field extraction to avoid serialization issues
+            transactions = []
+            for tx in traditional_response.transactions:
+                try:
+                    # Manually extract only essential fields to ensure JSON compatibility
+                    simple_tx = {
+                        "transaction_id": (
+                            str(tx.transaction_id) if tx.transaction_id else ""
+                        ),
+                        "account_id": str(tx.account_id) if tx.account_id else "",
+                        "amount": float(tx.amount) if tx.amount else 0.0,
+                        "date": str(tx.date) if tx.date else "",
+                        "name": str(tx.name) if tx.name else "Unknown Transaction",
+                        "merchant_name": (
+                            str(tx.merchant_name) if tx.merchant_name else ""
+                        ),
+                        "category": list(tx.category) if tx.category else ["Other"],
+                        "account_owner": (
+                            str(tx.account_owner) if tx.account_owner else ""
+                        ),
+                        "transaction_type": (
+                            str(tx.transaction_type)
+                            if hasattr(tx, "transaction_type")
+                            else "other"
+                        ),
+                        "iso_currency_code": (
+                            str(tx.iso_currency_code) if tx.iso_currency_code else "USD"
+                        ),
+                        "institution_name": target_token.institution_name,
+                        "institution_id": target_token.institution_id,
+                    }
+                    transactions.append(simple_tx)
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to process transaction {tx.transaction_id}: {e}"
+                    )
+                    # Add a minimal transaction record even if there's an error
+                    transactions.append(
+                        {
+                            "transaction_id": f"error_{len(transactions)}",
+                            "account_id": "",
+                            "amount": 0.0,
+                            "date": str(end_date),
+                            "name": "Transaction Processing Error",
+                            "merchant_name": "",
+                            "category": ["Error"],
+                            "account_owner": "",
+                            "transaction_type": "other",
+                            "iso_currency_code": "USD",
+                            "institution_name": target_token.institution_name,
+                            "institution_id": target_token.institution_id,
+                        }
+                    )
+
+            # Sort transactions by date (most recent first)
+            transactions.sort(key=lambda x: x.get("date", ""), reverse=True)
+
+            # Update token last used
+            self._update_token_last_used(item_id)
+
+            result = {
+                "transactions": transactions,
+                "transaction_count": len(transactions),
+                "institution_name": target_token.institution_name,
+                "item_id": item_id,
+            }
+
+            logger.info(
+                f"Successfully refreshed {len(transactions)} transactions for item {item_id}"
+            )
+            return result
+
+        except Exception as e:
+            logger.error(f"Failed to refresh transactions for item {item_id}: {e}")
+            raise Exception(f"Failed to refresh transactions: {e}")
+            raise Exception(f"Failed to refresh transactions: {e}")

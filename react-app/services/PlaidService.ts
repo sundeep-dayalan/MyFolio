@@ -39,6 +39,70 @@ export interface PlaidAccountsResponse {
   account_count: number;
 }
 
+export interface PlaidTransaction {
+  transaction_id: string;
+  account_id: string;
+  amount: number;
+  iso_currency_code: string;
+  unofficial_currency_code: string | null;
+  category: string[];
+  category_id: string;
+  date: string;
+  authorized_date: string | null;
+  name: string;
+  merchant_name: string | null;
+  payment_channel: string;
+  pending: boolean;
+  account_owner: string | null;
+  transaction_type: string;
+  location: {
+    address: string | null;
+    city: string | null;
+    region: string | null;
+    postal_code: string | null;
+    country: string | null;
+  } | null;
+  payment_meta: {
+    reference_number: string | null;
+    ppd_id: string | null;
+    payee: string | null;
+  } | null;
+  // Additional fields added by our backend
+  institution_name: string;
+  institution_id: string;
+  account_name: string;
+  account_type: string;
+  account_subtype: string;
+}
+
+export interface PlaidTransactionsResponse {
+  transactions: PlaidTransaction[];
+  transaction_count: number;
+  account_count: number;
+  items: {
+    item_id: string;
+    institution_name: string;
+    transaction_count: number;
+  }[];
+  date_range: {
+    start_date: string;
+    end_date: string;
+    days: number;
+  };
+}
+
+export interface PlaidTransactionsByItemResponse {
+  transactions: PlaidTransaction[];
+  transaction_count: number;
+  institution_name: string;
+  item_id: string;
+  date_range: {
+    start_date: string;
+    end_date: string;
+    days: number;
+  };
+}
+
 const getAuthHeaders = (): HeadersInit => {
   const token = localStorage.getItem('authToken');
 
@@ -224,6 +288,93 @@ export const PlaidService = {
     } catch (error) {
       console.error('Error revoking all items:', error);
       throw new Error('Failed to revoke all bank connections');
+    }
+  },
+
+  async getTransactions(days: number = 30): Promise<PlaidTransactionsResponse> {
+    try {
+      const response = await fetch(`${API_BASE}/plaid/transactions?days=${days}`, {
+        method: 'GET',
+        headers: getAuthHeaders(),
+      });
+
+      if (response.status === 401) {
+        localStorage.removeItem('authToken');
+        window.location.href = '/login';
+        throw new Error('Authentication required. Redirecting to login.');
+      }
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = (await response.json()) as PlaidTransactionsResponse;
+      return data;
+    } catch (error) {
+      console.error('Error fetching transactions:', error);
+      throw new Error('Failed to fetch transactions');
+    }
+  },
+
+  async getTransactionsByAccount(
+    accountId: string,
+    days: number = 30,
+  ): Promise<PlaidTransactionsResponse> {
+    try {
+      const response = await fetch(
+        `${API_BASE}/plaid/transactions/account/${accountId}?days=${days}`,
+        {
+          method: 'GET',
+          headers: getAuthHeaders(),
+        },
+      );
+
+      if (response.status === 401) {
+        localStorage.removeItem('authToken');
+        window.location.href = '/login';
+        throw new Error('Authentication required. Redirecting to login.');
+      }
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = (await response.json()) as PlaidTransactionsResponse;
+      return data;
+    } catch (error) {
+      console.error('Error fetching account transactions:', error);
+      throw new Error('Failed to fetch account transactions');
+    }
+  },
+
+  async refreshTransactions(
+    itemId: string,
+    days: number = 30,
+  ): Promise<PlaidTransactionsByItemResponse> {
+    try {
+      const response = await fetch(
+        `${API_BASE}/plaid/transactions/refresh/${itemId}?days=${days}`,
+        {
+          method: 'POST',
+          headers: getAuthHeaders(),
+        },
+      );
+
+      if (response.status === 401) {
+        localStorage.removeItem('authToken');
+        window.location.href = '/login';
+        throw new Error('Authentication required. Redirecting to login.');
+      }
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = (await response.json()) as PlaidTransactionsByItemResponse;
+      return data;
+    } catch (error) {
+      console.error('Error refreshing transactions:', error);
+      throw new Error('Failed to refresh transactions');
     }
   },
 };
