@@ -13,35 +13,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Check for existing authentication on app load
   useEffect(() => {
-    console.log('AuthContext: Checking for existing authentication...');
     
     const checkStoredAuth = () => {
       const storedToken = localStorage.getItem('authToken');
       const storedUser = localStorage.getItem('user');
       
-      console.log('AuthContext: Stored data found:', { 
-        token: storedToken ? 'present' : 'missing', 
-        user: storedUser ? 'present' : 'missing' 
-      });
-      
       if (storedToken && storedUser) {
         try {
           const userData = JSON.parse(storedUser);
-          console.log('AuthContext: Restoring user from localStorage:', userData);
           setUser(userData);
           setAuthToken(storedToken);
-          console.log('AuthContext: User restored successfully');
         } catch (error) {
-          console.error('Failed to parse stored user data:', error);
           // Clear invalid data
           localStorage.removeItem('authToken');
           localStorage.removeItem('user');
         }
-      } else {
-        console.log('AuthContext: No stored authentication found');
       }
       
-      console.log('AuthContext: Setting loading to false');
       setLoading(false);
     };
 
@@ -55,12 +43,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const setUserAndToken = useCallback((userData: UserResponse, authToken: string) => {
-    console.log('AuthContext: Setting user and token', userData);
     setUser(userData);
     setAuthToken(authToken);
     localStorage.setItem('authToken', authToken);
     localStorage.setItem('user', JSON.stringify(userData));
-    console.log('AuthContext: User and token set successfully');
   }, []);
 
   const logout = useCallback(() => {

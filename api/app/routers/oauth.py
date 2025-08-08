@@ -35,7 +35,6 @@ async def google_oauth_login(
         # Generate authorization URL
         auth_url, oauth_state = auth_service.generate_google_auth_url(state)
         
-        # Log the OAuth state for debugging (remove in production)
         logger.info(f"Generated OAuth state: {oauth_state}")
         logger.info(f"Redirecting to Google OAuth URL: {auth_url}")
         

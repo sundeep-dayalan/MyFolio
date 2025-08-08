@@ -17,23 +17,30 @@ load_dotenv()
 
 # --- Configuration ---
 SERVICE_ACCOUNT_KEY_PATH = 'service-account.json'
+# Configuration
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "https://your-frontend-domain.com")
+API_URL = os.getenv("API_URL", "https://your-api-domain.com")
 
 # --- FastAPI App Initialization ---
-app = FastAPI()
+app = FastAPI(title="MyFolio API", version="1.0.0")
+
+# Get allowed origins from environment
+allowed_origins = os.getenv("ALLOWED_ORIGINS", FRONTEND_URL).split(",")
 
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],  # React app URL
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # Add session middleware for OAuth state management
-app.add_middleware(SessionMiddleware, secret_key="your-secret-key-here")
+SECRET_KEY = os.getenv("SECRET_KEY", "your-super-secret-key-change-in-production")
+app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
 
 # Global variable to hold the Firestore client
 db = None
@@ -120,7 +127,7 @@ async def google_oauth_initiate(request: Request):
     # Build Google OAuth URL
     params = {
         "client_id": GOOGLE_CLIENT_ID,
-        "redirect_uri": "http://localhost:8000/api/v1/auth/oauth/google/callback",
+        "redirect_uri": f"{API_URL}/api/v1/auth/oauth/google/callback",
         "scope": "openid email profile",
         "response_type": "code",
         "state": state,
@@ -140,12 +147,12 @@ async def google_oauth_callback(
 ):
     """Handle Google OAuth callback."""
     if error:
-        return RedirectResponse(url=f"http://localhost:5173/auth/callback?success=false&error={error}")
+        return RedirectResponse(url=f"{FRONTEND_URL}/auth/callback?success=false&error={error}")
     
     # Verify state for CSRF protection
     session_state = request.session.get("oauth_state")
     if not session_state or session_state != state:
-        return RedirectResponse(url="http://localhost:5173/auth/callback?success=false&error=Invalid%20state")
+        return RedirectResponse(url=f"{FRONTEND_URL}/auth/callback?success=false&error=Invalid%20state")
     
     try:
         # Exchange code for tokens
@@ -157,18 +164,18 @@ async def google_oauth_callback(
                     "client_secret": GOOGLE_CLIENT_SECRET,
                     "code": code,
                     "grant_type": "authorization_code",
-                    "redirect_uri": "http://localhost:8000/api/v1/auth/oauth/google/callback"
+                    "redirect_uri": f"{API_URL}/api/v1/auth/oauth/google/callback"
                 }
             )
             
             if token_response.status_code != 200:
-                return RedirectResponse(url="http://localhost:5173/auth/callback?success=false&error=Token%20exchange%20failed")
+                return RedirectResponse(url=f"{FRONTEND_URL}/auth/callback?success=false&error=Token%20exchange%20failed")
             
             tokens = token_response.json()
             access_token = tokens.get("access_token")
             
             if not access_token:
-                return RedirectResponse(url="http://localhost:5173/auth/callback?success=false&error=No%20access%20token")
+                return RedirectResponse(url=f"{FRONTEND_URL}/auth/callback?success=false&error=No%20access%20token")
             
             # Get user info from Google
             user_response = await client.get(
@@ -177,7 +184,7 @@ async def google_oauth_callback(
             )
             
             if user_response.status_code != 200:
-                return RedirectResponse(url="http://localhost:5173/auth/callback?success=false&error=Failed%20to%20get%20user%20info")
+                return RedirectResponse(url=f"{FRONTEND_URL}/auth/callback?success=false&error=Failed%20to%20get%20user%20info")
             
             user_info = user_response.json()
             
@@ -214,15 +221,13 @@ async def google_oauth_callback(
             user_data_encoded = urllib.parse.quote(json.dumps(user_data))
             
             # Clean redirect without hash fragments
-            redirect_url = f"http://localhost:5173/auth/callback?success=true&token={token}&user={user_data_encoded}"
-            print(f"Redirecting to: {redirect_url}")  # Debug log
+            redirect_url = f"{FRONTEND_URL}/auth/callback?success=true&token={token}&user={user_data_encoded}"
             
             return RedirectResponse(url=redirect_url)
             
             
     except Exception as e:
-        print(f"OAuth error: {e}")
-        return RedirectResponse(url=f"http://localhost:5173/auth/callback?success=false&error=OAuth%20authentication%20failed")
+        return RedirectResponse(url=f"{FRONTEND_URL}/auth/callback?success=false&error=OAuth%20authentication%20failed")
 
 @app.get("/api/v1/auth/oauth/status")
 async def oauth_status(request: Request):
