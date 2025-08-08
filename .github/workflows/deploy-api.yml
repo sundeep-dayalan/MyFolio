@@ -68,8 +68,8 @@ jobs:
           --max-instances 10 \
           --min-instances 0 \
           --service-account myfolio-api-service@fit-guide-465001-p3.iam.gserviceaccount.com \
-          --set-env-vars ENVIRONMENT=production,DEBUG=false,LOG_LEVEL=INFO \
-          --set-secrets SECRET_KEY=SECRET_KEY:latest,GOOGLE_CLIENT_ID=GOOGLE_CLIENT_ID:latest,GOOGLE_CLIENT_SECRET=GOOGLE_CLIENT_SECRET:latest,FIREBASE_PROJECT_ID=FIREBASE_PROJECT_ID:latest,FIREBASE_CREDENTIALS=FIREBASE_CREDENTIALS:latest,GOOGLE_REDIRECT_URI=GOOGLE_REDIRECT_URI:latest,FRONTEND_URL=FRONTEND_URL:latest
+          --set-env-vars ENVIRONMENT=production,DEBUG=false,LOG_LEVEL=INFO,PLAID_ENV=sandbox \
+          --set-secrets SECRET_KEY=SECRET_KEY:latest,GOOGLE_CLIENT_ID=GOOGLE_CLIENT_ID:latest,GOOGLE_CLIENT_SECRET=GOOGLE_CLIENT_SECRET:latest,FIREBASE_PROJECT_ID=FIREBASE_PROJECT_ID:latest,FIREBASE_CREDENTIALS=FIREBASE_CREDENTIALS:latest,GOOGLE_REDIRECT_URI=GOOGLE_REDIRECT_URI:latest,FRONTEND_URL=FRONTEND_URL:latest,PLAID_CLIENT_ID=PLAID_CLIENT_ID:latest,PLAID_SECRET=PLAID_SECRET:latest
 
     - name: Get service URL
       id: url

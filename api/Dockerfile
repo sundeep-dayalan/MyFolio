@@ -28,6 +28,9 @@ RUN pip install --no-cache-dir --upgrade pip \
 # Copy application code
 COPY . .
 
+# Run startup diagnostics
+RUN python3 startup_check.py || echo "Startup check completed with warnings"
+
 # Create non-root user for security
 RUN adduser --disabled-password --gecos '' --shell /bin/bash appuser \
     && chown -R appuser:appuser /app
@@ -38,9 +41,9 @@ USER appuser
 # Expose port
 EXPOSE 8000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+# Health check - Remove for Cloud Run as it has its own health checks
+# HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+#     CMD curl -f http://localhost:8000/health || exit 1
 
-# Command to run the application
-CMD exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT} --workers 1
+# Command to run the application with better error handling
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--log-level", "info"]
