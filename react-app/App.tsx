@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -8,6 +7,9 @@ import NoPermissionPage from './pages/NoPermissionPage';
 import OAuthCallbackPage from './pages/OAuthCallbackPage';
 
 function App() {
+  // Temporary development mode - bypass auth to test Plaid integration
+  const DEV_MODE = true; // Set to false to re-enable authentication
+
   return (
     <div className="bg-slate-900 text-slate-100 min-h-screen font-sans">
       <Routes>
@@ -17,12 +19,16 @@ function App() {
         <Route
           path="/home"
           element={
-            <ProtectedRoute>
+            DEV_MODE ? (
               <HomePage />
-            </ProtectedRoute>
+            ) : (
+              <ProtectedRoute>
+                <HomePage />
+              </ProtectedRoute>
+            )
           }
         />
-        <Route path="*" element={<Navigate to="/login" replace />} />
+        <Route path="*" element={<Navigate to="/home" replace />} />
       </Routes>
     </div>
   );
