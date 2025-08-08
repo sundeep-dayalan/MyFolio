@@ -77,12 +77,9 @@ const HomePage: React.FC = () => {
     setErrorMessage('');
 
     try {
-      console.log('Fetching Plaid link token for user:', user.id);
       const token = await PlaidService.createLinkToken();
-      console.log('Obtained Plaid linkToken:', token);
       setLinkToken(token);
       setConnectionStatus('ready'); // Set to ready so button knows to open
-      console.log('Connection initialized, ready to open Plaid Link');
     } catch (err) {
       console.error('Error fetching Plaid link token:', err);
       setErrorMessage('Failed to initialize bank connection: ' + String(err));
@@ -94,16 +91,11 @@ const HomePage: React.FC = () => {
 
   const loadAccounts = async () => {
     try {
-      console.log('Loading accounts from backend...');
       const accountData = await PlaidService.getAccounts();
-      console.log('Account data received:', accountData);
       setPlaidData(accountData);
       setAccounts(accountData.accounts);
       if (accountData.accounts.length > 0) {
         setConnectionStatus('success');
-        console.log(`Successfully loaded ${accountData.accounts.length} accounts`);
-      } else {
-        console.log('No accounts found after loading');
       }
     } catch (err) {
       console.error('Error loading accounts:', err);
@@ -118,17 +110,11 @@ const HomePage: React.FC = () => {
       setErrorMessage('');
 
       try {
-        console.log('Plaid connection successful! Public token:', publicToken);
-        console.log('Plaid metadata:', metadata);
-        console.log('Exchanging token...');
         const exchangeResult = await PlaidService.exchangePublicToken(publicToken);
-        console.log('Token exchange result:', exchangeResult);
 
-        console.log('Token exchanged successfully, loading accounts...');
         await loadAccounts();
 
         setConnectionStatus('success');
-        console.log('Bank connection completed successfully');
       } catch (err) {
         console.error('Plaid onSuccess error:', err);
         setErrorMessage('Failed to connect your bank account: ' + String(err));
@@ -159,8 +145,7 @@ const HomePage: React.FC = () => {
         setErrorMessage(errorMsg);
         setConnectionStatus('error');
       } else {
-        console.log('Plaid Link was closed by user');
-        console.log('Exit metadata:', metadata);
+        // User closed the flow voluntarily
       }
       setIsConnecting(false);
     },
@@ -169,14 +154,12 @@ const HomePage: React.FC = () => {
   // Auto-open Plaid Link when token is ready and we're in 'ready' status
   useEffect(() => {
     if (linkToken && ready && connectionStatus === 'ready') {
-      console.log('Opening Plaid Link with token:', linkToken);
       setConnectionStatus('idle'); // Reset status to prevent repeated opens
       open();
     }
   }, [linkToken, ready, connectionStatus, open]);
 
   if (!user) {
-    console.log('HomePage: No user data, showing loading state');
     return (
       <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
         <div className="text-center">

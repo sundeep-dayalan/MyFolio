@@ -137,7 +137,6 @@ export const PlaidService = {
       const data = (await response.json()) as { link_token: string };
       return data.link_token;
     } catch (error) {
-      console.error('Error creating link token:', error);
       throw new Error('Failed to create link token');
     }
   },
@@ -163,7 +162,6 @@ export const PlaidService = {
       const data = (await response.json()) as { success: boolean; item_id: string };
       return data;
     } catch (error) {
-      console.error('Error exchanging public token:', error);
       throw new Error('Failed to exchange public token');
     }
   },
@@ -188,7 +186,6 @@ export const PlaidService = {
       const data = (await response.json()) as PlaidAccountsResponse;
       return data;
     } catch (error) {
-      console.error('Error fetching accounts:', error);
       throw new Error('Failed to fetch account data');
     }
   },
@@ -211,7 +208,6 @@ export const PlaidService = {
       const data = (await response.json()) as { accounts: PlaidAccount[] };
       return data.accounts;
     } catch (error) {
-      console.error('Error fetching balances:', error);
       throw new Error('Failed to fetch balances');
     }
   },
@@ -236,7 +232,6 @@ export const PlaidService = {
       const data = (await response.json()) as PlaidItemsResponse;
       return data;
     } catch (error) {
-      console.error('Error fetching Plaid items:', error);
       throw new Error('Failed to fetch Plaid items');
     }
   },
@@ -261,7 +256,6 @@ export const PlaidService = {
       const data = (await response.json()) as { message: string };
       return data;
     } catch (error) {
-      console.error('Error revoking item:', error);
       throw new Error('Failed to revoke bank connection');
     }
   },
@@ -286,7 +280,6 @@ export const PlaidService = {
       const data = (await response.json()) as { message: string; revoked_count: number };
       return data;
     } catch (error) {
-      console.error('Error revoking all items:', error);
       throw new Error('Failed to revoke all bank connections');
     }
   },
@@ -311,7 +304,6 @@ export const PlaidService = {
       const data = (await response.json()) as PlaidTransactionsResponse;
       return data;
     } catch (error) {
-      console.error('Error fetching transactions:', error);
       throw new Error('Failed to fetch transactions');
     }
   },
@@ -342,7 +334,6 @@ export const PlaidService = {
       const data = (await response.json()) as PlaidTransactionsResponse;
       return data;
     } catch (error) {
-      console.error('Error fetching account transactions:', error);
       throw new Error('Failed to fetch account transactions');
     }
   },
@@ -373,7 +364,6 @@ export const PlaidService = {
       const data = (await response.json()) as PlaidTransactionsByItemResponse;
       return data;
     } catch (error) {
-      console.error('Error refreshing transactions:', error);
       throw new Error('Failed to refresh transactions');
     }
   },

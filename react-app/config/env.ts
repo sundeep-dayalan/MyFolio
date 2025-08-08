@@ -32,15 +32,4 @@ export const validateConfig = () => {
   return missing.length === 0;
 };
 
-// Log current configuration in development
-if (config.isDevelopment) {
-  console.log('🔧 Environment Configuration:', {
-    apiBaseUrl: config.apiBaseUrl,
-    environment: config.environment,
-    mode: config.mode,
-    isDevelopment: config.isDevelopment,
-    isProduction: config.isProduction,
-  });
-}
-
 export default config;

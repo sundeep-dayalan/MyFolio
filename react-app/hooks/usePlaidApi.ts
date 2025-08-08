@@ -31,10 +31,8 @@ export const useCreateLinkTokenMutation = () => {
   return useMutation<string, Error>({
     mutationFn: PlaidService.createLinkToken,
     onSuccess: (data) => {
-      console.log('Link token created successfully:', data);
     },
     onError: (error) => {
-      console.error('Failed to create link token:', error);
     },
   });
 };
@@ -50,12 +48,10 @@ export const useExchangePublicTokenMutation = () => {
   >({
     mutationFn: PlaidService.exchangePublicToken,
     onSuccess: (data) => {
-      console.log('Token exchange successful:', data);
       // Invalidate and refetch accounts after successful token exchange
       queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.accounts] });
     },
     onError: (error) => {
-      console.error('Failed to exchange public token:', error);
     },
   });
 };
@@ -67,12 +63,10 @@ export const useRefreshAccountsMutation = () => {
   return useMutation<PlaidAccountsResponse, Error>({
     mutationFn: PlaidService.getAccounts,
     onSuccess: (data) => {
-      console.log('Accounts refreshed successfully:', data);
       // Update the cache with fresh data
       queryClient.setQueryData([QUERY_KEYS.accounts], data);
     },
     onError: (error) => {
-      console.error('Failed to refresh accounts:', error);
     },
   });
 };
@@ -95,13 +89,11 @@ export const useRevokeItemMutation = () => {
   return useMutation<{ message: string }, Error, string>({
     mutationFn: PlaidService.revokeItem,
     onSuccess: (data, itemId) => {
-      console.log('Item revoked successfully:', data);
       // Invalidate both accounts and items queries
       queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.accounts] });
       queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.items] });
     },
     onError: (error) => {
-      console.error('Failed to revoke item:', error);
     },
   });
 };
@@ -113,14 +105,12 @@ export const useRevokeAllItemsMutation = () => {
   return useMutation<{ message: string; revoked_count: number }, Error>({
     mutationFn: PlaidService.revokeAllItems,
     onSuccess: (data) => {
-      console.log('All items revoked successfully:', data);
       // Invalidate both accounts and items queries
       queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.accounts] });
       queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.items] });
       queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.transactions] });
     },
     onError: (error) => {
-      console.error('Failed to revoke all items:', error);
     },
   });
 };
@@ -158,12 +148,10 @@ export const useRefreshTransactionsMutation = () => {
   return useMutation<PlaidTransactionsByItemResponse, Error, { itemId: string; days?: number }>({
     mutationFn: ({ itemId, days = 30 }) => PlaidService.refreshTransactions(itemId, days),
     onSuccess: (data, variables) => {
-      console.log('Transactions refreshed successfully for item:', variables.itemId, data);
       // Invalidate transactions queries to refetch with fresh data
       queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.transactions] });
     },
     onError: (error, variables) => {
-      console.error('Failed to refresh transactions for item:', variables.itemId, error);
     },
   });
 };
