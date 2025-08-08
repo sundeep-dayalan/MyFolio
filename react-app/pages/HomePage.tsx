@@ -141,19 +141,21 @@ const HomePage: React.FC = () => {
       if (err) {
         console.error('Plaid Link exited with error:', err);
         console.log('Exit metadata:', metadata);
-        
+
         // Provide specific guidance for common exit scenarios
         let errorMsg = 'Bank connection was cancelled or failed: ' + String(err);
-        
+
         const errorObj = err as any; // Type assertion for Plaid error properties
         if (errorObj.error_code === 'INVALID_CREDENTIALS') {
-          errorMsg = 'Invalid credentials. In sandbox mode, use: Username: user_good, Password: pass_good';
+          errorMsg =
+            'Invalid credentials. In sandbox mode, use: Username: user_good, Password: pass_good';
         } else if (errorObj.error_code === 'INVALID_MFA') {
-          errorMsg = 'Phone verification failed. In sandbox mode, use: 5551234567 (no spaces/dashes)';
+          errorMsg =
+            'Phone verification failed. In sandbox mode, use: 5551234567 (no spaces/dashes)';
         } else if (errorObj.error_type === 'EXIT_ERROR') {
           errorMsg = 'Connection process was interrupted. Please try again.';
         }
-        
+
         setErrorMessage(errorMsg);
         setConnectionStatus('error');
       } else {
@@ -740,7 +742,6 @@ const HomePage: React.FC = () => {
                 </svg>
                 <h3 className="text-xl font-bold text-white text-center">Bank Connections</h3>
               </div>
-
               {/* Status Messages */}
               {connectionStatus === 'success' && accounts.length > 0 && (
                 <div className="mb-4 p-3 bg-emerald-500/20 border border-emerald-500/30 rounded-lg text-center">
@@ -750,98 +751,104 @@ const HomePage: React.FC = () => {
                   </p>
                 </div>
               )}
-
               {connectionStatus === 'error' && errorMessage && (
                 <div className="mb-4 p-3 bg-red-500/20 border border-red-500/30 rounded-lg text-center">
                   <p className="text-red-400 text-sm">❌ {errorMessage}</p>
                 </div>
               )}
-
               {isConnecting && (
                 <div className="mb-4 p-3 bg-blue-500/20 border border-blue-500/30 rounded-lg text-center">
                   <p className="text-blue-400 text-sm">🔄 Connecting your bank account...</p>
                 </div>
               )}
-
-            {/* Connect Button */}
-            {accounts.length === 0 && (
-              <div>
-                <div className="mb-6 p-4 bg-blue-500/20 border border-blue-500/30 rounded-lg">
-                  <h4 className="text-blue-400 font-semibold mb-2 text-center">🧪 Sandbox Test Credentials</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                    <div>
-                      <p className="text-blue-300 font-medium">Login Credentials:</p>
-                      <p className="text-slate-300">Username: <code className="bg-slate-700 px-1 rounded">user_good</code></p>
-                      <p className="text-slate-300">Password: <code className="bg-slate-700 px-1 rounded">pass_good</code></p>
-                    </div>
-                    <div>
-                      <p className="text-blue-300 font-medium">Phone Verification:</p>
-                      <p className="text-slate-300">Phone: <code className="bg-slate-700 px-1 rounded">5551234567</code></p>
-                      <p className="text-slate-400 text-xs">No spaces/dashes, just digits</p>
-                      <p className="text-slate-400 text-xs">Alternative: 15551234567</p>
+              {/* Connect Button */}
+              {accounts.length === 0 && (
+                <div>
+                  <div className="mb-6 p-4 bg-blue-500/20 border border-blue-500/30 rounded-lg">
+                    <h4 className="text-blue-400 font-semibold mb-2 text-center">
+                      🧪 Sandbox Test Credentials
+                    </h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                      <div>
+                        <p className="text-blue-300 font-medium">Login Credentials:</p>
+                        <p className="text-slate-300">
+                          Username: <code className="bg-slate-700 px-1 rounded">user_good</code>
+                        </p>
+                        <p className="text-slate-300">
+                          Password: <code className="bg-slate-700 px-1 rounded">pass_good</code>
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-blue-300 font-medium">Phone Verification:</p>
+                        <p className="text-slate-300">
+                          Phone: <code className="bg-slate-700 px-1 rounded">5551234567</code>
+                        </p>
+                        <p className="text-slate-400 text-xs">No spaces/dashes, just digits</p>
+                        <p className="text-slate-400 text-xs">Alternative: 15551234567</p>
+                      </div>
                     </div>
                   </div>
+
+                  <p className="text-slate-300 text-sm mb-6 text-center">
+                    Link your bank account to automatically import balances and transactions.
+                  </p>
+                  <div className="flex items-center justify-center">
+                    <button
+                      onClick={() => {
+                        if (connectionStatus === 'ready' && linkToken && ready) {
+                          open();
+                        } else {
+                          initializePlaidConnection();
+                        }
+                      }}
+                      disabled={isConnecting}
+                      className="px-6 py-3 bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-600 text-white rounded-lg font-medium transition-colors disabled:cursor-not-allowed flex items-center space-x-2"
+                    >
+                      {isConnecting ? (
+                        <>
+                          <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full"></div>
+                          <span>Initializing...</span>
+                        </>
+                      ) : connectionStatus === 'ready' && linkToken && ready ? (
+                        <>
+                          <svg
+                            className="w-4 h-4"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M12 6v6m0 0v6m0-6h6m-6 0H6"
+                            />
+                          </svg>
+                          <span>Open Bank Connection</span>
+                        </>
+                      ) : (
+                        <>
+                          <svg
+                            className="w-4 h-4"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M12 6v6m0 0v6m0-6h6m-6 0H6"
+                            />
+                          </svg>
+                          <span>Connect Bank Account</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
-                
-                <p className="text-slate-300 text-sm mb-6 text-center">
-                  Link your bank account to automatically import balances and transactions.
-                </p>
-                <div className="flex items-center justify-center">
-                  <button
-                    onClick={() => {
-                      if (connectionStatus === 'ready' && linkToken && ready) {
-                        open();
-                      } else {
-                        initializePlaidConnection();
-                      }
-                    }}
-                    disabled={isConnecting}
-                    className="px-6 py-3 bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-600 text-white rounded-lg font-medium transition-colors disabled:cursor-not-allowed flex items-center space-x-2"
-                  >
-                    {isConnecting ? (
-                      <>
-                        <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full"></div>
-                        <span>Initializing...</span>
-                      </>
-                    ) : connectionStatus === 'ready' && linkToken && ready ? (
-                      <>
-                        <svg
-                          className="w-4 h-4"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M12 6v6m0 0v6m0-6h6m-6 0H6"
-                          />
-                        </svg>
-                        <span>Open Bank Connection</span>
-                      </>
-                    ) : (
-                      <>
-                        <svg
-                          className="w-4 h-4"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M12 6v6m0 0v6m0-6h6m-6 0H6"
-                          />
-                        </svg>
-                        <span>Connect Bank Account</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-              </div>
-            )}              {/* Connected Accounts Display */}
+              )}{' '}
+              {/* Connected Accounts Display */}
               {accounts.length > 0 && (
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">

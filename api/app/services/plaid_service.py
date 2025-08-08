@@ -23,11 +23,11 @@ from ..config import settings
 from ..database import firebase_client
 from ..utils.logger import get_logger
 from ..models.plaid import (
-    PlaidAccessToken, 
-    PlaidTokenStatus, 
+    PlaidAccessToken,
+    PlaidTokenStatus,
     PlaidEnvironment,
     PlaidAccountWithBalance,
-    PlaidBalance
+    PlaidBalance,
 )
 import json
 
@@ -36,13 +36,15 @@ logger = get_logger(__name__)
 
 class TokenEncryption:
     """Utility class for encrypting/decrypting sensitive tokens."""
-    
+
     @staticmethod
     def _get_key() -> bytes:
         """Generate or retrieve encryption key from settings."""
         # In production, this should be from environment variable or key management service
-        password = getattr(settings, 'token_encryption_key', 'default-key-change-in-production').encode()
-        salt = b'plaid_tokens_salt'  # In production, use a random salt per token
+        password = getattr(
+            settings, "token_encryption_key", "default-key-change-in-production"
+        ).encode()
+        salt = b"plaid_tokens_salt"  # In production, use a random salt per token
         kdf = PBKDF2HMAC(
             algorithm=hashes.SHA256(),
             length=32,
@@ -51,7 +53,7 @@ class TokenEncryption:
         )
         key = base64.urlsafe_b64encode(kdf.derive(password))
         return key
-    
+
     @staticmethod
     def encrypt_token(token: str) -> str:
         """Encrypt a token for secure storage."""
@@ -62,7 +64,7 @@ class TokenEncryption:
         except Exception as e:
             logger.error(f"Failed to encrypt token: {e}")
             raise Exception("Token encryption failed")
-    
+
     @staticmethod
     def decrypt_token(encrypted_token: str) -> str:
         """Decrypt a token for use."""
@@ -107,8 +109,10 @@ class PlaidService:
     def create_link_token(self, user_id: str) -> str:
         """Create a Plaid Link token for a user."""
         try:
-            logger.info(f"Creating link token for user {user_id} in {self.environment} environment")
-            
+            logger.info(
+                f"Creating link token for user {user_id} in {self.environment} environment"
+            )
+
             # Create the basic request without webhook for now
             request_params = {
                 "products": [Products("auth"), Products("transactions")],
@@ -117,14 +121,14 @@ class PlaidService:
                 "language": "en",
                 "user": LinkTokenCreateRequestUser(client_user_id=user_id),
             }
-            
+
             # Only add webhook if it's explicitly set in settings
-            if hasattr(settings, 'plaid_webhook') and settings.plaid_webhook:
+            if hasattr(settings, "plaid_webhook") and settings.plaid_webhook:
                 request_params["webhook"] = settings.plaid_webhook
-            
+
             request = LinkTokenCreateRequest(**request_params)
             response = self.client.link_token_create(request)
-            
+
             logger.info(f"Successfully created link token for user {user_id}")
             return response["link_token"]
 
@@ -136,7 +140,7 @@ class PlaidService:
         """Exchange a public token for an access token and item ID, then store securely."""
         try:
             logger.info(f"Exchanging public token for user {user_id}")
-            
+
             request = ItemPublicTokenExchangeRequest(public_token=public_token)
             response = self.client.item_public_token_exchange(request)
 
@@ -146,14 +150,22 @@ class PlaidService:
             # Store the access token securely in Firestore
             stored_token = self._store_access_token(user_id, access_token, item_id)
 
-            logger.info(f"Successfully exchanged and stored token for user {user_id}, item_id: {item_id}")
-            return {"success": True, "item_id": item_id, "token_id": stored_token.item_id}
+            logger.info(
+                f"Successfully exchanged and stored token for user {user_id}, item_id: {item_id}"
+            )
+            return {
+                "success": True,
+                "item_id": item_id,
+                "token_id": stored_token.item_id,
+            }
 
         except Exception as e:
             logger.error(f"Failed to exchange public token for user {user_id}: {e}")
             raise Exception(f"Failed to exchange public token: {e}")
 
-    def _store_access_token(self, user_id: str, access_token: str, item_id: str) -> PlaidAccessToken:
+    def _store_access_token(
+        self, user_id: str, access_token: str, item_id: str
+    ) -> PlaidAccessToken:
         """Securely store access token in Firestore."""
         try:
             logger.info(f"Storing access token for user {user_id}, item_id: {item_id}")
@@ -176,7 +188,7 @@ class PlaidService:
                 environment=PlaidEnvironment(self.environment),
                 created_at=now,
                 updated_at=now,
-                last_used_at=now
+                last_used_at=now,
             )
 
             # Store in Firestore
@@ -201,33 +213,41 @@ class PlaidService:
                 raise Exception("Firebase connection required for token retrieval")
 
             # Query Firestore for user's tokens
-            query = firebase_client.db.collection("plaid_tokens").where(
-                "user_id", "==", user_id
-            ).where(
-                "status", "==", PlaidTokenStatus.ACTIVE.value
+            query = (
+                firebase_client.db.collection("plaid_tokens")
+                .where("user_id", "==", user_id)
+                .where("status", "==", PlaidTokenStatus.ACTIVE.value)
             )
-            
+
             docs = query.stream()
             tokens = []
-            
+
             for doc in docs:
                 try:
                     data = doc.to_dict()
                     # Convert Firestore timestamps to datetime objects
-                    if data.get('created_at'):
-                        data['created_at'] = data['created_at'].replace(tzinfo=timezone.utc)
-                    if data.get('updated_at'):
-                        data['updated_at'] = data['updated_at'].replace(tzinfo=timezone.utc)
-                    if data.get('last_used_at'):
-                        data['last_used_at'] = data['last_used_at'].replace(tzinfo=timezone.utc)
-                    
+                    if data.get("created_at"):
+                        data["created_at"] = data["created_at"].replace(
+                            tzinfo=timezone.utc
+                        )
+                    if data.get("updated_at"):
+                        data["updated_at"] = data["updated_at"].replace(
+                            tzinfo=timezone.utc
+                        )
+                    if data.get("last_used_at"):
+                        data["last_used_at"] = data["last_used_at"].replace(
+                            tzinfo=timezone.utc
+                        )
+
                     token = PlaidAccessToken.model_validate(data)
                     tokens.append(token)
                 except Exception as e:
                     logger.error(f"Failed to parse token document {doc.id}: {e}")
                     continue
 
-            logger.info(f"Found {len(tokens)} active tokens from Firestore for user {user_id}")
+            logger.info(
+                f"Found {len(tokens)} active tokens from Firestore for user {user_id}"
+            )
             return tokens
 
         except Exception as e:
@@ -250,11 +270,13 @@ class PlaidService:
 
             for i, token in enumerate(tokens):
                 try:
-                    logger.info(f"Processing token {i+1}/{len(tokens)} for user {user_id}")
-                    
+                    logger.info(
+                        f"Processing token {i+1}/{len(tokens)} for user {user_id}"
+                    )
+
                     # Decrypt the access token (tokens are always encrypted in Firestore)
                     decrypted_token = TokenEncryption.decrypt_token(token.access_token)
-                    
+
                     # Get accounts for this token
                     accounts = self._get_balance_for_token(decrypted_token)
                     logger.info(f"Token {i+1} returned {len(accounts)} accounts")
@@ -267,10 +289,8 @@ class PlaidService:
                         balance = account.balances.current or 0
                         total_balance += balance
                         all_accounts.append(account)
-                        logger.info(
-                            f"Account: {account.name} - Balance: ${balance}"
-                        )
-                
+                        logger.info(f"Account: {account.name} - Balance: ${balance}")
+
                 except Exception as e:
                     logger.error(f"Failed to process token {token.item_id}: {e}")
                     # Continue with other tokens
@@ -290,40 +310,58 @@ class PlaidService:
             logger.error(f"Failed to get accounts balance for user {user_id}: {e}")
             raise Exception(f"Failed to retrieve account balances: {e}")
 
-    def _get_balance_for_token(self, access_token: str) -> List[PlaidAccountWithBalance]:
+    def _get_balance_for_token(
+        self, access_token: str
+    ) -> List[PlaidAccountWithBalance]:
         """Retrieve account balances for a specific access token."""
         try:
             request = AccountsBalanceGetRequest(access_token=access_token)
             response = self.client.accounts_balance_get(request)
-            
+
             accounts = []
             raw_accounts = response["accounts"]
-            
+
             for account in raw_accounts:
                 # Extract balance information
                 balances = account.get("balances", {})
-                
+
                 # Create PlaidBalance model
                 balance = PlaidBalance(
-                    available=float(balances.get("available")) if balances.get("available") is not None else None,
-                    current=float(balances.get("current")) if balances.get("current") is not None else None,
+                    available=(
+                        float(balances.get("available"))
+                        if balances.get("available") is not None
+                        else None
+                    ),
+                    current=(
+                        float(balances.get("current"))
+                        if balances.get("current") is not None
+                        else None
+                    ),
                     iso_currency_code=balances.get("iso_currency_code"),
-                    unofficial_currency_code=balances.get("unofficial_currency_code")
+                    unofficial_currency_code=balances.get("unofficial_currency_code"),
                 )
-                
+
                 # Create PlaidAccountWithBalance model
                 account_with_balance = PlaidAccountWithBalance(
                     account_id=str(account.get("account_id", "")),
                     name=str(account.get("name", "")),
-                    official_name=str(account.get("official_name", "")) if account.get("official_name") else None,
+                    official_name=(
+                        str(account.get("official_name", ""))
+                        if account.get("official_name")
+                        else None
+                    ),
                     type=str(account.get("type", "")),
-                    subtype=str(account.get("subtype", "")) if account.get("subtype") else None,
+                    subtype=(
+                        str(account.get("subtype", ""))
+                        if account.get("subtype")
+                        else None
+                    ),
                     mask=str(account.get("mask", "")) if account.get("mask") else None,
-                    balances=balance
+                    balances=balance,
                 )
-                
+
                 accounts.append(account_with_balance)
-            
+
             return accounts
 
         except Exception as e:
@@ -335,10 +373,12 @@ class PlaidService:
         """Update the last_used_at timestamp for a token."""
         try:
             doc_ref = firebase_client.db.collection("plaid_tokens").document(item_id)
-            doc_ref.update({
-                "last_used_at": firestore.SERVER_TIMESTAMP,
-                "updated_at": firestore.SERVER_TIMESTAMP
-            })
+            doc_ref.update(
+                {
+                    "last_used_at": firestore.SERVER_TIMESTAMP,
+                    "updated_at": firestore.SERVER_TIMESTAMP,
+                }
+            )
         except Exception as e:
             logger.warning(f"Failed to update last_used_at for token {item_id}: {e}")
 
@@ -346,17 +386,19 @@ class PlaidService:
         """Revoke a Plaid access token."""
         try:
             logger.info(f"Revoking token {item_id} for user {user_id}")
-            
+
             # Update token status in Firestore
             doc_ref = firebase_client.db.collection("plaid_tokens").document(item_id)
-            doc_ref.update({
-                "status": PlaidTokenStatus.REVOKED.value,
-                "updated_at": firestore.SERVER_TIMESTAMP
-            })
-            
+            doc_ref.update(
+                {
+                    "status": PlaidTokenStatus.REVOKED.value,
+                    "updated_at": firestore.SERVER_TIMESTAMP,
+                }
+            )
+
             logger.info(f"Successfully revoked token {item_id}")
             return True
-            
+
         except Exception as e:
             logger.error(f"Failed to revoke token {item_id}: {e}")
             return False
@@ -365,19 +407,25 @@ class PlaidService:
         """Get summary of user's Plaid items (institutions)."""
         try:
             tokens = self.get_user_access_tokens(user_id)
-            
+
             items = []
             for token in tokens:
-                items.append({
-                    "item_id": token.item_id,
-                    "institution_name": token.institution_name,
-                    "status": token.status.value,
-                    "created_at": token.created_at.isoformat(),
-                    "last_used_at": token.last_used_at.isoformat() if token.last_used_at else None
-                })
-            
+                items.append(
+                    {
+                        "item_id": token.item_id,
+                        "institution_name": token.institution_name,
+                        "status": token.status.value,
+                        "created_at": token.created_at.isoformat(),
+                        "last_used_at": (
+                            token.last_used_at.isoformat()
+                            if token.last_used_at
+                            else None
+                        ),
+                    }
+                )
+
             return items
-            
+
         except Exception as e:
             logger.error(f"Failed to get Plaid items for user {user_id}: {e}")
             raise Exception(f"Failed to retrieve Plaid items: {e}")
