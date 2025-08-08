@@ -8,9 +8,6 @@ import NoPermissionPage from './pages/NoPermissionPage';
 import OAuthCallbackPage from './pages/OAuthCallbackPage';
 
 function App() {
-  // Temporary development mode - bypass auth to test Plaid integration
-  const DEV_MODE = true; // Set to false to re-enable authentication
-
   return (
     <div className="bg-slate-900 text-slate-100 min-h-screen font-sans">
       <Routes>
@@ -20,25 +17,17 @@ function App() {
         <Route
           path="/home"
           element={
-            DEV_MODE ? (
+            <ProtectedRoute>
               <HomePage />
-            ) : (
-              <ProtectedRoute>
-                <HomePage />
-              </ProtectedRoute>
-            )
+            </ProtectedRoute>
           }
         />
         <Route
           path="/accounts"
           element={
-            DEV_MODE ? (
+            <ProtectedRoute>
               <AccountsPage />
-            ) : (
-              <ProtectedRoute>
-                <AccountsPage />
-              </ProtectedRoute>
-            )
+            </ProtectedRoute>
           }
         />
         <Route path="*" element={<Navigate to="/home" replace />} />

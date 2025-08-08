@@ -35,6 +35,7 @@ async def lifespan(app: FastAPI):
         try:
             await firebase_client.connect()
             logger.info("Application startup complete")
+
         except Exception as e:
             logger.warning(f"Firebase connection failed: {e}")
             logger.info(
@@ -47,9 +48,11 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     logger.info("Shutting down Personal Wealth Management API...")
+
     if settings.environment != "test":
         try:
             await firebase_client.disconnect()
+
         except Exception as e:
             logger.warning(f"Error during Firebase disconnection: {e}")
             logger.info("Application shutdown complete")

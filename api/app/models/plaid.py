@@ -80,6 +80,8 @@ class PlaidAccountWithBalance(BaseModel):
     subtype: Optional[str] = None
     mask: Optional[str] = None
     balances: PlaidBalance
+    institution_name: Optional[str] = None
+    institution_id: Optional[str] = None
 
     class Config:
         from_attributes = True

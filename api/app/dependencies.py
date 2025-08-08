@@ -42,13 +42,7 @@ async def get_current_user_id(
 ) -> str:
     """
     Get current user ID from authentication token.
-    Supports dev mode with X-Dev-User-ID header for testing.
     """
-    # Development mode bypass
-    dev_user_id = request.headers.get("X-Dev-User-ID")
-    if dev_user_id:
-        return dev_user_id
-
     if not credentials:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

@@ -9,10 +9,12 @@ from plaid.model.link_token_create_request import LinkTokenCreateRequest
 from plaid.model.link_token_create_request_user import LinkTokenCreateRequestUser
 from plaid.model.country_code import CountryCode
 from plaid.model.products import Products
+from plaid.model.item_get_request import ItemGetRequest
+from plaid.model.institutions_get_by_id_request import InstitutionsGetByIdRequest
 from plaid.configuration import Configuration
 from plaid.api_client import ApiClient
 from firebase_admin import firestore
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import secrets
 import base64
 from cryptography.fernet import Fernet
@@ -113,7 +115,7 @@ class PlaidService:
                 f"Creating link token for user {user_id} in {self.environment} environment"
             )
 
-            # Create the basic request without webhook for now
+            # Create the basic request
             request_params = {
                 "products": [Products("auth"), Products("transactions")],
                 "client_name": settings.project_name,
@@ -147,24 +149,81 @@ class PlaidService:
             access_token = response["access_token"]
             item_id = response["item_id"]
 
-            # Store the access token securely in Firestore
-            stored_token = self._store_access_token(user_id, access_token, item_id)
+            # Get institution information
+            institution_info = self._get_institution_info(access_token)
+
+            # Store the access token securely in Firestore with institution info
+            stored_token = self._store_access_token(
+                user_id, access_token, item_id, institution_info
+            )
 
             logger.info(
-                f"Successfully exchanged and stored token for user {user_id}, item_id: {item_id}"
+                f"Successfully exchanged and stored token for user {user_id}, item_id: {item_id}, institution: {institution_info.get('name', 'Unknown')}"
             )
             return {
                 "success": True,
                 "item_id": item_id,
                 "token_id": stored_token.item_id,
+                "institution_name": institution_info.get("name"),
             }
 
         except Exception as e:
             logger.error(f"Failed to exchange public token for user {user_id}: {e}")
             raise Exception(f"Failed to exchange public token: {e}")
 
+    def _get_institution_info(self, access_token: str) -> Dict[str, Any]:
+        """Get institution information for an access token."""
+        try:
+            # First get the item to get institution_id
+            item_request = ItemGetRequest(access_token=access_token)
+            item_response = self.client.item_get(item_request)
+            institution_id = item_response["item"]["institution_id"]
+
+            logger.info(f"Got institution_id: {institution_id}")
+
+            # Then get institution details
+            institution_request = InstitutionsGetByIdRequest(
+                institution_id=institution_id, country_codes=[CountryCode("US")]
+            )
+            institution_response = self.client.institutions_get_by_id(
+                institution_request
+            )
+            institution = institution_response["institution"]
+
+            institution_info = {
+                "institution_id": institution_id,
+                "name": institution.get("name", "Unknown Bank"),
+                "url": institution.get("url"),
+                "primary_color": institution.get("primary_color"),
+                "logo": institution.get("logo"),
+            }
+
+            logger.info(f"Retrieved institution info: {institution_info['name']}")
+            return institution_info
+
+        except Exception as e:
+            logger.warning(f"Failed to get institution info: {e}")
+            # Return minimal info if we can't get details
+            try:
+                # Try to at least get the institution_id from item
+                item_request = ItemGetRequest(access_token=access_token)
+                item_response = self.client.item_get(item_request)
+                institution_id = item_response["item"]["institution_id"]
+                logger.info(f"At least got institution_id: {institution_id}")
+                return {
+                    "institution_id": institution_id,
+                    "name": f"Bank {institution_id}",
+                }
+            except Exception as e2:
+                logger.error(f"Failed to get even basic institution info: {e2}")
+                return {"institution_id": None, "name": "Unknown Bank"}
+
     def _store_access_token(
-        self, user_id: str, access_token: str, item_id: str
+        self,
+        user_id: str,
+        access_token: str,
+        item_id: str,
+        institution_info: Dict[str, Any] = None,
     ) -> PlaidAccessToken:
         """Securely store access token in Firestore."""
         try:
@@ -180,15 +239,20 @@ class PlaidService:
 
             # Create PlaidAccessToken model
             now = datetime.now(timezone.utc)
+            institution_info = institution_info or {}
+
             plaid_token = PlaidAccessToken(
                 user_id=user_id,
                 access_token=encrypted_token,
                 item_id=item_id,
+                institution_id=institution_info.get("institution_id"),
+                institution_name=institution_info.get("name"),
                 status=PlaidTokenStatus.ACTIVE,
                 environment=PlaidEnvironment(self.environment),
                 created_at=now,
                 updated_at=now,
                 last_used_at=now,
+                metadata=institution_info,  # Store full institution info in metadata
             )
 
             # Store in Firestore
@@ -277,12 +341,32 @@ class PlaidService:
                     # Decrypt the access token (tokens are always encrypted in Firestore)
                     decrypted_token = TokenEncryption.decrypt_token(token.access_token)
 
+                    # If token doesn't have institution info, fetch it now
+                    institution_name = token.institution_name
+                    institution_id = token.institution_id
+
+                    if not institution_name or not institution_id:
+                        logger.info(
+                            f"Fetching missing institution info for token {token.item_id}"
+                        )
+                        institution_info = self._get_institution_info(decrypted_token)
+                        institution_name = institution_info.get("name")
+                        institution_id = institution_info.get("institution_id")
+
+                        # Update the token in database with institution info
+                        if institution_name:
+                            self._update_token_institution_info(
+                                token.item_id, institution_info
+                            )
+
                     # Get accounts for this token
-                    accounts = self._get_balance_for_token(decrypted_token)
+                    accounts = self._get_balance_for_token(
+                        decrypted_token, institution_name, institution_id
+                    )
                     logger.info(f"Token {i+1} returned {len(accounts)} accounts")
 
-                    # Update last used timestamp
-                    self._update_token_last_used(token.item_id)
+                    # Mark token as used
+                    self.mark_token_as_used(token.item_id)
 
                     for account in accounts:
                         # Calculate total balance
@@ -311,7 +395,10 @@ class PlaidService:
             raise Exception(f"Failed to retrieve account balances: {e}")
 
     def _get_balance_for_token(
-        self, access_token: str
+        self,
+        access_token: str,
+        institution_name: str = None,
+        institution_id: str = None,
     ) -> List[PlaidAccountWithBalance]:
         """Retrieve account balances for a specific access token."""
         try:
@@ -358,6 +445,8 @@ class PlaidService:
                     ),
                     mask=str(account.get("mask", "")) if account.get("mask") else None,
                     balances=balance,
+                    institution_name=institution_name,
+                    institution_id=institution_id,
                 )
 
                 accounts.append(account_with_balance)
@@ -381,6 +470,28 @@ class PlaidService:
             )
         except Exception as e:
             logger.warning(f"Failed to update last_used_at for token {item_id}: {e}")
+
+    def _update_token_institution_info(
+        self, item_id: str, institution_info: Dict[str, Any]
+    ):
+        """Update institution information for a token."""
+        try:
+            doc_ref = firebase_client.db.collection("plaid_tokens").document(item_id)
+            doc_ref.update(
+                {
+                    "institution_id": institution_info.get("institution_id"),
+                    "institution_name": institution_info.get("name"),
+                    "metadata": institution_info,
+                    "updated_at": firestore.SERVER_TIMESTAMP,
+                }
+            )
+            logger.info(
+                f"Updated institution info for token {item_id}: {institution_info.get('name')}"
+            )
+        except Exception as e:
+            logger.warning(
+                f"Failed to update institution info for token {item_id}: {e}"
+            )
 
     def revoke_token(self, user_id: str, item_id: str) -> bool:
         """Revoke a Plaid access token."""
@@ -410,11 +521,18 @@ class PlaidService:
 
             items = []
             for token in tokens:
+                # Handle status field - it might be string or enum
+                status_value = token.status
+                if hasattr(status_value, 'value'):
+                    status_str = status_value.value
+                else:
+                    status_str = str(status_value)
+                
                 items.append(
                     {
                         "item_id": token.item_id,
                         "institution_name": token.institution_name,
-                        "status": token.status.value,
+                        "status": status_str,
                         "created_at": token.created_at.isoformat(),
                         "last_used_at": (
                             token.last_used_at.isoformat()
@@ -429,3 +547,322 @@ class PlaidService:
         except Exception as e:
             logger.error(f"Failed to get Plaid items for user {user_id}: {e}")
             raise Exception(f"Failed to retrieve Plaid items: {e}")
+
+    # ===== TOKEN LIFECYCLE MANAGEMENT METHODS =====
+
+    def cleanup_expired_tokens(self, days_threshold: int = 90) -> Dict[str, int]:
+        """
+        Clean up expired and stale tokens from Firebase.
+
+        Args:
+            days_threshold: Number of days of inactivity before considering a token stale
+
+        Returns:
+            Dict with cleanup statistics
+        """
+        try:
+            logger.info(f"Starting token cleanup with {days_threshold} days threshold")
+
+            cutoff_date = datetime.now(timezone.utc) - timedelta(days=days_threshold)
+
+            # Get all tokens for analysis
+            all_tokens = firebase_client.db.collection("plaid_tokens").stream()
+
+            expired_count = 0
+            stale_count = 0
+            invalid_count = 0
+            revoked_count = 0
+            total_checked = 0
+
+            for doc in all_tokens:
+                try:
+                    total_checked += 1
+                    token_data = doc.to_dict()
+
+                    # Convert timestamps
+                    last_used_at = token_data.get("last_used_at")
+                    if last_used_at:
+                        last_used_at = last_used_at.replace(tzinfo=timezone.utc)
+
+                    status = token_data.get("status", "unknown")
+                    item_id = token_data.get("item_id")
+                    user_id = token_data.get("user_id")
+
+                    logger.info(
+                        f"Checking token for user {user_id}, item_id: {item_id}, status: {status}"
+                    )
+
+                    # Check if token is already marked as expired/revoked
+                    if status in [
+                        PlaidTokenStatus.EXPIRED.value,
+                        PlaidTokenStatus.REVOKED.value,
+                    ]:
+                        logger.info(
+                            f"Removing already expired/revoked token: {item_id}"
+                        )
+                        doc.reference.delete()
+                        if status == PlaidTokenStatus.EXPIRED.value:
+                            expired_count += 1
+                        else:
+                            revoked_count += 1
+                        continue
+
+                    # Check if token hasn't been used for too long (stale)
+                    if last_used_at and last_used_at < cutoff_date:
+                        logger.info(
+                            f"Removing stale token (last used: {last_used_at}): {item_id}"
+                        )
+                        doc.reference.delete()
+                        stale_count += 1
+                        continue
+
+                    # Verify token is still valid with Plaid
+                    if status == PlaidTokenStatus.ACTIVE.value and token_data.get(
+                        "access_token"
+                    ):
+                        is_valid = self._verify_token_with_plaid(
+                            token_data.get("access_token")
+                        )
+                        if not is_valid:
+                            logger.info(f"Removing invalid token: {item_id}")
+                            # Mark as expired instead of deleting immediately
+                            doc.reference.update(
+                                {
+                                    "status": PlaidTokenStatus.EXPIRED.value,
+                                    "updated_at": datetime.now(timezone.utc),
+                                }
+                            )
+                            invalid_count += 1
+
+                except Exception as e:
+                    logger.error(f"Error processing token document {doc.id}: {e}")
+                    continue
+
+            cleanup_stats = {
+                "total_checked": total_checked,
+                "expired_removed": expired_count,
+                "stale_removed": stale_count,
+                "invalid_marked": invalid_count,
+                "revoked_removed": revoked_count,
+                "total_cleaned": expired_count + stale_count + revoked_count,
+            }
+
+            logger.info(f"Token cleanup completed: {cleanup_stats}")
+            return cleanup_stats
+
+        except Exception as e:
+            logger.error(f"Token cleanup failed: {e}")
+            raise Exception(f"Token cleanup failed: {e}")
+
+    def _verify_token_with_plaid(self, encrypted_token: str) -> bool:
+        """
+        Verify if a token is still valid with Plaid API.
+
+        Args:
+            encrypted_token: The encrypted access token to verify
+
+        Returns:
+            True if token is valid, False otherwise
+        """
+        try:
+            # Decrypt the token
+            access_token = TokenEncryption.decrypt_token(encrypted_token)
+
+            # Try to get item info to verify token is still valid
+            request = ItemGetRequest(access_token=access_token)
+            self.client.item_get(request)
+            return True
+
+        except Exception as e:
+            logger.warning(f"Token validation failed: {e}")
+            return False
+
+    def mark_token_as_used(self, item_id: str) -> None:
+        """
+        Update the last_used_at timestamp for a token.
+
+        Args:
+            item_id: The Plaid item ID to update
+        """
+        try:
+            doc_ref = firebase_client.db.collection("plaid_tokens").document(item_id)
+            doc_ref.update(
+                {
+                    "last_used_at": datetime.now(timezone.utc),
+                    "updated_at": datetime.now(timezone.utc),
+                }
+            )
+        except Exception as e:
+            logger.error(f"Failed to update token usage for {item_id}: {e}")
+
+    def revoke_user_token(self, user_id: str, item_id: str) -> bool:
+        """
+        Revoke a specific token for a user.
+
+        Args:
+            user_id: The user ID
+            item_id: The item ID to revoke
+
+        Returns:
+            True if successfully revoked
+        """
+        try:
+            logger.info(f"Revoking token for user {user_id}, item_id: {item_id}")
+
+            # Update token status in Firebase
+            doc_ref = firebase_client.db.collection("plaid_tokens").document(item_id)
+            doc = doc_ref.get()
+
+            if not doc.exists:
+                logger.warning(f"Token not found for item_id: {item_id}")
+                return False
+
+            token_data = doc.to_dict()
+            if token_data.get("user_id") != user_id:
+                logger.warning(f"Token {item_id} does not belong to user {user_id}")
+                return False
+
+            # Mark as revoked
+            doc_ref.update(
+                {
+                    "status": PlaidTokenStatus.REVOKED.value,
+                    "updated_at": datetime.now(timezone.utc),
+                }
+            )
+
+            logger.info(f"Successfully revoked token {item_id} for user {user_id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to revoke token {item_id} for user {user_id}: {e}")
+            return False
+
+    def revoke_all_user_tokens(self, user_id: str) -> int:
+        """
+        Revoke all tokens for a user.
+
+        Args:
+            user_id: The user ID
+
+        Returns:
+            Number of tokens revoked
+        """
+        try:
+            logger.info(f"Revoking all tokens for user {user_id}")
+
+            # Get all active tokens for user
+            query = (
+                firebase_client.db.collection("plaid_tokens")
+                .where("user_id", "==", user_id)
+                .where("status", "==", PlaidTokenStatus.ACTIVE.value)
+            )
+
+            docs = query.stream()
+            revoked_count = 0
+
+            for doc in docs:
+                try:
+                    doc.reference.update(
+                        {
+                            "status": PlaidTokenStatus.REVOKED.value,
+                            "updated_at": datetime.now(timezone.utc),
+                        }
+                    )
+                    revoked_count += 1
+                except Exception as e:
+                    logger.error(f"Failed to revoke token {doc.id}: {e}")
+                    continue
+
+            logger.info(f"Revoked {revoked_count} tokens for user {user_id}")
+            return revoked_count
+
+        except Exception as e:
+            logger.error(f"Failed to revoke tokens for user {user_id}: {e}")
+            return 0
+
+    def get_token_analytics(self) -> Dict[str, Any]:
+        """
+        Get analytics about token usage and health.
+
+        Returns:
+            Dict with token analytics
+        """
+        try:
+            logger.info("Generating token analytics")
+
+            # Get all tokens
+            all_tokens = firebase_client.db.collection("plaid_tokens").stream()
+
+            analytics = {
+                "total_tokens": 0,
+                "active_tokens": 0,
+                "expired_tokens": 0,
+                "revoked_tokens": 0,
+                "error_tokens": 0,
+                "users_with_tokens": set(),
+                "institutions": {},
+                "environments": {},
+                "stale_tokens_30_days": 0,
+                "stale_tokens_90_days": 0,
+            }
+
+            cutoff_30_days = datetime.now(timezone.utc) - timedelta(days=30)
+            cutoff_90_days = datetime.now(timezone.utc) - timedelta(days=90)
+
+            for doc in all_tokens:
+                try:
+                    token_data = doc.to_dict()
+                    analytics["total_tokens"] += 1
+
+                    status = token_data.get("status", "unknown")
+                    user_id = token_data.get("user_id")
+                    institution_name = token_data.get("institution_name", "Unknown")
+                    environment = token_data.get("environment", "unknown")
+
+                    # Count by status
+                    if status == PlaidTokenStatus.ACTIVE.value:
+                        analytics["active_tokens"] += 1
+                    elif status == PlaidTokenStatus.EXPIRED.value:
+                        analytics["expired_tokens"] += 1
+                    elif status == PlaidTokenStatus.REVOKED.value:
+                        analytics["revoked_tokens"] += 1
+                    else:
+                        analytics["error_tokens"] += 1
+
+                    # Track users
+                    if user_id:
+                        analytics["users_with_tokens"].add(user_id)
+
+                    # Track institutions
+                    analytics["institutions"][institution_name] = (
+                        analytics["institutions"].get(institution_name, 0) + 1
+                    )
+
+                    # Track environments
+                    analytics["environments"][environment] = (
+                        analytics["environments"].get(environment, 0) + 1
+                    )
+
+                    # Check for stale tokens
+                    last_used_at = token_data.get("last_used_at")
+                    if last_used_at:
+                        last_used_at = last_used_at.replace(tzinfo=timezone.utc)
+                        if last_used_at < cutoff_30_days:
+                            analytics["stale_tokens_30_days"] += 1
+                        if last_used_at < cutoff_90_days:
+                            analytics["stale_tokens_90_days"] += 1
+
+                except Exception as e:
+                    logger.error(f"Error processing token for analytics {doc.id}: {e}")
+                    continue
+
+            # Convert set to count
+            analytics["unique_users"] = len(analytics["users_with_tokens"])
+            del analytics["users_with_tokens"]
+
+            logger.info(f"Token analytics generated: {analytics}")
+            return analytics
+
+        except Exception as e:
+            logger.error(f"Failed to generate token analytics: {e}")
+            raise Exception(f"Token analytics failed: {e}")
