@@ -1,6 +1,6 @@
 import React, { useContext, useEffect, useState } from 'react';
 
-import { cn } from '@/lib';
+import { cn } from '@/lib/utils';
 import { GalleryVerticalEnd } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { AuthContext } from '@/context/AuthContext';
