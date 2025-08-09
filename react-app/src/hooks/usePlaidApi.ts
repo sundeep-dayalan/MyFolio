@@ -29,8 +29,8 @@ export const useAccountsQuery = () => {
 export const useCreateLinkTokenMutation = () => {
   return useMutation<string, Error>({
     mutationFn: PlaidService.createLinkToken,
-    onSuccess: (data) => {},
-    onError: (error) => {},
+    onSuccess: () => {},
+    onError: () => {},
   });
 };
 
@@ -44,11 +44,11 @@ export const useExchangePublicTokenMutation = () => {
     string
   >({
     mutationFn: PlaidService.exchangePublicToken,
-    onSuccess: (data) => {
+    onSuccess: () => {
       // Invalidate and refetch accounts after successful token exchange
       queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.accounts] });
     },
-    onError: (error) => {},
+    onError: () => {},
   });
 };
 
@@ -62,7 +62,7 @@ export const useRefreshAccountsMutation = () => {
       // Update the cache with fresh data
       queryClient.setQueryData([QUERY_KEYS.accounts], data);
     },
-    onError: (error) => {},
+    onError: () => {},
   });
 };
 
@@ -146,10 +146,10 @@ export const useRefreshTransactionsMutation = () => {
 
   return useMutation<PlaidTransactionsByItemResponse, Error, { itemId: string; days?: number }>({
     mutationFn: ({ itemId, days = 30 }) => PlaidService.refreshTransactions(itemId, days),
-    onSuccess: (data, variables) => {
+    onSuccess: () => {
       // Invalidate transactions queries to refetch with fresh data
       queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.transactions] });
     },
-    onError: (error, variables) => {},
+    onError: () => {},
   });
 };

@@ -57,11 +57,7 @@ const AccountsPage: React.FC = () => {
   const accounts = accountsData?.accounts || [];
 
   // Items and revoke mutations (now that accounts is available)
-  const {
-    data: itemsData,
-    isLoading: itemsLoading,
-    error: itemsError,
-  } = useItemsQuery(accounts.length > 0); // Only fetch items if we have accounts
+  const { data: itemsData } = useItemsQuery(accounts.length > 0); // Only fetch items if we have accounts
 
   const revokeItemMutation = useRevokeItemMutation();
   const revokeAllItemsMutation = useRevokeAllItemsMutation();
@@ -114,7 +110,7 @@ const AccountsPage: React.FC = () => {
         setConnectionStatus('error');
       }
     },
-    onExit: (err, metadata) => {
+    onExit: (err) => {
       if (err) {
         console.error('Plaid Link exited with error:', err);
         setConnectionStatus('error');

@@ -1,15 +1,10 @@
 import { DataTable } from '@/components/chart-area-interactive';
 import { ChartAreaInteractive } from '@/components/data-table';
 import { SectionCards } from '@/components/section-cards';
-import React, { useEffect, useState, useContext } from 'react';
+import React from 'react';
 import data from './data.json';
-import type { AuthContextType } from '@/types/types';
-import { AuthContext } from '@/context/AuthContext';
 
-const LoginPage: React.FC = () => {
-  const auth = useContext(AuthContext) as AuthContextType;
-  const { user: authUser, logout } = auth || {};
-
+const HomePage: React.FC = () => {
   return (
     <>
       <div className="flex flex-1 flex-col">
@@ -27,4 +22,4 @@ const LoginPage: React.FC = () => {
   );
 };
 
-export default LoginPage;
+export default HomePage;

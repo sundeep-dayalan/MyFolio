@@ -166,10 +166,10 @@ const TransactionsPage: React.FC = () => {
     return account?.name || 'Unknown Account';
   };
 
-  const getAccountType = (accountId: string) => {
-    const account = accounts.find((acc) => acc.account_id === accountId);
-    return account?.type || '';
-  };
+  // const getAccountType = (accountId: string) => {
+  //   const account = accounts.find((acc) => acc.account_id === accountId);
+  //   return account?.type || '';
+  // };
 
   if (!user) {
     return (
