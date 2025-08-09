@@ -54,7 +54,9 @@ develop-eggs/
 downloads/
 eggs/
 .eggs/
-lib/
+# Only ignore Python lib directories, not all lib directories
+**/lib/
+!react-app/src/lib/
 lib64/
 parts/
 sdist/
