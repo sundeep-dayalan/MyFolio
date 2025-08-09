@@ -258,17 +258,16 @@ class PlaidService:
             # Get the document reference for the user
             doc_ref = firebase_client.db.collection("plaid_tokens").document(user_id)
 
-            # This data structure will become the new content of the document.
-            # It contains an 'items' map with only the new item.
+            # This data structure will be merged with the existing document.
+            # It contains an 'items' map with the new item to add.
             update_data = {"items": {item_id: plaid_token.model_dump()}}
 
-            # --- KEY CHANGE ---
-            # By removing `merge=True`, we overwrite the entire document.
-            # This deletes the old 'items' map and replaces it with the new one.
-            doc_ref.set(update_data)
+            # Use merge=True to add the new item to the existing items map
+            # without deleting previously stored bank tokens
+            doc_ref.set(update_data, merge=True)
 
             logger.info(
-                f"Successfully stored token and replaced old data for user {user_id}"
+                f"Successfully stored token for user {user_id}, item_id: {item_id}, preserving existing tokens"
             )
             return plaid_token
 
@@ -738,9 +737,11 @@ class PlaidService:
 
             user_data = doc.to_dict()
             items_map = user_data.get("items", {})
-            
+
             if item_id not in items_map:
-                logger.warning(f"Token not found for item_id: {item_id} in user {user_id} document")
+                logger.warning(
+                    f"Token not found for item_id: {item_id} in user {user_id} document"
+                )
                 return False
 
             token_data = items_map[item_id]
@@ -768,12 +769,11 @@ class PlaidService:
             # Mark as revoked in our database by updating the specific item in the map
             items_map[item_id]["status"] = PlaidTokenStatus.REVOKED.value
             items_map[item_id]["updated_at"] = datetime.now(timezone.utc)
-            
+
             # Update the entire document with the modified items map
-            doc_ref.update({
-                "items": items_map,
-                "updated_at": datetime.now(timezone.utc)
-            })
+            doc_ref.update(
+                {"items": items_map, "updated_at": datetime.now(timezone.utc)}
+            )
 
             logger.info(f"Successfully revoked token {item_id} for user {user_id}")
             return True
@@ -819,16 +819,22 @@ class PlaidService:
                     if encrypted_token:
                         try:
                             # Decrypt the access token
-                            access_token = TokenEncryption.decrypt_token(encrypted_token)
+                            access_token = TokenEncryption.decrypt_token(
+                                encrypted_token
+                            )
 
                             # Call Plaid API to remove the item
                             request = ItemRemoveRequest(access_token=access_token)
                             response = self.client.item_remove(request)
 
-                            logger.info(f"Successfully removed item from Plaid: {item_id}")
+                            logger.info(
+                                f"Successfully removed item from Plaid: {item_id}"
+                            )
 
                         except Exception as plaid_error:
-                            logger.error(f"Failed to remove item {item_id} from Plaid API: {plaid_error}")
+                            logger.error(
+                                f"Failed to remove item {item_id} from Plaid API: {plaid_error}"
+                            )
                             # Continue to mark as revoked locally even if Plaid API fails
 
                     # Mark as revoked in the items map
@@ -842,10 +848,9 @@ class PlaidService:
 
             # Update the entire document with the modified items map
             if revoked_count > 0:
-                doc_ref.update({
-                    "items": items_map,
-                    "updated_at": datetime.now(timezone.utc)
-                })
+                doc_ref.update(
+                    {"items": items_map, "updated_at": datetime.now(timezone.utc)}
+                )
 
             logger.info(f"Revoked {revoked_count} tokens for user {user_id}")
             return revoked_count
