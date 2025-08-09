@@ -70,6 +70,7 @@ const AccountsPage: React.FC = () => {
   const [showConfirmDialog, setShowConfirmDialog] = useState<{
     type: 'single' | 'all';
     bankName?: string;
+    itemId?: string;
   } | null>(null);
 
   // More derived data
@@ -172,15 +173,20 @@ const AccountsPage: React.FC = () => {
   };
 
   // Handle single bank unlink
-  const handleUnlinkBank = async (bankName: string) => {
-    const itemId = getItemIdForBank(bankName);
-    if (!itemId) {
+  const handleUnlinkBank = async (bankName: string, itemId?: string) => {
+    console.log('handleUnlinkBank called with:', { bankName, itemId });
+    const finalItemId = itemId || getItemIdForBank(bankName);
+    console.log('Final itemId to revoke:', finalItemId);
+    
+    if (!finalItemId) {
       console.error('Could not find item_id for bank:', bankName);
       return;
     }
 
     try {
-      await revokeItemMutation.mutateAsync(itemId);
+      console.log('Calling revokeItemMutation.mutateAsync with itemId:', finalItemId);
+      await revokeItemMutation.mutateAsync(finalItemId);
+      console.log('Successfully revoked item, closing dialog');
       setShowConfirmDialog(null);
     } catch (error) {
       console.error('Failed to unlink bank:', error);
@@ -189,8 +195,11 @@ const AccountsPage: React.FC = () => {
 
   // Handle all banks unlink
   const handleUnlinkAllBanks = async () => {
+    console.log('handleUnlinkAllBanks called');
     try {
-      await revokeAllItemsMutation.mutateAsync();
+      console.log('Calling revokeAllItemsMutation.mutateAsync');
+      const result = await revokeAllItemsMutation.mutateAsync();
+      console.log('Successfully revoked all items:', result);
       setShowConfirmDialog(null);
     } catch (error) {
       console.error('Failed to unlink all banks:', error);
@@ -451,7 +460,10 @@ const AccountsPage: React.FC = () => {
 
                   {/* Disconnect All Banks Button */}
                   <button
-                    onClick={() => setShowConfirmDialog({ type: 'all' })}
+                    onClick={() => {
+                      console.log('Disconnect All button clicked');
+                      setShowConfirmDialog({ type: 'all' });
+                    }}
                     disabled={revokeAllItemsMutation.isPending}
                     className="flex items-center space-x-2 px-4 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-400 hover:text-red-300 rounded-xl border border-red-500/30 hover:border-red-500/50 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
                     title="Disconnect all bank connections"
@@ -616,13 +628,20 @@ const AccountsPage: React.FC = () => {
                                       </p>
                                     </div>
                                     <button
-                                      onClick={() =>
-                                        setShowConfirmDialog({
-                                          type: 'single',
-                                          itemId: getItemIdForBank(bankName) || '',
-                                          bankName,
-                                        })
-                                      }
+                                      onClick={() => {
+                                        console.log('Unlink bank button clicked for:', bankName);
+                                        const itemId = getItemIdForBank(bankName);
+                                        console.log('Found itemId:', itemId);
+                                        if (itemId) {
+                                          setShowConfirmDialog({
+                                            type: 'single',
+                                            itemId,
+                                            bankName,
+                                          });
+                                        } else {
+                                          console.error(`Could not find item_id for bank: ${bankName}`);
+                                        }
+                                      }}
                                       disabled={revokeItemMutation.isPending}
                                       className="flex items-center space-x-2 px-3 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-400 hover:text-red-300 rounded-lg border border-red-500/30 hover:border-red-500/50 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
                                       title={`Unlink ${bankName}`}
@@ -790,8 +809,17 @@ const AccountsPage: React.FC = () => {
                   type="button"
                   onClick={
                     showConfirmDialog.type === 'all'
-                      ? handleUnlinkAllBanks
-                      : () => handleUnlinkBank(showConfirmDialog.bankName!)
+                      ? () => {
+                          console.log('Confirmation dialog - Yes Disconnect All clicked');
+                          handleUnlinkAllBanks();
+                        }
+                      : () => {
+                          console.log('Confirmation dialog - Yes Disconnect Single clicked', {
+                            bankName: showConfirmDialog.bankName,
+                            itemId: showConfirmDialog.itemId
+                          });
+                          handleUnlinkBank(showConfirmDialog.bankName!, showConfirmDialog.itemId);
+                        }
                   }
                   disabled={revokeItemMutation.isPending || revokeAllItemsMutation.isPending}
                   className="w-full inline-flex justify-center rounded-xl border border-transparent shadow-sm px-4 py-2 text-base font-medium text-white focus:outline-none focus:ring-2 focus:ring-offset-2 sm:ml-3 sm:w-auto sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed transition-colors bg-red-600 hover:bg-red-700 focus:ring-red-500"

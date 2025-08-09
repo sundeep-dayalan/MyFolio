@@ -5,6 +5,7 @@ from plaid.model.accounts_balance_get_request import AccountsBalanceGetRequest
 from plaid.model.item_public_token_exchange_request import (
     ItemPublicTokenExchangeRequest,
 )
+from plaid.model.item_remove_request import ItemRemoveRequest
 from plaid.model.link_token_create_request import LinkTokenCreateRequest
 from plaid.model.link_token_create_request_user import LinkTokenCreateRequestUser
 from plaid.model.country_code import CountryCode
@@ -225,7 +226,6 @@ class PlaidService:
         item_id: str,
         institution_info: Dict[str, Any] = None,
     ) -> PlaidAccessToken:
-        """Securely store access token in Firestore."""
         try:
             logger.info(f"Storing access token for user {user_id}, item_id: {item_id}")
 
@@ -255,11 +255,21 @@ class PlaidService:
                 metadata=institution_info,  # Store full institution info in metadata
             )
 
-            # Store in Firestore
-            doc_ref = firebase_client.db.collection("plaid_tokens").document(item_id)
-            doc_ref.set(plaid_token.model_dump())
+            # Get the document reference for the user
+            doc_ref = firebase_client.db.collection("plaid_tokens").document(user_id)
 
-            logger.info(f"Successfully stored encrypted token for user {user_id}")
+            # This data structure will become the new content of the document.
+            # It contains an 'items' map with only the new item.
+            update_data = {"items": {item_id: plaid_token.model_dump()}}
+
+            # --- KEY CHANGE ---
+            # By removing `merge=True`, we overwrite the entire document.
+            # This deletes the old 'items' map and replaces it with the new one.
+            doc_ref.set(update_data)
+
+            logger.info(
+                f"Successfully stored token and replaced old data for user {user_id}"
+            )
             return plaid_token
 
         except Exception as e:
@@ -267,50 +277,59 @@ class PlaidService:
             raise Exception(f"Failed to store access token: {e}")
 
     def get_user_access_tokens(self, user_id: str) -> List[PlaidAccessToken]:
-        """Retrieve all access tokens for a user."""
+        """Retrieve all active access tokens for a user from their document."""
         try:
             logger.info(f"Retrieving access tokens for user {user_id}")
 
-            # Check if Firebase is connected
             if not firebase_client.is_connected:
                 logger.error("Firebase not connected - cannot retrieve tokens")
                 raise Exception("Firebase connection required for token retrieval")
 
-            # Query Firestore for user's tokens
-            query = (
-                firebase_client.db.collection("plaid_tokens")
-                .where("user_id", "==", user_id)
-                .where("status", "==", PlaidTokenStatus.ACTIVE.value)
-            )
+            # 1. Get the specific document for the user
+            doc_ref = firebase_client.db.collection("plaid_tokens").document(user_id)
+            doc = doc_ref.get()
 
-            docs = query.stream()
+            if not doc.exists:
+                logger.warning(f"No token document found for user {user_id}")
+                return []
+
+            # 2. Extract the 'items' map from the document
+            user_data = doc.to_dict()
+            items_map = user_data.get("items", {})  # Get the map, default to empty dict
             tokens = []
 
-            for doc in docs:
+            # 3. Iterate through the items in the map
+            for item_id, item_data in items_map.items():
                 try:
-                    data = doc.to_dict()
+                    # 4. Filter for active tokens inside the loop
+                    if item_data.get("status") != PlaidTokenStatus.ACTIVE.value:
+                        continue
+
                     # Convert Firestore timestamps to datetime objects
-                    if data.get("created_at"):
-                        data["created_at"] = data["created_at"].replace(
+                    # (This is good practice, assuming these fields exist)
+                    if item_data.get("created_at"):
+                        item_data["created_at"] = item_data["created_at"].replace(
                             tzinfo=timezone.utc
                         )
-                    if data.get("updated_at"):
-                        data["updated_at"] = data["updated_at"].replace(
+                    if item_data.get("updated_at"):
+                        item_data["updated_at"] = item_data["updated_at"].replace(
                             tzinfo=timezone.utc
                         )
-                    if data.get("last_used_at"):
-                        data["last_used_at"] = data["last_used_at"].replace(
+                    if item_data.get("last_used_at"):
+                        item_data["last_used_at"] = item_data["last_used_at"].replace(
                             tzinfo=timezone.utc
                         )
 
-                    token = PlaidAccessToken.model_validate(data)
+                    token = PlaidAccessToken.model_validate(item_data)
                     tokens.append(token)
                 except Exception as e:
-                    logger.error(f"Failed to parse token document {doc.id}: {e}")
-                    continue
+                    logger.error(
+                        f"Failed to parse token data for item_id {item_id}: {e}"
+                    )
+                    continue  # Skip to the next item if one is corrupted
 
             logger.info(
-                f"Found {len(tokens)} active tokens from Firestore for user {user_id}"
+                f"Found {len(tokens)} active tokens in document for user {user_id}"
             )
             return tokens
 
@@ -709,26 +728,52 @@ class PlaidService:
         try:
             logger.info(f"Revoking token for user {user_id}, item_id: {item_id}")
 
-            # Update token status in Firebase
-            doc_ref = firebase_client.db.collection("plaid_tokens").document(item_id)
+            # Get the user's token document (tokens stored as items map inside user document)
+            doc_ref = firebase_client.db.collection("plaid_tokens").document(user_id)
             doc = doc_ref.get()
 
             if not doc.exists:
-                logger.warning(f"Token not found for item_id: {item_id}")
+                logger.warning(f"No token document found for user {user_id}")
                 return False
 
-            token_data = doc.to_dict()
-            if token_data.get("user_id") != user_id:
-                logger.warning(f"Token {item_id} does not belong to user {user_id}")
+            user_data = doc.to_dict()
+            items_map = user_data.get("items", {})
+            
+            if item_id not in items_map:
+                logger.warning(f"Token not found for item_id: {item_id} in user {user_id} document")
                 return False
 
-            # Mark as revoked
-            doc_ref.update(
-                {
-                    "status": PlaidTokenStatus.REVOKED.value,
-                    "updated_at": datetime.now(timezone.utc),
-                }
-            )
+            token_data = items_map[item_id]
+
+            # Get the encrypted access token
+            encrypted_token = token_data.get("access_token")
+            if encrypted_token:
+                try:
+                    # Decrypt the access token
+                    access_token = TokenEncryption.decrypt_token(encrypted_token)
+
+                    # Call Plaid API to remove the item
+                    request = ItemRemoveRequest(access_token=access_token)
+                    response = self.client.item_remove(request)
+
+                    logger.info(f"Successfully removed item from Plaid: {item_id}")
+
+                except Exception as plaid_error:
+                    logger.error(f"Failed to remove item from Plaid API: {plaid_error}")
+                    # Continue to mark as revoked locally even if Plaid API fails
+                    # This ensures the user can still "disconnect" items that may be invalid
+            else:
+                logger.warning(f"No access token found for item_id: {item_id}")
+
+            # Mark as revoked in our database by updating the specific item in the map
+            items_map[item_id]["status"] = PlaidTokenStatus.REVOKED.value
+            items_map[item_id]["updated_at"] = datetime.now(timezone.utc)
+            
+            # Update the entire document with the modified items map
+            doc_ref.update({
+                "items": items_map,
+                "updated_at": datetime.now(timezone.utc)
+            })
 
             logger.info(f"Successfully revoked token {item_id} for user {user_id}")
             return True
@@ -750,31 +795,64 @@ class PlaidService:
         try:
             logger.info(f"Revoking all tokens for user {user_id}")
 
-            # Get all active tokens for user
-            query = (
-                firebase_client.db.collection("plaid_tokens")
-                .where("user_id", "==", user_id)
-                .where("status", "==", PlaidTokenStatus.ACTIVE.value)
-            )
+            # Get the user's token document (tokens stored as items map inside user document)
+            doc_ref = firebase_client.db.collection("plaid_tokens").document(user_id)
+            doc = doc_ref.get()
 
-            docs = query.stream()
+            if not doc.exists:
+                logger.warning(f"No token document found for user {user_id}")
+                return 0
+
+            user_data = doc.to_dict()
+            items_map = user_data.get("items", {})
             revoked_count = 0
 
-            for doc in docs:
+            # Process each active token in the items map
+            for item_id, token_data in items_map.items():
                 try:
-                    doc.reference.update(
-                        {
-                            "status": PlaidTokenStatus.REVOKED.value,
-                            "updated_at": datetime.now(timezone.utc),
-                        }
-                    )
+                    # Skip already revoked tokens
+                    if token_data.get("status") != PlaidTokenStatus.ACTIVE.value:
+                        continue
+
+                    # Get the encrypted access token
+                    encrypted_token = token_data.get("access_token")
+                    if encrypted_token:
+                        try:
+                            # Decrypt the access token
+                            access_token = TokenEncryption.decrypt_token(encrypted_token)
+
+                            # Call Plaid API to remove the item
+                            request = ItemRemoveRequest(access_token=access_token)
+                            response = self.client.item_remove(request)
+
+                            logger.info(f"Successfully removed item from Plaid: {item_id}")
+
+                        except Exception as plaid_error:
+                            logger.error(f"Failed to remove item {item_id} from Plaid API: {plaid_error}")
+                            # Continue to mark as revoked locally even if Plaid API fails
+
+                    # Mark as revoked in the items map
+                    items_map[item_id]["status"] = PlaidTokenStatus.REVOKED.value
+                    items_map[item_id]["updated_at"] = datetime.now(timezone.utc)
                     revoked_count += 1
+
                 except Exception as e:
-                    logger.error(f"Failed to revoke token {doc.id}: {e}")
+                    logger.error(f"Failed to revoke token {item_id}: {e}")
                     continue
+
+            # Update the entire document with the modified items map
+            if revoked_count > 0:
+                doc_ref.update({
+                    "items": items_map,
+                    "updated_at": datetime.now(timezone.utc)
+                })
 
             logger.info(f"Revoked {revoked_count} tokens for user {user_id}")
             return revoked_count
+
+        except Exception as e:
+            logger.error(f"Failed to revoke all tokens for user {user_id}: {e}")
+            return 0
 
         except Exception as e:
             logger.error(f"Failed to revoke tokens for user {user_id}: {e}")

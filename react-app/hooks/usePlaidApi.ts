@@ -89,11 +89,13 @@ export const useRevokeItemMutation = () => {
   return useMutation<{ message: string }, Error, string>({
     mutationFn: PlaidService.revokeItem,
     onSuccess: (data, itemId) => {
+      console.log(`Successfully revoked item ${itemId}:`, data);
       // Invalidate both accounts and items queries
       queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.accounts] });
       queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.items] });
     },
-    onError: (error) => {
+    onError: (error, itemId) => {
+      console.error(`Failed to revoke item ${itemId}:`, error);
     },
   });
 };
@@ -105,12 +107,14 @@ export const useRevokeAllItemsMutation = () => {
   return useMutation<{ message: string; revoked_count: number }, Error>({
     mutationFn: PlaidService.revokeAllItems,
     onSuccess: (data) => {
+      console.log('Successfully revoked all items:', data);
       // Invalidate both accounts and items queries
       queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.accounts] });
       queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.items] });
       queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.transactions] });
     },
     onError: (error) => {
+      console.error('Failed to revoke all items:', error);
     },
   });
 };
