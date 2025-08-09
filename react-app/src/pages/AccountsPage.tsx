@@ -9,11 +9,13 @@ import {
   useRevokeItemMutation,
   useRevokeAllItemsMutation,
 } from '../hooks/usePlaidApi';
+import { usePlaidConnectionFlow } from '../hooks/usePlaidConnectionFlow';
 import type { AuthContextType } from '@/types/types';
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Spinner } from '@/components/ui/spinner';
+import { MultiStepLoader } from '@/components/ui/multi-step-loader';
 import { AccountsSummary } from '@/components/custom/accounts/accounts-summary';
 import { AccountsHeader } from '@/components/custom/accounts/accounts-header';
 import { AccountsDisplay } from '@/components/custom/accounts/accounts-display';
@@ -33,6 +35,18 @@ const AccountsPage: React.FC = () => {
     bankName?: string;
     itemId?: string;
   } | null>(null);
+
+  // Multi-step loader hook
+  const {
+    currentStep,
+    isLoading: isFlowLoading,
+    plaidConnectionSteps,
+    startFlow,
+    completeFlow,
+    resetFlow,
+    handlePlaidEvent,
+    updateStep,
+  } = usePlaidConnectionFlow();
 
   // TanStack Query hooks
   const {
@@ -70,13 +84,17 @@ const AccountsPage: React.FC = () => {
 
   const initializePlaidConnection = async () => {
     setConnectionStatus('idle');
+    startFlow(); // Start the multi-step loader
+
     try {
+      updateStep(0); // Initializing secure connection
       const token = await createLinkTokenMutation.mutateAsync();
       setLinkToken(token);
       setConnectionStatus('ready');
     } catch (err) {
       console.error('Error fetching Plaid link token:', err);
       setConnectionStatus('error');
+      resetFlow(); // Reset the loader on error
     }
   };
 
@@ -108,11 +126,14 @@ const AccountsPage: React.FC = () => {
     token: linkToken || '',
     onSuccess: async (publicToken: string, _metadata: any) => {
       try {
+        updateStep(4); // Syncing account information
         await exchangePublicTokenMutation.mutateAsync(publicToken);
+        completeFlow(); // Complete the flow
         setConnectionStatus('success');
       } catch (err) {
         console.error('Plaid onSuccess error:', err);
         setConnectionStatus('error');
+        resetFlow();
       }
     },
     onExit: (err) => {
@@ -120,6 +141,13 @@ const AccountsPage: React.FC = () => {
         console.error('Plaid Link exited with error:', err);
         setConnectionStatus('error');
       }
+      resetFlow(); // Reset the loader when user exits
+    },
+    onEvent: (eventName: string, metadata: any) => {
+      handlePlaidEvent(eventName, metadata);
+    },
+    onLoad: () => {
+      updateStep(1); // Opening Plaid Link
     },
   });
 
@@ -166,6 +194,16 @@ const AccountsPage: React.FC = () => {
   // Main render following HomePage pattern
   return (
     <>
+      {/* Multi-Step Loader */}
+      <MultiStepLoader
+        loadingStates={plaidConnectionSteps}
+        loading={isFlowLoading}
+        currentStep={currentStep}
+        loop={false}
+        showCloseButton={true}
+        onClose={resetFlow}
+      />
+
       <div className="flex flex-1 flex-col">
         <div className="@container/main flex flex-1 flex-col gap-2">
           <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6">

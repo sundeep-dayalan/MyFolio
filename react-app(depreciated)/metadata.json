@@ -1,5 +1,0 @@
-{
-  "name": "React Google SSO App",
-  "description": "A React application demonstrating Single Sign-On (SSO) with a Google Account, featuring a login page, a protected homepage, and a no-permission page.",
-  "requestFramePermissions": []
-}
