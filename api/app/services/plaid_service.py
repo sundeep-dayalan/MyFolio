@@ -1068,28 +1068,41 @@ class PlaidService:
                     logger.error(f"Failed to revoke token {item_id}: {e}")
                     continue
 
-            # Delete the entire plaid_tokens document since all tokens are being revoked
+            # Clean up all cached data BEFORE deleting the plaid_tokens document
             if revoked_count > 0:
-                logger.info(
-                    f"Deleting entire plaid_tokens document for user {user_id} after revoking all {revoked_count} tokens"
-                )
-                doc_ref.delete()
-
-                # Clean up all cached account data since all tokens are being revoked
                 try:
                     from .account_storage_service import account_storage_service
 
                     logger.info(
-                        f"Clearing all account data for user {user_id} after revoking all tokens"
+                        f"Cleaning up all data for user {user_id} after revoking all {revoked_count} tokens"
                     )
+                    
+                    # Delete transactions first (while we still have access to item IDs from items_map)
+                    logger.info(f"Deleting transactions for {len(items_map)} items")
+                    for item_id in items_map.keys():
+                        try:
+                            transaction_storage_service.delete_item_transactions(user_id, item_id)
+                            logger.info(f"Deleted transactions for item {item_id}")
+                        except Exception as tx_error:
+                            logger.error(f"Failed to delete transactions for item {item_id}: {tx_error}")
+                            # Continue with other items
+                    
+                    # Clear account data
                     account_storage_service.clear_data(user_id)
-                    transaction_storage_service.delete_all_user_transactions(user_id)
+                    
+                    logger.info(f"Successfully cleaned up all data for user {user_id}")
 
                 except Exception as cleanup_error:
                     logger.error(
-                        f"Failed to cleanup account data after revoking all tokens for user {user_id}: {cleanup_error}"
+                        f"Failed to cleanup data after revoking all tokens for user {user_id}: {cleanup_error}"
                     )
                     # Don't fail the entire operation if cleanup fails
+
+                # Finally, delete the plaid_tokens document
+                logger.info(
+                    f"Deleting plaid_tokens document for user {user_id}"
+                )
+                doc_ref.delete()
 
             logger.info(f"Revoked {revoked_count} tokens for user {user_id}")
             return revoked_count

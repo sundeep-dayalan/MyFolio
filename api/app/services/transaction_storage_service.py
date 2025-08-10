@@ -71,157 +71,58 @@ class TransactionStorageService:
 
     def delete_all_user_transactions(self, user_id: str) -> bool:
         """
-        Deletes all transaction data for a specific user by recursively deleting
-        all nested subcollections and their documents.
+        Deletes all transaction data for a specific user by deleting the entire user document
+        and all its subcollections. This is a simplified, more reliable version.
         """
         try:
-            logger.info(
-                f"Starting recursive deletion of all transaction data for user {user_id}"
-            )
+            logger.info(f"Deleting all transaction data for user {user_id}")
+            
             if not firebase_client.is_connected:
-                logger.error("Firebase not connected - cannot clear transaction data")
+                logger.error("Firebase not connected - cannot delete transaction data")
                 return False
 
-            # The key insight: In Firestore, subcollections can exist without parent documents
-            # So we need to query all possible item documents and check their data subcollections
-
-            # Strategy: Use collection group query to find all data documents for this user
-            # Then work backwards to delete them and their parent structures
-
-            user_doc_ref = firebase_client.db.collection(self.collection_name).document(
-                user_id
-            )
+            # Get reference to the user document
+            user_doc_ref = firebase_client.db.collection(self.collection_name).document(user_id)
+            
+            # Check if user document exists
+            user_doc = user_doc_ref.get()
+            if not user_doc.exists:
+                logger.info(f"No transaction document found for user {user_id}")
+                # Still need to check for subcollections even if parent doesn't exist
+            
+            # Delete all items subcollection
             items_ref = user_doc_ref.collection("items")
-
-            # Debug: Log the collection path we're querying
-            logger.info(f"Querying items collection at path: {items_ref._path}")
-
-            # First, let's try to find all item documents that might have data subcollections
-            # We'll do this by checking if we can find any data documents for this user
-
             deleted_items = 0
             deleted_transactions = 0
-
-            # Get all possible item documents - this might return empty if intermediate docs don't exist
+            
+            # Get all item documents in the subcollection
             item_docs = list(items_ref.stream())
-            logger.info(
-                f"Found {len(item_docs)} item documents via subcollection query"
-            )
-
-            if not item_docs:
-                # If no items found via subcollection, try alternative approach
-                # Check if there are any plaid_tokens for this user to get item_ids
-                logger.info(
-                    f"No items found via subcollection query, trying alternative approaches..."
-                )
-
-                # Approach 1: Check plaid_tokens to get item IDs
-                try:
-                    plaid_tokens_ref = firebase_client.db.collection(
-                        "plaid_tokens"
-                    ).document(user_id)
-                    plaid_doc = plaid_tokens_ref.get()
-
-                    if plaid_doc.exists:
-                        plaid_data = plaid_doc.to_dict()
-                        items_map = plaid_data.get("items", {})
-                        logger.info(f"Found {len(items_map)} items in plaid_tokens")
-
-                        # Check each item for transaction data
-                        for item_id in items_map.keys():
-                            logger.info(
-                                f"Checking item {item_id} for transaction data..."
-                            )
-
-                            item_ref = items_ref.document(item_id)
-                            data_ref = item_ref.collection("data")
-
-                            # Try to delete data subcollection directly
-                            deleted_count = self._delete_collection_in_batches(data_ref)
-
-                            if deleted_count > 0:
-                                deleted_items += 1
-                                deleted_transactions += deleted_count
-                                logger.info(
-                                    f"Deleted {deleted_count} transactions from item {item_id}"
-                                )
-
-                                # Delete the item document if it exists
-                                if item_ref.get().exists:
-                                    item_ref.delete()
-                                    logger.info(f"Deleted item document: {item_id}")
-
-                except Exception as e:
-                    logger.warning(f"Could not check plaid_tokens for item IDs: {e}")
-
-                # Approach 2: Use collection group query to find transaction data
-                # This is more comprehensive but requires proper indexing
-                try:
-                    # Find all 'data' subcollections under this user's transactions
-                    # Note: This requires a collection group index in Firestore
-
-                    # For now, let's use a direct approach: try common item patterns
-                    # This is a fallback if the above approaches don't work
-                    logger.info("Trying direct data subcollection check...")
-
-                    # We could try to query all collections, but that's expensive
-                    # Instead, let's report what we found
-
-                except Exception as e:
-                    logger.warning(f"Collection group query failed: {e}")
-
-            else:
-                # Process found item documents normally
-                for item_doc in item_docs:
-                    item_id = item_doc.id
-                    logger.info(f"Deleting data subcollection for item: {item_id}")
-
-                    # Delete the 'data' subcollection
-                    data_ref = item_doc.reference.collection("data")
-                    deleted_count = self._delete_collection_in_batches(data_ref)
-
-                    if deleted_count > 0:
-                        deleted_transactions += deleted_count
-                        deleted_items += 1
-
-                        # Delete the item document itself
-                        item_doc.reference.delete()
-                        logger.info(f"Deleted item document: {item_id}")
-
-            # Summary
-            if deleted_items > 0 or deleted_transactions > 0:
-                logger.info(
-                    f"Deleted {deleted_transactions} transactions from {deleted_items} items for user {user_id}"
-                )
-
-                # Delete the user document if it exists
-                if user_doc_ref.get().exists:
-                    user_doc_ref.delete()
-                    logger.info(f"Deleted user document: {user_id}")
-
-                return True
-            else:
-                logger.info(f"No transaction data found for user {user_id}")
-                # Debug: Let's try to check if there are any documents at all in the transactions collection
-                all_user_docs = list(
-                    firebase_client.db.collection(self.collection_name)
-                    .limit(5)
-                    .stream()
-                )
-                logger.info(
-                    f"Debug: Found {len(all_user_docs)} total user documents in transactions collection"
-                )
-                if all_user_docs:
-                    logger.info(
-                        f"Debug: Sample user doc IDs: {[doc.id for doc in all_user_docs]}"
-                    )
-                return True
+            logger.info(f"Found {len(item_docs)} item documents to delete")
+            
+            for item_doc in item_docs:
+                item_id = item_doc.id
+                logger.info(f"Deleting all data for item {item_id}")
+                
+                # Delete all transactions in the data subcollection
+                data_ref = item_doc.reference.collection("data")
+                deleted_count = self._delete_collection_in_batches(data_ref)
+                deleted_transactions += deleted_count
+                
+                # Delete the item document itself
+                item_doc.reference.delete()
+                deleted_items += 1
+                logger.info(f"Deleted item {item_id} with {deleted_count} transactions")
+            
+            # Delete the user document itself (if it exists)
+            if user_doc.exists:
+                user_doc_ref.delete()
+                logger.info(f"Deleted user document: {user_id}")
+            
+            logger.info(f"Successfully deleted all transaction data for user {user_id}: {deleted_items} items, {deleted_transactions} transactions")
+            return True
 
         except Exception as e:
-            logger.error(
-                f"Failed to delete transaction data for user {user_id}: {e}",
-                exc_info=True,
-            )
+            logger.error(f"Failed to delete all transaction data for user {user_id}: {e}", exc_info=True)
             return False
 
     def delete_item_transactions(self, user_id: str, item_id: str) -> bool:
