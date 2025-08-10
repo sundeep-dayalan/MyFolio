@@ -922,22 +922,34 @@ class PlaidService:
             items_map[item_id]["status"] = PlaidTokenStatus.REVOKED.value
             items_map[item_id]["updated_at"] = datetime.now(timezone.utc)
 
-            # Update the entire document with the modified items map
-            doc_ref.update(
-                {"items": items_map, "updated_at": datetime.now(timezone.utc)}
-            )
+            # Check if this was the last active token - if so, we'll delete the entire document
+            remaining_active_items = [
+                item
+                for item in items_map.values()
+                if item.get("status") == PlaidTokenStatus.ACTIVE.value
+            ]
+
+            if len(remaining_active_items) == 0:
+                # This was the last active token - delete the entire plaid_tokens document
+                logger.info(
+                    f"No active tokens remaining for user {user_id}, deleting entire plaid_tokens document"
+                )
+                doc_ref.delete()
+            else:
+                # Still have active tokens - remove only this specific item from the map
+                logger.info(
+                    f"Removing revoked item {item_id} from plaid_tokens document, {len(remaining_active_items)} active tokens remaining"
+                )
+                del items_map[item_id]  # Remove the revoked item completely
+                doc_ref.update(
+                    {"items": items_map, "updated_at": datetime.now(timezone.utc)}
+                )
 
             # Clean up cached account data for this item
             try:
                 from .account_storage_service import account_storage_service
 
-                # If this was the last active token, clear all account data
-                remaining_active_items = [
-                    item
-                    for item in items_map.values()
-                    if item.get("status") == PlaidTokenStatus.ACTIVE.value
-                ]
-
+                # Use the remaining_active_items we calculated above
                 if len(remaining_active_items) == 0:
                     logger.info(
                         f"No active tokens remaining for user {user_id}, clearing all account data"
@@ -1056,11 +1068,12 @@ class PlaidService:
                     logger.error(f"Failed to revoke token {item_id}: {e}")
                     continue
 
-            # Update the entire document with the modified items map
+            # Delete the entire plaid_tokens document since all tokens are being revoked
             if revoked_count > 0:
-                doc_ref.update(
-                    {"items": items_map, "updated_at": datetime.now(timezone.utc)}
+                logger.info(
+                    f"Deleting entire plaid_tokens document for user {user_id} after revoking all {revoked_count} tokens"
                 )
+                doc_ref.delete()
 
                 # Clean up all cached account data since all tokens are being revoked
                 try:
