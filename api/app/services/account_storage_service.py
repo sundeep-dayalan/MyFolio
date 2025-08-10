@@ -32,7 +32,12 @@ class AccountStorageService:
             bool: True if successful, False otherwise
         """
         try:
-            logger.info(f"Storing account data for user {user_id}")
+            logger.info(
+                f"Storing account data for user {user_id} - {accounts_data.get('account_count', 0)} accounts"
+            )
+            logger.debug(
+                f"Account data to store: accounts={len(accounts_data.get('accounts', []))}, total_balance=${accounts_data.get('total_balance', 0)}"
+            )
 
             if not firebase_client.is_connected:
                 logger.error("Firebase not connected - cannot store account data")
@@ -54,7 +59,12 @@ class AccountStorageService:
             doc_ref = firebase_client.db.collection(self.collection_name).document(
                 user_id
             )
+
+            logger.info(
+                f"Writing to Firestore document: {self.collection_name}/{user_id}"
+            )
             doc_ref.set(stored_data)
+            logger.info(f"Firestore write completed successfully")
 
             logger.info(
                 f"Successfully stored account data for user {user_id} - {stored_data['account_count']} accounts, ${stored_data['total_balance']}"

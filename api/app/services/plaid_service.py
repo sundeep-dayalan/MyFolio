@@ -162,6 +162,22 @@ class PlaidService:
             logger.info(
                 f"Successfully exchanged and stored token for user {user_id}, item_id: {item_id}, institution: {institution_info.get('name', 'Unknown')}"
             )
+
+            # Automatically fetch and store account data after successful token exchange
+            try:
+                logger.info(
+                    f"Fetching initial account data after token exchange for user {user_id}"
+                )
+                account_data = self.get_accounts_balance(user_id)
+                logger.info(
+                    f"Successfully fetched and stored {account_data.get('account_count', 0)} accounts after token exchange"
+                )
+            except Exception as account_error:
+                logger.error(
+                    f"Failed to fetch account data after token exchange for user {user_id}: {account_error}"
+                )
+                # Don't fail the entire exchange if account fetch fails
+
             return {
                 "success": True,
                 "item_id": item_id,
@@ -903,6 +919,46 @@ class PlaidService:
                 {"items": items_map, "updated_at": datetime.now(timezone.utc)}
             )
 
+            # Clean up cached account data for this item
+            try:
+                from .account_storage_service import account_storage_service
+
+                # If this was the last active token, clear all account data
+                remaining_active_items = [
+                    item
+                    for item in items_map.values()
+                    if item.get("status") == PlaidTokenStatus.ACTIVE.value
+                ]
+
+                if len(remaining_active_items) == 0:
+                    logger.info(
+                        f"No active tokens remaining for user {user_id}, clearing all account data"
+                    )
+                    account_storage_service.clear_data(user_id)
+                else:
+                    logger.info(
+                        f"User {user_id} still has {len(remaining_active_items)} active tokens, refreshing account data to remove unlinked accounts"
+                    )
+                    # Refresh account data to immediately reflect the removal of accounts from the unlinked bank
+                    try:
+                        updated_accounts = self.get_accounts_balance(
+                            user_id, force_refresh=True
+                        )
+                        logger.info(
+                            f"Successfully refreshed account data after unlinking - now showing {len(updated_accounts.get('accounts', []))} accounts"
+                        )
+                    except Exception as refresh_error:
+                        logger.error(
+                            f"Failed to refresh account data after unlinking: {refresh_error}"
+                        )
+                        # Continue anyway - the data will be refreshed on next API call
+
+            except Exception as cleanup_error:
+                logger.error(
+                    f"Failed to cleanup account data after revoking item {item_id}: {cleanup_error}"
+                )
+                # Don't fail the entire operation if cleanup fails
+
             logger.info(f"Successfully revoked token {item_id} for user {user_id}")
             return True
 
@@ -979,6 +1035,21 @@ class PlaidService:
                 doc_ref.update(
                     {"items": items_map, "updated_at": datetime.now(timezone.utc)}
                 )
+
+                # Clean up all cached account data since all tokens are being revoked
+                try:
+                    from .account_storage_service import account_storage_service
+
+                    logger.info(
+                        f"Clearing all account data for user {user_id} after revoking all tokens"
+                    )
+                    account_storage_service.clear_data(user_id)
+
+                except Exception as cleanup_error:
+                    logger.error(
+                        f"Failed to cleanup account data after revoking all tokens for user {user_id}: {cleanup_error}"
+                    )
+                    # Don't fail the entire operation if cleanup fails
 
             logger.info(f"Revoked {revoked_count} tokens for user {user_id}")
             return revoked_count
