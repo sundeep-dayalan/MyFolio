@@ -37,6 +37,20 @@ export interface PlaidAccountsResponse {
   accounts: PlaidAccount[];
   total_balance: number;
   account_count: number;
+  last_updated?: string;
+  from_stored?: boolean;
+  refreshed?: boolean;
+  message?: string;
+}
+
+export interface PlaidDataInfo {
+  has_data: boolean;
+  last_updated?: string;
+  age_hours?: number;
+  account_count?: number;
+  total_balance?: number;
+  is_expired?: boolean;
+  error?: string;
 }
 
 export interface PlaidTransaction {
@@ -186,7 +200,55 @@ export const PlaidService = {
       const data = (await response.json()) as PlaidAccountsResponse;
       return data;
     } catch (error) {
-      throw new Error('Failed to fetch account data');
+      throw new Error('Failed to fetch stored account data');
+    }
+  },
+
+  async refreshAccounts(): Promise<PlaidAccountsResponse> {
+    try {
+      const response = await fetch(`${API_BASE}/plaid/accounts/refresh`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      });
+
+      if (response.status === 401) {
+        localStorage.removeItem('authToken');
+        window.location.href = '/login';
+        throw new Error('Authentication required. Redirecting to login.');
+      }
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = (await response.json()) as PlaidAccountsResponse;
+      return data;
+    } catch (error) {
+      throw new Error('Failed to refresh account data from Plaid API');
+    }
+  },
+
+  async getAccountsDataInfo(): Promise<PlaidDataInfo> {
+    try {
+      const response = await fetch(`${API_BASE}/plaid/accounts/data-info`, {
+        method: 'GET',
+        headers: getAuthHeaders(),
+      });
+
+      if (response.status === 401) {
+        localStorage.removeItem('authToken');
+        window.location.href = '/login';
+        throw new Error('Authentication required. Redirecting to login.');
+      }
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = (await response.json()) as PlaidDataInfo;
+      return data;
+    } catch (error) {
+      throw new Error('Failed to fetch data information');
     }
   },
 

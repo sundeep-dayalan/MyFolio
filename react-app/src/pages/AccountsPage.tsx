@@ -214,6 +214,10 @@ const AccountsPage: React.FC = () => {
               hasAccounts={accounts.length > 0}
               isDisconnecting={revokeAllItemsMutation.isPending}
               errorMessage={errorMessage}
+              onRefreshSuccess={() => {
+                // Optionally trigger any additional actions after refresh
+                console.log('Account data refreshed successfully');
+              }}
             />
 
             {accountsData && accounts.length > 0 && (

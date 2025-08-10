@@ -54,9 +54,35 @@ def get_accounts(
     user_id: str = Depends(get_current_user_id),
     plaid_service: PlaidService = Depends(get_plaid_service),
 ):
-    """Fetch all account balances for the current user."""
+    """Fetch all account balances for the current user from stored data (fast, no API cost)."""
     try:
-        result = plaid_service.get_accounts_balance(user_id)
+        result = plaid_service.get_stored_accounts_balance(user_id)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/accounts/refresh")
+def refresh_accounts(
+    user_id: str = Depends(get_current_user_id),
+    plaid_service: PlaidService = Depends(get_plaid_service),
+):
+    """Force refresh account balances from Plaid API and update stored data."""
+    try:
+        result = plaid_service.refresh_accounts_balance(user_id)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/accounts/data-info")
+def get_accounts_data_info(
+    user_id: str = Depends(get_current_user_id),
+    plaid_service: PlaidService = Depends(get_plaid_service),
+):
+    """Get information about stored account data (last updated, age, etc.)."""
+    try:
+        result = plaid_service.get_data_info(user_id)
         return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))

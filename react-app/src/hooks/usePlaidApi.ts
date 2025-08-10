@@ -1,5 +1,6 @@
 import {
   type PlaidAccountsResponse,
+  type PlaidDataInfo,
   PlaidService,
   type PlaidItemsResponse,
   type PlaidTransactionsResponse,
@@ -10,17 +11,28 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 // Query Keys
 export const QUERY_KEYS = {
   accounts: 'accounts',
+  accountsDataInfo: 'accountsDataInfo',
   linkToken: 'linkToken',
   items: 'items',
   transactions: 'transactions',
 } as const;
 
-// Get Accounts Query
+// Get Accounts Query - Now uses cached data by default
 export const useAccountsQuery = () => {
   return useQuery<PlaidAccountsResponse>({
     queryKey: [QUERY_KEYS.accounts],
     queryFn: PlaidService.getAccounts,
-    staleTime: 2 * 60 * 1000, // 2 minutes
+    staleTime: 5 * 60 * 1000, // 5 minutes - cache is managed server-side
+    refetchOnMount: true,
+  });
+};
+
+// Get Accounts Data Info Query
+export const useAccountsDataInfoQuery = () => {
+  return useQuery<PlaidDataInfo>({
+    queryKey: [QUERY_KEYS.accountsDataInfo],
+    queryFn: PlaidService.getAccountsDataInfo,
+    staleTime: 1 * 60 * 1000, // 1 minute
     refetchOnMount: true,
   });
 };
@@ -52,15 +64,17 @@ export const useExchangePublicTokenMutation = () => {
   });
 };
 
-// Refresh Accounts Mutation (for manual refresh)
+// Refresh Accounts Mutation (for manual refresh from Plaid API)
 export const useRefreshAccountsMutation = () => {
   const queryClient = useQueryClient();
 
   return useMutation<PlaidAccountsResponse, Error>({
-    mutationFn: PlaidService.getAccounts,
+    mutationFn: PlaidService.refreshAccounts,
     onSuccess: (data) => {
       // Update the cache with fresh data
       queryClient.setQueryData([QUERY_KEYS.accounts], data);
+      // Also refresh data info
+      queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.accountsDataInfo] });
     },
     onError: () => {},
   });
