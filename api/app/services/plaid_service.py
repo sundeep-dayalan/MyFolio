@@ -949,9 +949,7 @@ class PlaidService:
                     )
                     # Refresh account data to immediately reflect the removal of accounts from the unlinked bank
                     try:
-                        updated_accounts = self.get_accounts_balance(
-                            user_id, force_refresh=True
-                        )
+                        updated_accounts = self.refresh_accounts_balance(user_id)
                         logger.info(
                             f"Successfully refreshed account data after unlinking - now showing {len(updated_accounts.get('accounts', []))} accounts"
                         )
@@ -966,6 +964,26 @@ class PlaidService:
                     f"Failed to cleanup account data after revoking item {item_id}: {cleanup_error}"
                 )
                 # Don't fail the entire operation if cleanup fails
+
+            # Clean up transaction data for this specific item
+            try:
+                logger.info(
+                    f"Cleaning up transaction data for unlinked item {item_id}"
+                )
+                transaction_cleanup_success = transaction_storage_service.delete_item_transactions(user_id, item_id)
+                if transaction_cleanup_success:
+                    logger.info(
+                        f"Successfully cleaned up transaction data for item {item_id}"
+                    )
+                else:
+                    logger.warning(
+                        f"Failed to clean up transaction data for item {item_id}, but continuing"
+                    )
+            except Exception as transaction_cleanup_error:
+                logger.error(
+                    f"Failed to cleanup transaction data for item {item_id}: {transaction_cleanup_error}"
+                )
+                # Don't fail the entire operation if transaction cleanup fails
 
             logger.info(f"Successfully revoked token {item_id} for user {user_id}")
             return True
