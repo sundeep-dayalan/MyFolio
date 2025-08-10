@@ -289,7 +289,7 @@ class PlaidService:
 
             # Use merge=True to add the new item to the existing items map
             # without deleting previously stored bank tokens
-            doc_ref.set(update_data)
+            doc_ref.set(update_data, merge=True)
 
             logger.info(
                 f"Successfully stored token for user {user_id}, item_id: {item_id}, preserving existing tokens"
