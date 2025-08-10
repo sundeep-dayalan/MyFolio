@@ -1,11 +1,16 @@
 """
 Personal Wealth Management API
 
-A production-ready FastAPI application for managing personal wealth,
-including portfolio tracking, transaction management, and financial analytics.
+A streamlined production-ready FastAPI application for personal finance management:
+- Google OAuth 2.0 authentication
+- Plaid financial data integration
+- Real-time account balances and transactions
+- Secure token management
+
+Optimized for production with unused endpoints and code removed.
 """
 
-__version__ = "1.0.0"
+__version__ = "2.0.0"
 __author__ = "Personal Wealth Management Team"
 
 from .main import app

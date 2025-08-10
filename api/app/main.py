@@ -1,6 +1,18 @@
 """
 FastAPI application for Personal Wealth Management.
-Version: 1.0.2
+Version: 2.0.0 - Production Ready
+
+A streamlined personal wealth management API focused on:
+- Google OAuth 2.0 authentication
+- Plaid financial data integration
+- Real-time account balances and transactions
+- Secure token management
+
+Removed unused endpoints:
+- JWT-based authentication (replaced with OAuth)
+- User management APIs
+- Wealth/portfolio management APIs
+- Unused Plaid utility endpoints
 """
 
 from contextlib import asynccontextmanager
@@ -15,7 +27,7 @@ from .middleware import (
     add_exception_handlers,
     add_logging_middleware,
 )
-from .routers import users_router, auth_router, wealth_router, plaid_router
+from .routers import plaid_router
 from .routers.oauth import router as oauth_router
 from .utils.logger import setup_logging, get_logger
 
@@ -88,10 +100,7 @@ def create_app() -> FastAPI:
     )
 
     # Add routers
-    app.include_router(auth_router, prefix=settings.api_v1_prefix)
     app.include_router(oauth_router, prefix=settings.api_v1_prefix)
-    app.include_router(users_router, prefix=settings.api_v1_prefix)
-    app.include_router(wealth_router, prefix=settings.api_v1_prefix)
     # Plaid integration endpoints
     app.include_router(plaid_router, prefix=settings.api_v1_prefix)
 

@@ -33,13 +33,23 @@ export const TransactionsAccountTabs: React.FC<TransactionsAccountTabsProps> = (
 
   if (bankAccounts.length === 0) return null;
 
+  const getGridColumns = (accountCount: number) => {
+    if (accountCount === 1) return 'grid-cols-1';
+    if (accountCount === 2) return 'grid-cols-2';
+    if (accountCount === 3) return 'grid-cols-3';
+    if (accountCount === 4) return 'grid-cols-4';
+    if (accountCount === 5) return 'grid-cols-5';
+    if (accountCount === 6) return 'grid-cols-6';
+    return 'grid-cols-6'; // Max 6 columns, then wrap
+  };
+
   return (
     <div className="px-4 lg:px-6">
       <Tabs
         value={activeAccountId || ''}
         onValueChange={(accountId) => onAccountTabChange(activeBankName, accountId)}
       >
-        <TabsList className="grid w-full grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <TabsList className={`grid w-full ${getGridColumns(bankAccounts.length)}`}>
           {bankAccounts.map((account) => (
             <TabsTrigger key={account.account_id} value={account.account_id} className="text-xs">
               {account.name} ({account.subtype})

@@ -1,6 +1,7 @@
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { IconPlus, IconTrash, IconAlertTriangle } from '@tabler/icons-react';
+import AccountsRefreshCard from './accounts-refresh-card';
 
 interface AccountsHeaderProps {
   onConnectBank: () => void;
@@ -9,6 +10,7 @@ interface AccountsHeaderProps {
   hasAccounts: boolean;
   isDisconnecting: boolean;
   errorMessage?: string;
+  onRefreshSuccess?: () => void;
 }
 
 export function AccountsHeader({
@@ -18,6 +20,7 @@ export function AccountsHeader({
   hasAccounts,
   isDisconnecting,
   errorMessage,
+  onRefreshSuccess,
 }: AccountsHeaderProps) {
   return (
     <div className="px-4 lg:px-6 space-y-4">
@@ -29,7 +32,8 @@ export function AccountsHeader({
             Manage your connected bank accounts and view balances
           </p>
         </div>
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center space-x-3">
+          {hasAccounts && <AccountsRefreshCard onRefreshSuccess={onRefreshSuccess} />}
           <Button onClick={onConnectBank} disabled={isConnecting} size="sm">
             {isConnecting && (
               <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current mr-2" />

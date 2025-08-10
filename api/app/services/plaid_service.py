@@ -32,6 +32,7 @@ from ..models.plaid import (
     PlaidAccountWithBalance,
     PlaidBalance,
 )
+from .account_storage_service import account_storage_service
 import json
 
 logger = get_logger(__name__)
@@ -384,7 +385,7 @@ class PlaidService:
                     logger.info(f"Token {i+1} returned {len(accounts)} accounts")
 
                     # Mark token as used
-                    self.mark_token_as_used(token.item_id)
+                    self.mark_token_as_used(user_id, token.item_id)
 
                     for account in accounts:
                         # Calculate total balance
@@ -402,15 +403,137 @@ class PlaidService:
                 f"Total: {len(all_accounts)} accounts, ${total_balance} total balance for user {user_id}"
             )
 
-            return {
+            account_data = {
                 "accounts": [account.model_dump() for account in all_accounts],
                 "total_balance": float(total_balance),
                 "account_count": int(len(all_accounts)),
             }
 
+            # Cache the account data in Firestore
+            account_storage_service.store_account_data(user_id, account_data)
+
+            return account_data
+
         except Exception as e:
             logger.error(f"Failed to get accounts balance for user {user_id}: {e}")
             raise Exception(f"Failed to retrieve account balances: {e}")
+
+    def get_stored_accounts_balance(
+        self,
+        user_id: str,
+        max_age_hours: int = None,  # No age limit - show any data that exists
+    ) -> Dict[str, Any]:
+        """Retrieve cached account balances from Firestore without calling Plaid API."""
+        try:
+            logger.info(f"Getting cached accounts balance for user {user_id}")
+
+            # Get any cached data regardless of age
+            cached_data = account_storage_service.get_stored_account_data(
+                user_id, max_age_hours=24 * 365 * 10  # Allow up to 10 years old data
+            )
+
+            if cached_data:
+                logger.info(
+                    f"Found cached data for user {user_id} - {cached_data.get('account_count', 0)} accounts"
+                )
+
+                # Determine if data should be considered "expired" for UI purposes (older than 7 days)
+                is_old = False
+                last_updated = cached_data.get("last_updated")
+                if last_updated:
+                    try:
+                        from datetime import datetime, timezone
+
+                        if isinstance(last_updated, str):
+                            update_time = datetime.fromisoformat(
+                                last_updated.replace("Z", "+00:00")
+                            )
+                        else:
+                            update_time = last_updated
+
+                        age_hours = (
+                            datetime.now(timezone.utc) - update_time
+                        ).total_seconds() / 3600
+                        is_old = age_hours > 168  # Consider old if older than 7 days
+                    except:
+                        is_old = True  # If we can't parse the date, assume it's old
+
+                return {
+                    "accounts": cached_data.get("accounts", []),
+                    "total_balance": cached_data.get("total_balance", 0.0),
+                    "account_count": cached_data.get("account_count", 0),
+                    "last_updated": cached_data.get("last_updated"),
+                    "from_cache": True,
+                    "is_expired": is_old,
+                    "message": (
+                        "Data may be outdated. Consider refreshing for latest balances."
+                        if is_old
+                        else None
+                    ),
+                }
+
+            # If absolutely no cached data exists
+            logger.info(f"No cached data found for user {user_id}")
+            return {
+                "accounts": [],
+                "total_balance": 0.0,
+                "account_count": 0,
+                "last_updated": None,
+                "from_cache": False,
+                "message": "No cached data available. Please refresh to get latest data.",
+            }
+
+        except Exception as e:
+            logger.error(
+                f"Failed to get cached accounts balance for user {user_id}: {e}"
+            )
+            raise Exception(f"Failed to retrieve cached account balances: {e}")
+
+    def refresh_accounts_balance(self, user_id: str) -> Dict[str, Any]:
+        """Force refresh of account balances from Plaid API and update cache."""
+        try:
+            logger.info(f"Force refreshing accounts balance for user {user_id}")
+
+            # Call the original method which will fetch from Plaid and cache the results
+            account_data = self.get_accounts_balance(user_id)
+
+            # Add refresh indicator
+            account_data["refreshed"] = True
+            account_data["from_cache"] = False
+
+            logger.info(
+                f"Successfully refreshed and cached account data for user {user_id}"
+            )
+            return account_data
+
+        except Exception as e:
+            logger.error(f"Failed to refresh accounts balance for user {user_id}: {e}")
+            raise Exception(f"Failed to refresh account balances: {e}")
+
+    def get_data_info(self, user_id: str) -> Dict[str, Any]:
+        """Get information about cached account data."""
+        try:
+            # Get any data regardless of age
+            cache_info = account_storage_service.get_data_info(
+                user_id, max_age_hours=24 * 365 * 10
+            )  # 10 years
+
+            if cache_info:
+                return {
+                    "has_data": True,
+                    "last_updated": cache_info["last_updated"],
+                    "age_hours": cache_info["age_hours"],
+                    "account_count": cache_info["account_count"],
+                    "total_balance": cache_info["total_balance"],
+                    "is_expired": cache_info["age_hours"]
+                    > 168,  # Mark as expired if older than 7 days, but still show it
+                }
+
+            return {"has_data": False}
+
+        except Exception as e:
+            logger.error(f"Failed to get cache info for user {user_id}: {e}")
+            return {"has_data": False, "error": str(e)}
 
     def _get_balance_for_token(
         self,
@@ -695,23 +818,28 @@ class PlaidService:
             logger.warning(f"Token validation failed: {e}")
             return False
 
-    def mark_token_as_used(self, item_id: str) -> None:
+    def mark_token_as_used(self, user_id: str, item_id: str) -> None:
         """
         Update the last_used_at timestamp for a token.
 
         Args:
+            user_id: The user ID who owns the token
             item_id: The Plaid item ID to update
         """
         try:
-            doc_ref = firebase_client.db.collection("plaid_tokens").document(item_id)
+            doc_ref = firebase_client.db.collection("plaid_tokens").document(user_id)
+            now = datetime.now(timezone.utc)
             doc_ref.update(
                 {
-                    "last_used_at": datetime.now(timezone.utc),
-                    "updated_at": datetime.now(timezone.utc),
+                    f"items.{item_id}.last_used_at": now,
+                    f"items.{item_id}.updated_at": now,
                 }
             )
+            logger.info(f"Updated token usage for user {user_id}, item {item_id}")
         except Exception as e:
-            logger.error(f"Failed to update token usage for {item_id}: {e}")
+            logger.error(
+                f"Failed to update token usage for user {user_id}, item {item_id}: {e}"
+            )
 
     def revoke_user_token(self, user_id: str, item_id: str) -> bool:
         """

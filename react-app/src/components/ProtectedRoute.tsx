@@ -15,7 +15,7 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
   if (auth.loading) {
     console.log('ProtectedRoute: Still loading, showing spinner');
     return (
-      <div className="flex items-center justify-center min-h-screen bg-slate-900">
+      <div className="flex items-center justify-center min-h-screen ">
         <div className="text-center">
           <Spinner />
           <p className="mt-4 text-slate-400">Loading...</p>

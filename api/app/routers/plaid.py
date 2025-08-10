@@ -22,16 +22,6 @@ def get_plaid_service() -> PlaidService:
     return PlaidService()
 
 
-@router.get("/test")
-def test_plaid_connection():
-    """Test endpoint to verify Plaid service is working."""
-    try:
-        plaid_service = PlaidService()
-        return {"status": "ok", "message": "Plaid service initialized successfully"}
-    except Exception as e:
-        return {"status": "error", "message": f"Plaid service error: {e}"}
-
-
 @router.post("/create_link_token")
 def create_link_token(
     user_id: str = Depends(get_current_user_id),
@@ -64,9 +54,35 @@ def get_accounts(
     user_id: str = Depends(get_current_user_id),
     plaid_service: PlaidService = Depends(get_plaid_service),
 ):
-    """Fetch all account balances for the current user."""
+    """Fetch all account balances for the current user from stored data (fast, no API cost)."""
     try:
-        result = plaid_service.get_accounts_balance(user_id)
+        result = plaid_service.get_stored_accounts_balance(user_id)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/accounts/refresh")
+def refresh_accounts(
+    user_id: str = Depends(get_current_user_id),
+    plaid_service: PlaidService = Depends(get_plaid_service),
+):
+    """Force refresh account balances from Plaid API and update stored data."""
+    try:
+        result = plaid_service.refresh_accounts_balance(user_id)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/accounts/data-info")
+def get_accounts_data_info(
+    user_id: str = Depends(get_current_user_id),
+    plaid_service: PlaidService = Depends(get_plaid_service),
+):
+    """Get information about stored account data (last updated, age, etc.)."""
+    try:
+        result = plaid_service.get_data_info(user_id)
         return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -115,24 +131,6 @@ def revoke_plaid_item(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-# ===== TOKEN LIFECYCLE MANAGEMENT ENDPOINTS =====
-
-
-@router.delete("/tokens/cleanup")
-def cleanup_expired_tokens(
-    days_threshold: int = 90,
-    user_id: str = Depends(get_current_user_id),
-    plaid_service: PlaidService = Depends(get_plaid_service),
-):
-    """Clean up expired and stale tokens. Requires authentication."""
-    try:
-        # Note: This is a system-wide cleanup, but we require authentication for security
-        stats = plaid_service.cleanup_expired_tokens(days_threshold)
-        return {"message": "Token cleanup completed", "statistics": stats}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @router.delete("/tokens/revoke-all")
 def revoke_all_tokens(
     user_id: str = Depends(get_current_user_id),
@@ -147,22 +145,6 @@ def revoke_all_tokens(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/tokens/analytics")
-def get_token_analytics(
-    user_id: str = Depends(get_current_user_id),
-    plaid_service: PlaidService = Depends(get_plaid_service),
-):
-    """Get token analytics and health information. Requires authentication."""
-    try:
-        analytics = plaid_service.get_token_analytics()
-        return {"analytics": analytics}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ===== TRANSACTIONS ENDPOINTS =====
 
 
 @router.get("/transactions")

@@ -290,7 +290,7 @@ The application includes comprehensive testing for:
 ### Performance Features
 - **Query Optimization**: Efficient Firestore queries with fallback strategies
 - **Connection Pooling**: Optimized Firebase connection management
-- **Caching Strategy**: Client-side caching with React Query
+- **Caching Strategy**: Client-side data storage with React Query
 - **Bundle Optimization**: Tree shaking and code splitting
 
 ### Scalability
