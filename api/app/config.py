@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     project_name: str = Field(
         default="Personal Wealth Management API", env="PROJECT_NAME"
     )
-    version: str = Field(default="1.0.0", env="VERSION")
+    version: str = Field(default="2.0.0", env="VERSION")
     api_v1_prefix: str = Field(default="/api/v1", env="API_V1_PREFIX")
     debug: bool = Field(default=False, env="DEBUG")
 
