@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useContext } from 'react';
+import { Check, ChevronsUpDown } from 'lucide-react';
 import { AuthContext } from '../context/AuthContext';
 import {
   useTransactionsQuery,
@@ -9,9 +10,19 @@ import {
 import type { AuthContextType } from '@/types/types';
 import type { PlaidTransaction } from '@/services/PlaidService';
 import { TransactionsHeader } from '@/components/custom/transactions/transactions-header';
-import { TransactionsBankTabs } from '@/components/custom/transactions/transactions-bank-tabs';
 import { TransactionsAccountTabs } from '@/components/custom/transactions/transactions-account-tabs';
 import { TransactionsEmptyState } from '@/components/custom/transactions/transactions-empty-state';
+import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
 const TransactionsPage: React.FC = () => {
   const auth = useContext(AuthContext) as AuthContextType;
@@ -164,6 +175,60 @@ const TransactionsPage: React.FC = () => {
     return account?.name || 'Unknown Account';
   };
 
+  // Bank Selector Component
+  const BankSelector = () => {
+    const [open, setOpen] = useState(false);
+
+    return (
+      <div className="w-full max-w-sm">
+        <Popover open={open} onOpenChange={setOpen}>
+          <PopoverTrigger asChild>
+            <Button
+              variant="outline"
+              role="combobox"
+              aria-expanded={open}
+              className="w-full justify-between"
+            >
+              {activeBankTab ? bankNames.find((bank) => bank === activeBankTab) : 'Select bank...'}
+              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-full p-0">
+            <Command>
+              <CommandInput placeholder="Search bank..." className="h-9" />
+              <CommandList>
+                <CommandEmpty>No bank found.</CommandEmpty>
+                <CommandGroup>
+                  {bankNames.map((bankName) => (
+                    <CommandItem
+                      key={bankName}
+                      value={bankName}
+                      onSelect={(currentValue) => {
+                        const selectedBank = bankNames.find(
+                          (bank) => bank.toLowerCase() === currentValue.toLowerCase(),
+                        );
+                        setActiveBankTab(selectedBank || currentValue);
+                        setOpen(false);
+                      }}
+                    >
+                      {bankName}
+                      <Check
+                        className={cn(
+                          'ml-auto h-4 w-4',
+                          activeBankTab === bankName ? 'opacity-100' : 'opacity-0',
+                        )}
+                      />
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              </CommandList>
+            </Command>
+          </PopoverContent>
+        </Popover>
+      </div>
+    );
+  };
+
   // const getAccountType = (accountId: string) => {
   //   const account = accounts.find((acc) => acc.account_id === accountId);
   //   return account?.type || '';
@@ -191,11 +256,12 @@ const TransactionsPage: React.FC = () => {
 
             {bankNames.length > 0 && (
               <>
-                <TransactionsBankTabs
-                  bankNames={bankNames}
-                  activeBankTab={activeBankTab}
-                  onBankTabChange={setActiveBankTab}
-                />
+                <div className="px-4 lg:px-6">
+                  <div className="flex flex-col gap-2">
+                    <label className="text-sm font-medium">Select Bank:</label>
+                    <BankSelector />
+                  </div>
+                </div>
 
                 {activeBankTab && (
                   <TransactionsAccountTabs
