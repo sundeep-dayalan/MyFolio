@@ -33,7 +33,9 @@ from ..models.plaid import (
     PlaidBalance,
 )
 from .account_storage_service import account_storage_service
+from .transaction_storage_service import transaction_storage_service
 import json
+from datetime import date, datetime, timezone
 
 logger = get_logger(__name__)
 
@@ -62,9 +64,10 @@ class TokenEncryption:
     def encrypt_token(token: str) -> str:
         """Encrypt a token for secure storage."""
         try:
-            f = Fernet(TokenEncryption._get_key())
-            encrypted_token = f.encrypt(token.encode())
-            return base64.urlsafe_b64encode(encrypted_token).decode()
+            # f = Fernet(TokenEncryption._get_key())
+            # encrypted_token = f.encrypt(token.encode())
+            # return base64.urlsafe_b64encode(encrypted_token).decode()
+            return token  # For now removing  encrpytion and decrypt
         except Exception as e:
             logger.error(f"Failed to encrypt token: {e}")
             raise Exception("Token encryption failed")
@@ -73,10 +76,11 @@ class TokenEncryption:
     def decrypt_token(encrypted_token: str) -> str:
         """Decrypt a token for use."""
         try:
-            f = Fernet(TokenEncryption._get_key())
-            decoded_token = base64.urlsafe_b64decode(encrypted_token.encode())
-            decrypted_token = f.decrypt(decoded_token)
-            return decrypted_token.decode()
+            # f = Fernet(TokenEncryption._get_key())
+            # decoded_token = base64.urlsafe_b64decode(encrypted_token.encode())
+            # decrypted_token = f.decrypt(decoded_token)
+            # return decrypted_token.decode()
+            return encrypted_token  # For now removing  encrpytion and decrypt
         except Exception as e:
             logger.error(f"Failed to decrypt token: {e}")
             raise Exception("Token decryption failed")
@@ -162,11 +166,28 @@ class PlaidService:
             logger.info(
                 f"Successfully exchanged and stored token for user {user_id}, item_id: {item_id}, institution: {institution_info.get('name', 'Unknown')}"
             )
+
+            # Automatically fetch and store account data after successful token exchange
+            try:
+                logger.info(
+                    f"Fetching initial account data after token exchange for user {user_id}"
+                )
+                account_data = self.get_accounts_balance(user_id)
+                logger.info(
+                    f"Successfully fetched and stored {account_data.get('account_count', 0)} accounts after token exchange"
+                )
+            except Exception as account_error:
+                logger.error(
+                    f"Failed to fetch account data after token exchange for user {user_id}: {account_error}"
+                )
+                # Don't fail the entire exchange if account fetch fails
+
             return {
                 "success": True,
                 "item_id": item_id,
                 "token_id": stored_token.item_id,
                 "institution_name": institution_info.get("name"),
+                "access_token": access_token,  # Return for background task use
             }
 
         except Exception as e:
@@ -262,6 +283,9 @@ class PlaidService:
             # This data structure will be merged with the existing document.
             # It contains an 'items' map with the new item to add.
             update_data = {"items": {item_id: plaid_token.model_dump()}}
+
+            # For long-running sync, we can set a placeholder for transaction sync status
+            update_data["items"][item_id]["transaction_sync_status"] = "inprogress"
 
             # Use merge=True to add the new item to the existing items map
             # without deleting previously stored bank tokens
@@ -898,10 +922,80 @@ class PlaidService:
             items_map[item_id]["status"] = PlaidTokenStatus.REVOKED.value
             items_map[item_id]["updated_at"] = datetime.now(timezone.utc)
 
-            # Update the entire document with the modified items map
-            doc_ref.update(
-                {"items": items_map, "updated_at": datetime.now(timezone.utc)}
-            )
+            # Check if this was the last active token - if so, we'll delete the entire document
+            remaining_active_items = [
+                item
+                for item in items_map.values()
+                if item.get("status") == PlaidTokenStatus.ACTIVE.value
+            ]
+
+            if len(remaining_active_items) == 0:
+                # This was the last active token - delete the entire plaid_tokens document
+                logger.info(
+                    f"No active tokens remaining for user {user_id}, deleting entire plaid_tokens document"
+                )
+                doc_ref.delete()
+            else:
+                # Still have active tokens - remove only this specific item from the map
+                logger.info(
+                    f"Removing revoked item {item_id} from plaid_tokens document, {len(remaining_active_items)} active tokens remaining"
+                )
+                del items_map[item_id]  # Remove the revoked item completely
+                doc_ref.update(
+                    {"items": items_map, "updated_at": datetime.now(timezone.utc)}
+                )
+
+            # Clean up cached account data for this item
+            try:
+                from .account_storage_service import account_storage_service
+
+                # Use the remaining_active_items we calculated above
+                if len(remaining_active_items) == 0:
+                    logger.info(
+                        f"No active tokens remaining for user {user_id}, clearing all account data"
+                    )
+                    account_storage_service.clear_data(user_id)
+                else:
+                    logger.info(
+                        f"User {user_id} still has {len(remaining_active_items)} active tokens, refreshing account data to remove unlinked accounts"
+                    )
+                    # Refresh account data to immediately reflect the removal of accounts from the unlinked bank
+                    try:
+                        updated_accounts = self.refresh_accounts_balance(user_id)
+                        logger.info(
+                            f"Successfully refreshed account data after unlinking - now showing {len(updated_accounts.get('accounts', []))} accounts"
+                        )
+                    except Exception as refresh_error:
+                        logger.error(
+                            f"Failed to refresh account data after unlinking: {refresh_error}"
+                        )
+                        # Continue anyway - the data will be refreshed on next API call
+
+            except Exception as cleanup_error:
+                logger.error(
+                    f"Failed to cleanup account data after revoking item {item_id}: {cleanup_error}"
+                )
+                # Don't fail the entire operation if cleanup fails
+
+            # Clean up transaction data for this specific item
+            try:
+                logger.info(
+                    f"Cleaning up transaction data for unlinked item {item_id}"
+                )
+                transaction_cleanup_success = transaction_storage_service.delete_item_transactions(user_id, item_id)
+                if transaction_cleanup_success:
+                    logger.info(
+                        f"Successfully cleaned up transaction data for item {item_id}"
+                    )
+                else:
+                    logger.warning(
+                        f"Failed to clean up transaction data for item {item_id}, but continuing"
+                    )
+            except Exception as transaction_cleanup_error:
+                logger.error(
+                    f"Failed to cleanup transaction data for item {item_id}: {transaction_cleanup_error}"
+                )
+                # Don't fail the entire operation if transaction cleanup fails
 
             logger.info(f"Successfully revoked token {item_id} for user {user_id}")
             return True
@@ -974,11 +1068,41 @@ class PlaidService:
                     logger.error(f"Failed to revoke token {item_id}: {e}")
                     continue
 
-            # Update the entire document with the modified items map
+            # Clean up all cached data BEFORE deleting the plaid_tokens document
             if revoked_count > 0:
-                doc_ref.update(
-                    {"items": items_map, "updated_at": datetime.now(timezone.utc)}
+                try:
+                    from .account_storage_service import account_storage_service
+
+                    logger.info(
+                        f"Cleaning up all data for user {user_id} after revoking all {revoked_count} tokens"
+                    )
+                    
+                    # Delete transactions first (while we still have access to item IDs from items_map)
+                    logger.info(f"Deleting transactions for {len(items_map)} items")
+                    for item_id in items_map.keys():
+                        try:
+                            transaction_storage_service.delete_item_transactions(user_id, item_id)
+                            logger.info(f"Deleted transactions for item {item_id}")
+                        except Exception as tx_error:
+                            logger.error(f"Failed to delete transactions for item {item_id}: {tx_error}")
+                            # Continue with other items
+                    
+                    # Clear account data
+                    account_storage_service.clear_data(user_id)
+                    
+                    logger.info(f"Successfully cleaned up all data for user {user_id}")
+
+                except Exception as cleanup_error:
+                    logger.error(
+                        f"Failed to cleanup data after revoking all tokens for user {user_id}: {cleanup_error}"
+                    )
+                    # Don't fail the entire operation if cleanup fails
+
+                # Finally, delete the plaid_tokens document
+                logger.info(
+                    f"Deleting plaid_tokens document for user {user_id}"
                 )
+                doc_ref.delete()
 
             logger.info(f"Revoked {revoked_count} tokens for user {user_id}")
             return revoked_count
@@ -1351,3 +1475,121 @@ class PlaidService:
             logger.error(f"Failed to refresh transactions for item {item_id}: {e}")
             raise Exception(f"Failed to refresh transactions: {e}")
             raise Exception(f"Failed to refresh transactions: {e}")
+
+    def _clean_and_normalize_for_firestore(self, data: Any) -> Any:
+        """
+        Recursively cleans and normalizes data to be compatible with Firestore.
+        This version corrects the order of type checks to prevent RecursionError.
+        """
+        if data is None:
+            return None
+
+        # --- Recursive Cleaning for Collections (Do this FIRST) ---
+        if isinstance(data, dict):
+            return {
+                k: self._clean_and_normalize_for_firestore(v) for k, v in data.items()
+            }
+        if isinstance(data, list):
+            return [self._clean_and_normalize_for_firestore(item) for item in data]
+
+        # --- Data Type Conversion (Do this AFTER recursion) ---
+        # Check for the MOST specific type (datetime) BEFORE the less specific type (date).
+        if isinstance(data, datetime):
+            return (
+                data.astimezone(timezone.utc)
+                if data.tzinfo
+                else data.replace(tzinfo=timezone.utc)
+            )
+        if isinstance(data, date):
+            # This clause will only be reached if the object is a 'date' but not a 'datetime'.
+            return datetime.combine(data, datetime.min.time(), tzinfo=timezone.utc)
+
+        # Return all other compatible types (str, int, float, bool)
+        return data
+
+    # The main sync function
+    def sync_all_transactions_for_item(
+        self, user_id: str, item_id: str, access_token: str
+    ):
+        """
+        Fetch all available transactions for a new item and store them in Firestore.
+        This method is designed to be run in the background.
+        """
+        try:
+            logger.info(
+                f"Starting initial transaction sync for user {user_id}, item {item_id}"
+            )
+
+            decrypted_token = TokenEncryption.decrypt_token(access_token)
+            has_more = True
+            cursor = None
+            total_transactions_fetched = 0
+
+            while has_more:
+                request_args = {"access_token": decrypted_token, "count": 500}
+                if cursor:
+                    request_args["cursor"] = cursor
+
+                request = TransactionsSyncRequest(**request_args)
+                response = self.client.transactions_sync(request)
+
+                added_transactions = response.get("added", [])
+                if added_transactions:
+                    logger.info(
+                        f"Fetched {len(added_transactions)} new transactions for item {item_id}"
+                    )
+
+                    # 1. Clean and normalize all transactions in the batch
+                    cleaned_transactions = [
+                        self._clean_and_normalize_for_firestore(tx.to_dict())
+                        for tx in added_transactions
+                    ]
+
+                    # 2. Delegate the database write operation to the storage service
+                    success = transaction_storage_service.store_transactions_batch(
+                        user_id, item_id, cleaned_transactions
+                    )
+
+                    # 3. Handle the result
+                    if success:
+                        total_transactions_fetched += len(added_transactions)
+                    else:
+                        # If storage fails, stop the sync to avoid inconsistent data
+                        raise Exception(
+                            "Failed to store transaction batch in Firestore."
+                        )
+
+                has_more = response["has_more"]
+                cursor = response["next_cursor"]
+                logger.info(f"has_more is now {has_more} for item {item_id}")
+
+            # Update the token metadata (cursor, status, etc.)
+            # This logic correctly remains in the PlaidService
+            doc_ref = firebase_client.db.collection("plaid_tokens").document(user_id)
+            doc_ref.update(
+                {
+                    f"items.{item_id}.transactions_cursor": cursor,
+                    f"items.{item_id}.last_sync_completed_at": firestore.SERVER_TIMESTAMP,
+                    f"items.{item_id}.total_transactions_synced": total_transactions_fetched,
+                    f"items.{item_id}.transaction_sync_status": "completed",
+                }
+            )
+
+            logger.info(
+                f"Successfully completed initial sync for item {item_id}. "
+                f"Fetched {total_transactions_fetched} transactions. Final cursor stored."
+            )
+
+        except Exception as e:
+            logger.error(
+                f"Background transaction sync failed for user {user_id}, item {item_id}: {e}",
+                exc_info=True,
+            )
+            doc_ref = firebase_client.db.collection("plaid_tokens").document(user_id)
+            doc_ref.update(
+                {
+                    f"items.{item_id}.transaction_sync_status": "failed",
+                    f"items.{item_id}.sync_error": str(e),
+                    f"items.{item_id}.last_sync_completed_at": firestore.SERVER_TIMESTAMP,
+                }
+            )
