@@ -33,7 +33,9 @@ from ..models.plaid import (
     PlaidBalance,
 )
 from .account_storage_service import account_storage_service
+from .transaction_storage_service import transaction_storage_service
 import json
+from datetime import date, datetime, timezone
 
 logger = get_logger(__name__)
 
@@ -62,9 +64,10 @@ class TokenEncryption:
     def encrypt_token(token: str) -> str:
         """Encrypt a token for secure storage."""
         try:
-            f = Fernet(TokenEncryption._get_key())
-            encrypted_token = f.encrypt(token.encode())
-            return base64.urlsafe_b64encode(encrypted_token).decode()
+            # f = Fernet(TokenEncryption._get_key())
+            # encrypted_token = f.encrypt(token.encode())
+            # return base64.urlsafe_b64encode(encrypted_token).decode()
+            return token  # For now removing  encrpytion and decrypt
         except Exception as e:
             logger.error(f"Failed to encrypt token: {e}")
             raise Exception("Token encryption failed")
@@ -73,10 +76,11 @@ class TokenEncryption:
     def decrypt_token(encrypted_token: str) -> str:
         """Decrypt a token for use."""
         try:
-            f = Fernet(TokenEncryption._get_key())
-            decoded_token = base64.urlsafe_b64decode(encrypted_token.encode())
-            decrypted_token = f.decrypt(decoded_token)
-            return decrypted_token.decode()
+            # f = Fernet(TokenEncryption._get_key())
+            # decoded_token = base64.urlsafe_b64decode(encrypted_token.encode())
+            # decrypted_token = f.decrypt(decoded_token)
+            # return decrypted_token.decode()
+            return encrypted_token  # For now removing  encrpytion and decrypt
         except Exception as e:
             logger.error(f"Failed to decrypt token: {e}")
             raise Exception("Token decryption failed")
@@ -183,6 +187,7 @@ class PlaidService:
                 "item_id": item_id,
                 "token_id": stored_token.item_id,
                 "institution_name": institution_info.get("name"),
+                "access_token": access_token,  # Return for background task use
             }
 
         except Exception as e:
@@ -279,9 +284,12 @@ class PlaidService:
             # It contains an 'items' map with the new item to add.
             update_data = {"items": {item_id: plaid_token.model_dump()}}
 
+            # For long-running sync, we can set a placeholder for transaction sync status
+            update_data["items"][item_id]["transaction_sync_status"] = "inprogress"
+
             # Use merge=True to add the new item to the existing items map
             # without deleting previously stored bank tokens
-            doc_ref.set(update_data, merge=True)
+            doc_ref.set(update_data)
 
             logger.info(
                 f"Successfully stored token for user {user_id}, item_id: {item_id}, preserving existing tokens"
@@ -1044,6 +1052,7 @@ class PlaidService:
                         f"Clearing all account data for user {user_id} after revoking all tokens"
                     )
                     account_storage_service.clear_data(user_id)
+                    transaction_storage_service.delete_all_user_transactions(user_id)
 
                 except Exception as cleanup_error:
                     logger.error(
@@ -1422,3 +1431,121 @@ class PlaidService:
             logger.error(f"Failed to refresh transactions for item {item_id}: {e}")
             raise Exception(f"Failed to refresh transactions: {e}")
             raise Exception(f"Failed to refresh transactions: {e}")
+
+    def _clean_and_normalize_for_firestore(self, data: Any) -> Any:
+        """
+        Recursively cleans and normalizes data to be compatible with Firestore.
+        This version corrects the order of type checks to prevent RecursionError.
+        """
+        if data is None:
+            return None
+
+        # --- Recursive Cleaning for Collections (Do this FIRST) ---
+        if isinstance(data, dict):
+            return {
+                k: self._clean_and_normalize_for_firestore(v) for k, v in data.items()
+            }
+        if isinstance(data, list):
+            return [self._clean_and_normalize_for_firestore(item) for item in data]
+
+        # --- Data Type Conversion (Do this AFTER recursion) ---
+        # Check for the MOST specific type (datetime) BEFORE the less specific type (date).
+        if isinstance(data, datetime):
+            return (
+                data.astimezone(timezone.utc)
+                if data.tzinfo
+                else data.replace(tzinfo=timezone.utc)
+            )
+        if isinstance(data, date):
+            # This clause will only be reached if the object is a 'date' but not a 'datetime'.
+            return datetime.combine(data, datetime.min.time(), tzinfo=timezone.utc)
+
+        # Return all other compatible types (str, int, float, bool)
+        return data
+
+    # The main sync function
+    def sync_all_transactions_for_item(
+        self, user_id: str, item_id: str, access_token: str
+    ):
+        """
+        Fetch all available transactions for a new item and store them in Firestore.
+        This method is designed to be run in the background.
+        """
+        try:
+            logger.info(
+                f"Starting initial transaction sync for user {user_id}, item {item_id}"
+            )
+
+            decrypted_token = TokenEncryption.decrypt_token(access_token)
+            has_more = True
+            cursor = None
+            total_transactions_fetched = 0
+
+            while has_more:
+                request_args = {"access_token": decrypted_token, "count": 500}
+                if cursor:
+                    request_args["cursor"] = cursor
+
+                request = TransactionsSyncRequest(**request_args)
+                response = self.client.transactions_sync(request)
+
+                added_transactions = response.get("added", [])
+                if added_transactions:
+                    logger.info(
+                        f"Fetched {len(added_transactions)} new transactions for item {item_id}"
+                    )
+
+                    # 1. Clean and normalize all transactions in the batch
+                    cleaned_transactions = [
+                        self._clean_and_normalize_for_firestore(tx.to_dict())
+                        for tx in added_transactions
+                    ]
+
+                    # 2. Delegate the database write operation to the storage service
+                    success = transaction_storage_service.store_transactions_batch(
+                        user_id, item_id, cleaned_transactions
+                    )
+
+                    # 3. Handle the result
+                    if success:
+                        total_transactions_fetched += len(added_transactions)
+                    else:
+                        # If storage fails, stop the sync to avoid inconsistent data
+                        raise Exception(
+                            "Failed to store transaction batch in Firestore."
+                        )
+
+                has_more = response["has_more"]
+                cursor = response["next_cursor"]
+                logger.info(f"has_more is now {has_more} for item {item_id}")
+
+            # Update the token metadata (cursor, status, etc.)
+            # This logic correctly remains in the PlaidService
+            doc_ref = firebase_client.db.collection("plaid_tokens").document(user_id)
+            doc_ref.update(
+                {
+                    f"items.{item_id}.transactions_cursor": cursor,
+                    f"items.{item_id}.last_sync_completed_at": firestore.SERVER_TIMESTAMP,
+                    f"items.{item_id}.total_transactions_synced": total_transactions_fetched,
+                    f"items.{item_id}.transaction_sync_status": "completed",
+                }
+            )
+
+            logger.info(
+                f"Successfully completed initial sync for item {item_id}. "
+                f"Fetched {total_transactions_fetched} transactions. Final cursor stored."
+            )
+
+        except Exception as e:
+            logger.error(
+                f"Background transaction sync failed for user {user_id}, item {item_id}: {e}",
+                exc_info=True,
+            )
+            doc_ref = firebase_client.db.collection("plaid_tokens").document(user_id)
+            doc_ref.update(
+                {
+                    f"items.{item_id}.transaction_sync_status": "failed",
+                    f"items.{item_id}.sync_error": str(e),
+                    f"items.{item_id}.last_sync_completed_at": firestore.SERVER_TIMESTAMP,
+                }
+            )

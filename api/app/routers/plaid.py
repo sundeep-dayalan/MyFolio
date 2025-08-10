@@ -2,7 +2,7 @@
 Plaid integration routes.
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Dict, Any
 from ..services.plaid_service import PlaidService
@@ -38,12 +38,29 @@ def create_link_token(
 @router.post("/exchange_public_token")
 def exchange_public_token(
     request: ExchangeTokenRequest,
+    background_tasks: BackgroundTasks,
     user_id: str = Depends(get_current_user_id),
     plaid_service: PlaidService = Depends(get_plaid_service),
 ):
     """Exchange public token for an access token and store securely."""
     try:
         result = plaid_service.exchange_public_token(request.public_token, user_id)
+
+        # Add the long-running sync as a background task
+        # This will run after the response has been sent to the user.
+        if result.get("success") and result.get("access_token"):
+            logger.info(
+                f"Scheduling background task for initial transaction sync for item {result['item_id']}"
+            )
+            background_tasks.add_task(
+                plaid_service.sync_all_transactions_for_item,
+                user_id=user_id,
+                item_id=result["item_id"],
+                access_token=result["access_token"],
+            )
+
+        # We don't want to return the sensitive access token to the client
+        del result["access_token"]
         return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
