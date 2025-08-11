@@ -10,6 +10,14 @@ from plaid.model.link_token_create_request import LinkTokenCreateRequest
 from plaid.model.link_token_create_request_user import LinkTokenCreateRequestUser
 from plaid.model.country_code import CountryCode
 from plaid.model.products import Products
+from plaid.model.account_subtype import AccountSubtype
+from plaid.model.credit_account_subtypes import CreditAccountSubtypes
+from plaid.model.credit_account_subtype import CreditAccountSubtype
+from plaid.model.link_token_account_filters import LinkTokenAccountFilters
+from plaid.model.depository_filter import DepositoryFilter
+from plaid.model.credit_filter import CreditFilter
+from plaid.model.depository_account_subtype import DepositoryAccountSubtype
+from plaid.model.depository_account_subtypes import DepositoryAccountSubtypes
 from plaid.model.item_get_request import ItemGetRequest
 from plaid.model.institutions_get_by_id_request import InstitutionsGetByIdRequest
 from plaid.configuration import Configuration
@@ -36,6 +44,9 @@ from .account_storage_service import account_storage_service
 from .transaction_storage_service import transaction_storage_service
 import json
 from datetime import date, datetime, timezone
+from plaid.model.accounts_balance_get_request_options import (
+    AccountsBalanceGetRequestOptions,
+)
 
 logger = get_logger(__name__)
 
@@ -123,16 +134,37 @@ class PlaidService:
 
             # Create the basic request
             request_params = {
-                "products": [Products("auth"), Products("transactions")],
+                # "products": [Products("auth"), Products("transactions")],
+                "products": [Products("transactions")],
                 "client_name": settings.project_name,
                 "country_codes": [CountryCode("US")],
+                "transactions": {"days_requested": 730},
                 "language": "en",
                 "user": LinkTokenCreateRequestUser(client_user_id=user_id),
+                "account_filters": LinkTokenAccountFilters(
+                    depository=DepositoryFilter(
+                        account_subtypes=DepositoryAccountSubtypes(
+                            [
+                                DepositoryAccountSubtype("checking"),
+                                DepositoryAccountSubtype("savings"),
+                            ]
+                        )
+                    ),
+                    credit=CreditFilter(
+                        account_subtypes=CreditAccountSubtypes(
+                            [
+                                CreditAccountSubtype("credit card"),
+                            ]
+                        )
+                    ),
+                ),
             }
 
+            logger.info(f"Plaid request_params {request_params}")
             # Only add webhook if it's explicitly set in settings
             if hasattr(settings, "plaid_webhook") and settings.plaid_webhook:
                 request_params["webhook"] = settings.plaid_webhook
+            logger.info(f"Plaid request_params {request_params}")
 
             request = LinkTokenCreateRequest(**request_params)
             response = self.client.link_token_create(request)
@@ -573,7 +605,16 @@ class PlaidService:
     ) -> List[PlaidAccountWithBalance]:
         """Retrieve account balances for a specific access token."""
         try:
-            request = AccountsBalanceGetRequest(access_token=access_token)
+            # Calculate a date 10 years in the past from the current time - Just to ensure plaid connection wont fail for capital one connections at any cost
+            long_time_ago = datetime.now(timezone.utc) - timedelta(days=365 * 10)
+            # Format it into the required ISO 8601 string with a 'Z' for UTC
+            safe_timestamp = long_time_ago.isoformat().replace("+00:00", "Z")
+
+            request_args = {"access_token": access_token}
+            request_args["options"] = AccountsBalanceGetRequestOptions(
+                min_last_updated_datetime=long_time_ago
+            )
+            request = AccountsBalanceGetRequest(**request_args)
             response = self.client.accounts_balance_get(request)
 
             accounts = []
