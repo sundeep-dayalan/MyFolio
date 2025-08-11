@@ -4,6 +4,7 @@ import {
   useAccountsQuery,
   useItemsQuery,
   useRefreshTransactionsMutation,
+  useForceRefreshTransactionsMutation,
 } from '../hooks/usePlaidApi';
 import type { AuthContextType } from '@/types/types';
 import { TransactionsHeader } from '@/components/custom/transactions/transactions-header';
@@ -34,6 +35,7 @@ const TransactionsPage: React.FC = () => {
   const { data: accountsData, isLoading: accountsLoading } = useAccountsQuery();
   const { data: itemsData, isLoading: itemsLoading } = useItemsQuery();
   const refreshTransactionsMutation = useRefreshTransactionsMutation();
+  const forceRefreshTransactionsMutation = useForceRefreshTransactionsMutation();
 
   const accounts = accountsData?.accounts || [];
   const items = itemsData?.items || [];
@@ -141,6 +143,40 @@ const TransactionsPage: React.FC = () => {
     }
   };
 
+  const handleForceRefreshBank = async (bankName: string) => {
+    const itemId = institutionToItemMap.get(bankName);
+    if (!itemId) {
+      setErrorMessage(`Could not find item ID for ${bankName}`);
+      return;
+    }
+
+    try {
+      setErrorMessage('');
+      const result = await forceRefreshTransactionsMutation.mutateAsync({ itemId });
+
+      // Show success toast for async operation
+      if (result.success && result.async_operation) {
+        toast.success(`Resync transactions request submitted for ${bankName}`, {
+          description:
+            'Check back later for updated transactions. This process may take a few minutes.',
+          duration: 7000, // Show longer for async operations
+        });
+      }
+
+      // Note: Don't invalidate queries here since processing is async
+    } catch (error) {
+      setErrorMessage(
+        `Failed to submit force refresh request: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+
+      toast.error('Failed to submit force refresh request', {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
+
   // Main render with new data table
   return (
     <>
@@ -153,6 +189,8 @@ const TransactionsPage: React.FC = () => {
               onBankChange={handleBankChange}
               onRefreshBank={handleRefreshBank}
               isRefreshing={refreshTransactionsMutation.isPending}
+              onForceRefreshBank={handleForceRefreshBank}
+              isForceRefreshing={forceRefreshTransactionsMutation.isPending}
               errorMessage={errorMessage}
               transactionType={transactionType}
               onTransactionTypeChange={setTransactionType}

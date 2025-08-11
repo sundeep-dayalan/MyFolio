@@ -128,6 +128,15 @@ export interface RefreshTransactionsResponse {
   message: string;
 }
 
+export interface ForceRefreshTransactionsResponse {
+  success: boolean;
+  message: string;
+  item_id: string;
+  institution_name: string;
+  status: string;
+  async_operation: boolean;
+}
+
 const getAuthHeaders = (): HeadersInit => {
   const token = localStorage.getItem('authToken');
 
@@ -432,6 +441,30 @@ export const PlaidService = {
       return data;
     } catch (error) {
       throw new Error('Failed to refresh transactions');
+    }
+  },
+
+  async forceRefreshTransactions(itemId: string): Promise<ForceRefreshTransactionsResponse> {
+    try {
+      const response = await fetch(`${API_BASE}/plaid/transactions/force-refresh/${itemId}`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      });
+
+      if (response.status === 401) {
+        localStorage.removeItem('authToken');
+        window.location.href = '/login';
+        throw new Error('Authentication required. Redirecting to login.');
+      }
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = (await response.json()) as ForceRefreshTransactionsResponse;
+      return data;
+    } catch (error) {
+      throw new Error('Failed to force refresh transactions');
     }
   },
 };

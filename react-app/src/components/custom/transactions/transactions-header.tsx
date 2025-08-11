@@ -1,6 +1,17 @@
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
 import { Check, ChevronDown } from 'lucide-react';
 import { IconRefresh, IconAlertTriangle } from '@tabler/icons-react';
 import { cn } from '@/lib/utils';
@@ -11,6 +22,8 @@ interface TransactionsHeaderProps {
   onBankChange: (bankName: string | null) => void;
   onRefreshBank: (bankName: string) => Promise<void>;
   isRefreshing: boolean;
+  onForceRefreshBank?: (bankName: string) => Promise<void>;
+  isForceRefreshing?: boolean;
   errorMessage?: string;
   transactionType: 'added' | 'modified' | 'removed' | 'all';
   onTransactionTypeChange: (type: 'added' | 'modified' | 'removed' | 'all') => void;
@@ -22,6 +35,8 @@ export const TransactionsHeader: React.FC<TransactionsHeaderProps> = ({
   onBankChange,
   onRefreshBank,
   isRefreshing,
+  onForceRefreshBank,
+  isForceRefreshing,
   errorMessage,
   transactionType,
   onTransactionTypeChange,
@@ -133,6 +148,45 @@ export const TransactionsHeader: React.FC<TransactionsHeaderProps> = ({
               )}
               Refresh {activeBankName}
             </Button>
+          )}
+
+          {/* Force Refresh Button with Confirmation */}
+          {activeBankName && onForceRefreshBank && (
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button
+                  disabled={isRefreshing || isForceRefreshing}
+                  size="sm"
+                  variant="destructive"
+                >
+                  {isForceRefreshing ? (
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current mr-2" />
+                  ) : (
+                    <IconRefresh className="h-4 w-4 mr-2" />
+                  )}
+                  Force Refresh
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Force Refresh Transactions</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This will delete all existing transaction data for {activeBankName} and perform
+                    a complete resync from your bank. This action cannot be undone. Are you sure you
+                    want to continue?
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={() => onForceRefreshBank(activeBankName)}
+                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  >
+                    Force Refresh
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           )}
         </div>
       </div>

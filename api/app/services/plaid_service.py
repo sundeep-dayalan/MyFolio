@@ -1617,6 +1617,181 @@ class PlaidService:
 
             raise Exception(f"Failed to refresh transactions: {e}")
 
+    def force_refresh_transactions(self, user_id: str, item_id: str) -> Dict[str, Any]:
+        """
+        Force refresh transactions for a specific item/bank by clearing all existing data
+        and performing a complete resync. This is an async operation.
+
+        Returns immediate success response while processing happens in background.
+        """
+        try:
+            logger.info(
+                f"Starting force refresh transactions for user {user_id}, item {item_id}"
+            )
+
+            # Get the specific access token for validation
+            access_tokens = self.get_user_access_tokens(user_id)
+            target_token = next(
+                (token for token in access_tokens if token.item_id == item_id), None
+            )
+
+            if not target_token:
+                raise Exception(f"Access token not found for item {item_id}")
+
+            if target_token.status != PlaidTokenStatus.ACTIVE:
+                raise Exception(f"Access token for item {item_id} is not active")
+
+            # Set sync status to force refresh in progress
+            doc_ref = firebase_client.db.collection("plaid_tokens").document(user_id)
+            doc_ref.update(
+                {
+                    f"items.{item_id}.transactions.transaction_sync_status": "force_refresh_in_progress",
+                    f"items.{item_id}.transactions.last_sync_started_at": firestore.SERVER_TIMESTAMP,
+                }
+            )
+
+            # Start the background force refresh process
+            import threading
+
+            thread = threading.Thread(
+                target=self._execute_force_refresh_background,
+                args=(user_id, item_id, target_token.access_token),
+                daemon=True,
+            )
+            thread.start()
+
+            # Return immediate response to user
+            result = {
+                "success": True,
+                "message": "Force refresh request submitted successfully",
+                "item_id": item_id,
+                "institution_name": target_token.institution_name,
+                "status": "processing",
+                "async_operation": True,
+            }
+
+            logger.info(f"Force refresh request submitted for item {item_id}")
+            return result
+
+        except Exception as e:
+            logger.error(
+                f"Failed to submit force refresh request for item {item_id}: {e}"
+            )
+
+            # Update sync status to failed
+            try:
+                doc_ref = firebase_client.db.collection("plaid_tokens").document(
+                    user_id
+                )
+                doc_ref.update(
+                    {
+                        f"items.{item_id}.transactions.transaction_sync_status": "failed",
+                        f"items.{item_id}.transactions.sync_error": str(e),
+                        f"items.{item_id}.transactions.last_sync_completed_at": firestore.SERVER_TIMESTAMP,
+                    }
+                )
+            except Exception as update_error:
+                logger.error(f"Failed to update sync status: {update_error}")
+
+            raise Exception(f"Failed to submit force refresh request: {e}")
+
+    def _execute_force_refresh_background(
+        self, user_id: str, item_id: str, access_token: str
+    ):
+        """
+        Execute the force refresh operation in the background.
+        This method deletes all existing transactions and performs a complete resync.
+        """
+        try:
+            logger.info(
+                f"Executing background force refresh for user {user_id}, item {item_id}"
+            )
+
+            # Step 1: Delete all existing transactions for this item
+            logger.info(f"Deleting all existing transactions for item {item_id}")
+            success = self._delete_all_item_transactions(user_id, item_id)
+
+            if not success:
+                raise Exception("Failed to delete existing transactions")
+
+            # Step 2: Reset transaction metadata in plaid_tokens
+            logger.info(f"Resetting transaction metadata for item {item_id}")
+            doc_ref = firebase_client.db.collection("plaid_tokens").document(user_id)
+            doc_ref.update(
+                {
+                    f"items.{item_id}.transactions.transactions_cursor": None,
+                    f"items.{item_id}.transactions.total_transactions_synced": 0,
+                    f"items.{item_id}.transactions.total_transactions_processed": 0,
+                    f"items.{item_id}.transactions.transactions_added": 0,
+                    f"items.{item_id}.transactions.transactions_modified": 0,
+                    f"items.{item_id}.transactions.transactions_removed": 0,
+                    f"items.{item_id}.transactions.transaction_sync_status": "force_refresh_syncing",
+                }
+            )
+
+            # Step 3: Perform complete resync using existing method
+            logger.info(f"Starting complete transaction resync for item {item_id}")
+            self.sync_all_transactions_for_item(user_id, item_id, access_token)
+
+            logger.info(
+                f"Background force refresh completed successfully for item {item_id}"
+            )
+
+        except Exception as e:
+            logger.error(
+                f"Background force refresh failed for item {item_id}: {e}",
+                exc_info=True,
+            )
+
+            # Update sync status to failed
+            try:
+                doc_ref = firebase_client.db.collection("plaid_tokens").document(
+                    user_id
+                )
+                doc_ref.update(
+                    {
+                        f"items.{item_id}.transactions.transaction_sync_status": "failed",
+                        f"items.{item_id}.transactions.sync_error": str(e),
+                        f"items.{item_id}.transactions.last_sync_completed_at": firestore.SERVER_TIMESTAMP,
+                    }
+                )
+            except Exception as update_error:
+                logger.error(
+                    f"Failed to update sync status after background error: {update_error}"
+                )
+
+    def _delete_all_item_transactions(self, user_id: str, item_id: str) -> bool:
+        """
+        Delete all transactions for a specific item from all transaction collections.
+
+        Args:
+            user_id: The user ID
+            item_id: The item ID whose transactions should be deleted
+
+        Returns:
+            True if deletion was successful, False otherwise
+        """
+        try:
+            logger.info(f"Deleting all transactions for user {user_id}, item {item_id}")
+
+            # Use the transaction_storage_service to delete transactions
+            from .transaction_storage_service import transaction_storage_service
+
+            success = transaction_storage_service.delete_item_transactions(
+                user_id, item_id
+            )
+
+            if success:
+                logger.info(f"Successfully deleted all transactions for item {item_id}")
+            else:
+                logger.error(f"Failed to delete transactions for item {item_id}")
+
+            return success
+
+        except Exception as e:
+            logger.error(f"Error deleting transactions for item {item_id}: {e}")
+            return False
+
     def _clean_and_normalize_for_firestore(self, data: Any) -> Any:
         """
         Recursively cleans and normalizes data to be compatible with Firestore.
