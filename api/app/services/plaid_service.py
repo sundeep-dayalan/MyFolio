@@ -125,47 +125,50 @@ class PlaidService:
         self.client = plaid_api.PlaidApi(api_client)
         self.environment = plaid_env
 
-    def create_link_token(self, user_id: str) -> str:
-        """Create a Plaid Link token for a user."""
+    def create_link_token(
+        self,
+        user_id: str,
+        products: list = None,
+        optional_products: list = None,
+        required_if_supported_products: list = None,
+        account_filters: dict = None,
+        transactions_days_requested: int = 730,
+    ) -> str:
+        """Create a Plaid Link token for a user, supporting any Plaid product."""
         try:
             logger.info(
                 f"Creating link token for user {user_id} in {self.environment} environment"
             )
 
-            # Create the basic request
+            # Build request params dynamically
             request_params = {
-                # "products": [Products("auth"), Products("transactions")],
-                "products": [Products("transactions")],
+                "products": [Products(p) for p in (products or ["transactions"])],
                 "client_name": settings.project_name,
                 "country_codes": [CountryCode("US")],
-                "transactions": {"days_requested": 730},
                 "language": "en",
                 "user": LinkTokenCreateRequestUser(client_user_id=user_id),
-                "account_filters": LinkTokenAccountFilters(
-                    depository=DepositoryFilter(
-                        account_subtypes=DepositoryAccountSubtypes(
-                            [
-                                DepositoryAccountSubtype("checking"),
-                                DepositoryAccountSubtype("savings"),
-                            ]
-                        )
-                    ),
-                    credit=CreditFilter(
-                        account_subtypes=CreditAccountSubtypes(
-                            [
-                                CreditAccountSubtype("credit card"),
-                            ]
-                        )
-                    ),
-                ),
             }
+            # Add transactions config if requested
+            if "transactions" in (products or ["transactions"]):
+                request_params["transactions"] = {
+                    "days_requested": transactions_days_requested
+                }
+            # Add optional/required_if_supported products if provided
+            if optional_products:
+                request_params["optional_products"] = optional_products
+            if required_if_supported_products:
+                request_params["required_if_supported_products"] = (
+                    required_if_supported_products
+                )
+            # Add account_filters if provided (or remove to allow all)
+            if account_filters:
+                request_params["account_filters"] = account_filters
 
-            logger.info(f"Plaid request_params {request_params}")
             # Only add webhook if it's explicitly set in settings
             if hasattr(settings, "plaid_webhook") and settings.plaid_webhook:
                 request_params["webhook"] = settings.plaid_webhook
-            logger.info(f"Plaid request_params {request_params}")
 
+            logger.info(f"Plaid request_params {request_params}")
             request = LinkTokenCreateRequest(**request_params)
             response = self.client.link_token_create(request)
 
