@@ -12,6 +12,8 @@ interface TransactionsHeaderProps {
   onRefreshBank: (bankName: string) => Promise<void>;
   isRefreshing: boolean;
   errorMessage?: string;
+  transactionType: 'added' | 'modified' | 'removed' | 'all';
+  onTransactionTypeChange: (type: 'added' | 'modified' | 'removed' | 'all') => void;
 }
 
 export const TransactionsHeader: React.FC<TransactionsHeaderProps> = ({
@@ -21,6 +23,8 @@ export const TransactionsHeader: React.FC<TransactionsHeaderProps> = ({
   onRefreshBank,
   isRefreshing,
   errorMessage,
+  transactionType,
+  onTransactionTypeChange,
 }) => {
   return (
     <div className="px-4 lg:px-6 space-y-4">
@@ -31,8 +35,40 @@ export const TransactionsHeader: React.FC<TransactionsHeaderProps> = ({
             View and manage your transaction history across all connected accounts
           </p>
         </div>
-        
+
         <div className="flex items-center space-x-2">
+          {/* Transaction Type Selector */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" className="justify-between min-w-[120px]">
+                {transactionType.charAt(0).toUpperCase() + transactionType.slice(1)}
+                <ChevronDown className="ml-2 h-4 w-4" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-[160px] p-0" align="end">
+              <div className="p-1">
+                {(['added', 'modified', 'removed', 'all'] as const).map((type) => (
+                  <button
+                    key={type}
+                    className={cn(
+                      'w-full flex items-center px-2 py-2 text-sm rounded-sm hover:bg-accent hover:text-accent-foreground',
+                      transactionType === type && 'bg-accent',
+                    )}
+                    onClick={() => onTransactionTypeChange(type)}
+                  >
+                    <Check
+                      className={cn(
+                        'mr-2 h-4 w-4',
+                        transactionType === type ? 'opacity-100' : 'opacity-0',
+                      )}
+                    />
+                    {type.charAt(0).toUpperCase() + type.slice(1)}
+                  </button>
+                ))}
+              </div>
+            </PopoverContent>
+          </Popover>
+
           {/* Bank Selector */}
           {availableBanks.length > 0 && (
             <Popover>
@@ -48,34 +84,31 @@ export const TransactionsHeader: React.FC<TransactionsHeaderProps> = ({
                   <button
                     className={cn(
                       'w-full flex items-center px-2 py-2 text-sm rounded-sm hover:bg-accent hover:text-accent-foreground',
-                      !activeBankName && 'bg-accent'
+                      !activeBankName && 'bg-accent',
                     )}
                     onClick={() => onBankChange(null)}
                   >
-                    <Check 
-                      className={cn(
-                        'mr-2 h-4 w-4',
-                        !activeBankName ? 'opacity-100' : 'opacity-0'
-                      )} 
+                    <Check
+                      className={cn('mr-2 h-4 w-4', !activeBankName ? 'opacity-100' : 'opacity-0')}
                     />
                     All Banks
                   </button>
-                  
+
                   {/* Individual Banks */}
                   {availableBanks.map((bank) => (
                     <button
                       key={bank}
                       className={cn(
                         'w-full flex items-center px-2 py-2 text-sm rounded-sm hover:bg-accent hover:text-accent-foreground',
-                        activeBankName === bank && 'bg-accent'
+                        activeBankName === bank && 'bg-accent',
                       )}
                       onClick={() => onBankChange(bank)}
                     >
-                      <Check 
+                      <Check
                         className={cn(
                           'mr-2 h-4 w-4',
-                          activeBankName === bank ? 'opacity-100' : 'opacity-0'
-                        )} 
+                          activeBankName === bank ? 'opacity-100' : 'opacity-0',
+                        )}
                       />
                       {bank}
                     </button>

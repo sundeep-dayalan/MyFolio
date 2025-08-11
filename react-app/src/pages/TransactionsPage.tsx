@@ -1,6 +1,10 @@
 import React, { useState, useContext, useMemo, useEffect } from 'react';
 import { AuthContext } from '../context/AuthContext';
-import { useAccountsQuery, useItemsQuery, useRefreshTransactionsMutation } from '../hooks/usePlaidApi';
+import {
+  useAccountsQuery,
+  useItemsQuery,
+  useRefreshTransactionsMutation,
+} from '../hooks/usePlaidApi';
 import type { AuthContextType } from '@/types/types';
 import { TransactionsHeader } from '@/components/custom/transactions/transactions-header';
 import { TransactionsEmptyState } from '@/components/custom/transactions/transactions-empty-state';
@@ -21,6 +25,9 @@ const TransactionsPage: React.FC = () => {
   // State for filtering and UI
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [selectedBank, setSelectedBank] = useState<string | null>(null);
+  const [transactionType, setTransactionType] = useState<'added' | 'modified' | 'removed' | 'all'>(
+    'added',
+  );
 
   // API calls for accounts and items
   const { data: accountsData, isLoading: accountsLoading } = useAccountsQuery();
@@ -33,7 +40,7 @@ const TransactionsPage: React.FC = () => {
   // Get unique institution names from accounts
   const availableBanks = useMemo(() => {
     const uniqueInstitutions = new Set<string>();
-    accounts.forEach(account => {
+    accounts.forEach((account) => {
       if (account.institution_name) {
         uniqueInstitutions.add(account.institution_name);
       }
@@ -44,7 +51,7 @@ const TransactionsPage: React.FC = () => {
   // Map institution name to item_id
   const institutionToItemMap = useMemo(() => {
     const map = new Map<string, string>();
-    items.forEach(item => {
+    items.forEach((item) => {
       if (item.institution_name && item.item_id) {
         map.set(item.institution_name, item.item_id);
       }
@@ -62,16 +69,20 @@ const TransactionsPage: React.FC = () => {
   // Initial request for the data table with item_id filter (more efficient than institution_name)
   const initialRequest: PaginatedTransactionsRequest = useMemo(() => {
     const itemId = selectedBank ? institutionToItemMap.get(selectedBank) : null;
-    return {
+    const request: PaginatedTransactionsRequest = {
       page: 1,
       pageSize: 20,
       sortBy: 'date',
-      sortOrder: 'desc',
+      sortOrder: 'desc' as const,
+      transactionType: transactionType,
       filters: {
         ...(itemId && { itemId: itemId }),
       },
     };
-  }, [selectedBank, institutionToItemMap]);
+
+    console.log('TransactionsPage: initialRequest changed', request);
+    return request;
+  }, [selectedBank, institutionToItemMap, transactionType]);
 
   const handleGoToAccounts = () => {
     window.location.href = '/accounts';
@@ -94,7 +105,9 @@ const TransactionsPage: React.FC = () => {
       await refreshTransactionsMutation.mutateAsync({ itemId });
       // The mutation will automatically invalidate the query cache
     } catch (error) {
-      setErrorMessage(`Failed to refresh transactions: ${error instanceof Error ? error.message : String(error)}`);
+      setErrorMessage(
+        `Failed to refresh transactions: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   };
 
@@ -111,6 +124,8 @@ const TransactionsPage: React.FC = () => {
               onRefreshBank={handleRefreshBank}
               isRefreshing={refreshTransactionsMutation.isPending}
               errorMessage={errorMessage}
+              transactionType={transactionType}
+              onTransactionTypeChange={setTransactionType}
             />
 
             {/* Show empty state only if we have no accounts */}
@@ -124,11 +139,7 @@ const TransactionsPage: React.FC = () => {
             {/* Main data table */}
             {accounts.length > 0 && selectedBank && (
               <div className="px-4 lg:px-6">
-                <TransactionsDataTable 
-                  columns={columns} 
-                  initialRequest={initialRequest}
-                  key={selectedBank} // Force re-render when bank changes
-                />
+                <TransactionsDataTable columns={columns} initialRequest={initialRequest} />
               </div>
             )}
           </div>

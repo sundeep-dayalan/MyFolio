@@ -15,36 +15,43 @@ class TransactionStorageService:
         self.collection_name = "transactions"
 
     def store_transactions_batch(
-        self, user_id: str, item_id: str, transactions: List[Dict[str, Any]]
+        self,
+        user_id: str,
+        item_id: str,
+        transactions: List[Dict[str, Any]],
+        transaction_type: str = "added",
     ) -> bool:
         """
-        Stores a batch of cleaned transaction data in a Firestore subcollection.
+        Stores a batch of transaction data in a Firestore subcollection organized by transaction type.
 
         Args:
             user_id: The ID of the user.
             item_id: The Plaid Item ID the transactions belong to.
             transactions: A list of cleaned & normalized transaction dictionaries.
+            transaction_type: The type of transactions ("added", "modified", or "removed")
 
         Returns:
             True if the batch write was successful, False otherwise.
         """
         if not transactions:
-            logger.info(f"No transactions to store for user {user_id}, item {item_id}.")
+            logger.info(
+                f"No {transaction_type} transactions to store for user {user_id}, item {item_id}."
+            )
             return True
 
         try:
             logger.info(
-                f"Storing batch of {len(transactions)} transactions for user {user_id}, item {item_id}"
+                f"Storing batch of {len(transactions)} {transaction_type} transactions for user {user_id}, item {item_id}"
             )
             batch = firebase_client.db.batch()
 
-            # The scalable path for storing transactions
+            # Separate path for each transaction type
             base_ref = (
                 firebase_client.db.collection(self.collection_name)
                 .document(user_id)
                 .collection("items")
                 .document(item_id)
-                .collection("data")
+                .collection(transaction_type)  # "added", "modified", or "removed"
             )
 
             for tx_data in transactions:
@@ -53,24 +60,49 @@ class TransactionStorageService:
                     logger.warning("Skipping transaction with no ID.")
                     continue
 
-                # Add user_id to transaction data for collection group queries
-                tx_data_with_user = {**tx_data, "user_id": user_id}
+                # Add user_id and type to transaction data
+                tx_data_with_metadata = {
+                    **tx_data,
+                    "user_id": user_id,
+                    "transaction_type": transaction_type,
+                    "sync_timestamp": firestore.SERVER_TIMESTAMP,
+                }
 
                 # Create a new document reference for each transaction within the batch
                 tx_ref = base_ref.document(transaction_id)
-                batch.set(tx_ref, tx_data_with_user)
+                batch.set(tx_ref, tx_data_with_metadata)
 
             # Commit all the writes in a single operation
             batch.commit()
-            logger.info(f"Successfully committed batch for item {item_id}")
+            logger.info(
+                f"Successfully committed {transaction_type} batch for item {item_id}"
+            )
             return True
 
         except Exception as e:
             logger.error(
-                f"Failed to store transaction data batch for user {user_id}, item {item_id}: {e}",
+                f"Failed to store {transaction_type} transaction data batch for user {user_id}, item {item_id}: {e}",
                 exc_info=True,
             )
             return False
+
+    def store_added_transactions_batch(
+        self, user_id: str, item_id: str, transactions: List[Dict[str, Any]]
+    ) -> bool:
+        """Store added transactions in the 'added' collection."""
+        return self.store_transactions_batch(user_id, item_id, transactions, "added")
+
+    def store_modified_transactions_batch(
+        self, user_id: str, item_id: str, transactions: List[Dict[str, Any]]
+    ) -> bool:
+        """Store modified transactions in the 'modified' collection."""
+        return self.store_transactions_batch(user_id, item_id, transactions, "modified")
+
+    def store_removed_transactions_batch(
+        self, user_id: str, item_id: str, transactions: List[Dict[str, Any]]
+    ) -> bool:
+        """Store removed transactions in the 'removed' collection."""
+        return self.store_transactions_batch(user_id, item_id, transactions, "removed")
 
     # The correct and final version of the deletion logic
 
@@ -282,9 +314,10 @@ class TransactionStorageService:
         sort_by: str = "date",
         sort_order: str = "desc",
         filters: Optional[Dict[str, Any]] = None,
+        transaction_type: str = "added",  # New parameter for transaction type
     ) -> Tuple[List[Dict[str, Any]], int, int, bool, bool]:
         """
-        Get transactions with pagination and filtering.
+        Get transactions with pagination and filtering from the new separated collections.
 
         Args:
             user_id: The ID of the user
@@ -293,13 +326,14 @@ class TransactionStorageService:
             sort_by: Field to sort by (date, amount, name, etc.)
             sort_order: "asc" or "desc"
             filters: Optional filters dict
+            transaction_type: Type of transactions to fetch ("added", "modified", "removed", "all")
 
         Returns:
             Tuple of (transactions, total_count, total_pages, has_next, has_previous)
         """
         try:
             logger.info(
-                f"Getting paginated transactions for user {user_id}, page {page}"
+                f"Getting paginated {transaction_type} transactions for user {user_id}, page {page}"
             )
 
             if not firebase_client.is_connected:
@@ -315,12 +349,16 @@ class TransactionStorageService:
 
             # Determine which items to query based on filters
             target_item_ids = []
-            
+
             if filters and filters.get("institution_name"):
                 # Filter by institution name - we need to get item IDs for this institution
-                target_item_ids = self._get_item_ids_by_institution(user_id, filters["institution_name"])
+                target_item_ids = self._get_item_ids_by_institution(
+                    user_id, filters["institution_name"]
+                )
                 if not target_item_ids:
-                    logger.info(f"No items found for institution: {filters['institution_name']}")
+                    logger.info(
+                        f"No items found for institution: {filters['institution_name']}"
+                    )
                     return [], 0, 0, False, False
             elif filters and filters.get("item_id"):
                 # Filter by specific item_id
@@ -334,34 +372,56 @@ class TransactionStorageService:
                 logger.info(f"No items found for user {user_id}")
                 return [], 0, 0, False, False
 
-            logger.info(f"Querying transactions from {len(target_item_ids)} items")
+            logger.info(
+                f"Querying {transaction_type} transactions from {len(target_item_ids)} items"
+            )
 
             # Get all transactions for the target items
             all_transactions = []
+
+            # Define which transaction types to query
+            transaction_types_to_query = []
+            if transaction_type == "all":
+                transaction_types_to_query = ["added", "modified", "removed"]
+            else:
+                transaction_types_to_query = [transaction_type]
+
             for item_id in target_item_ids:
-                # Get all transactions for this item
-                data_ref = items_ref.document(item_id).collection("data")
-                
-                # Apply account_id filter at the Firestore query level if provided
-                if filters and filters.get("account_id"):
-                    query = data_ref.where("account_id", "==", filters["account_id"])
-                    transactions = list(query.stream())
-                else:
-                    transactions = list(data_ref.stream())
+                for t_type in transaction_types_to_query:
+                    # Get transactions from the specific type collection
+                    data_ref = items_ref.document(item_id).collection(t_type)
 
-                for tx_doc in transactions:
-                    tx_data = tx_doc.to_dict()
-                    tx_data["id"] = tx_doc.id  # Add document ID
-                    tx_data["item_id"] = item_id  # Add item_id for reference
-                    all_transactions.append(tx_data)
+                    # Apply account_id filter at the Firestore query level if provided
+                    if filters and filters.get("account_id"):
+                        query = data_ref.where(
+                            "account_id", "==", filters["account_id"]
+                        )
+                        transactions = list(query.stream())
+                    else:
+                        transactions = list(data_ref.stream())
 
-            logger.info(f"Retrieved {len(all_transactions)} total transactions before filtering")
+                    for tx_doc in transactions:
+                        tx_data = tx_doc.to_dict()
+                        tx_data["id"] = tx_doc.id  # Add document ID
+                        tx_data["item_id"] = item_id  # Add item_id for reference
+                        tx_data["query_type"] = (
+                            t_type  # Add which collection this came from
+                        )
+                        all_transactions.append(tx_data)
+
+            logger.info(
+                f"Retrieved {len(all_transactions)} total transactions before filtering"
+            )
 
             # Apply remaining filters
-            all_transactions = self._apply_transaction_filters(all_transactions, filters)
+            all_transactions = self._apply_transaction_filters(
+                all_transactions, filters
+            )
 
             # Sort transactions
-            all_transactions = self._sort_transactions(all_transactions, sort_by, sort_order)
+            all_transactions = self._sort_transactions(
+                all_transactions, sort_by, sort_order
+            )
 
             # Calculate pagination
             total_count = len(all_transactions)
@@ -385,38 +445,47 @@ class TransactionStorageService:
             )
             return [], 0, 0, False, False
 
-    def _get_item_ids_by_institution(self, user_id: str, institution_name: str) -> List[str]:
+    def _get_item_ids_by_institution(
+        self, user_id: str, institution_name: str
+    ) -> List[str]:
         """
         Get item IDs that belong to a specific institution.
         This queries the access tokens to find items for the given institution.
         """
         try:
             from ..dependencies import get_plaid_service
+
             plaid_service = get_plaid_service()
-            
+
             # Get user's access tokens which contain institution information
             tokens = plaid_service.get_user_access_tokens(user_id)
-            
+
             # Filter tokens by institution name
             matching_item_ids = []
             for token in tokens:
                 if token.institution_name == institution_name:
                     matching_item_ids.append(token.item_id)
-                    
-            logger.info(f"Found {len(matching_item_ids)} items for institution '{institution_name}'")
+
+            logger.info(
+                f"Found {len(matching_item_ids)} items for institution '{institution_name}'"
+            )
             return matching_item_ids
-            
+
         except Exception as e:
-            logger.error(f"Failed to get item IDs for institution {institution_name}: {e}")
+            logger.error(
+                f"Failed to get item IDs for institution {institution_name}: {e}"
+            )
             return []
 
-    def _apply_transaction_filters(self, transactions: List[Dict[str, Any]], filters: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _apply_transaction_filters(
+        self, transactions: List[Dict[str, Any]], filters: Optional[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
         """Apply filters to transaction list (excluding item_id, account_id, and institution_name which are handled earlier)"""
         if not filters:
             return transactions
-            
+
         filtered_transactions = transactions
-        
+
         # Apply search term filter
         if filters.get("search_term"):
             search_term = filters["search_term"].lower()
@@ -425,33 +494,38 @@ class TransactionStorageService:
                 searchable_text = f"{tx.get('name', '')} {tx.get('merchant_name', '')} {tx.get('account_name', '')}".lower()
                 if search_term in searchable_text:
                     filtered_transactions.append(tx)
-        
+
         # Apply category filter
         if filters.get("category"):
             filtered_transactions = [
-                tx for tx in filtered_transactions
+                tx
+                for tx in filtered_transactions
                 if filters["category"] in tx.get("category", [])
             ]
-        
+
         # Apply date filters
         if filters.get("date_from"):
             filtered_transactions = [
-                tx for tx in filtered_transactions
+                tx
+                for tx in filtered_transactions
                 if tx.get("date", "") >= filters["date_from"]
             ]
-        
+
         if filters.get("date_to"):
             filtered_transactions = [
-                tx for tx in filtered_transactions
+                tx
+                for tx in filtered_transactions
                 if tx.get("date", "") <= filters["date_to"]
             ]
-            
+
         return filtered_transactions
 
-    def _sort_transactions(self, transactions: List[Dict[str, Any]], sort_by: str, sort_order: str) -> List[Dict[str, Any]]:
+    def _sort_transactions(
+        self, transactions: List[Dict[str, Any]], sort_by: str, sort_order: str
+    ) -> List[Dict[str, Any]]:
         """Sort transactions by the specified field and order"""
         reverse = sort_order.lower() == "desc"
-        
+
         if sort_by == "date":
             transactions.sort(key=lambda x: x.get("date", ""), reverse=reverse)
         elif sort_by == "amount":
@@ -459,10 +533,12 @@ class TransactionStorageService:
         elif sort_by == "name":
             transactions.sort(key=lambda x: x.get("name", "").lower(), reverse=reverse)
         elif sort_by == "account_name":
-            transactions.sort(key=lambda x: x.get("account_name", "").lower(), reverse=reverse)
+            transactions.sort(
+                key=lambda x: x.get("account_name", "").lower(), reverse=reverse
+            )
         else:
             transactions.sort(key=lambda x: x.get(sort_by, ""), reverse=reverse)
-            
+
         return transactions
 
     def get_user_transactions_count(self, user_id: str) -> int:

@@ -20,6 +20,7 @@ export interface PaginatedTransactionsRequest {
   pageSize: number;
   sortBy?: string;
   sortOrder?: 'asc' | 'desc';
+  transactionType?: 'added' | 'modified' | 'removed' | 'all'; // New field
   filters?: {
     accountId?: string;
     itemId?: string;
@@ -39,6 +40,7 @@ export interface PaginatedTransactionsResponse {
   totalPages: number;
   hasNextPage: boolean;
   hasPreviousPage: boolean;
+  transactionType: string; // New field to show which type was queried
 }
 
 export interface Transaction {
@@ -113,6 +115,9 @@ class FirestoreServiceClass {
       page: request.page.toString(),
       pageSize: request.pageSize.toString(),
     });
+
+    // Add transaction type parameter (default to 'added')
+    queryParams.append('transactionType', request.transactionType || 'added');
 
     if (request.sortBy) {
       queryParams.append('sortBy', request.sortBy);

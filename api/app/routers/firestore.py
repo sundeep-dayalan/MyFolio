@@ -5,6 +5,7 @@ Firestore-based transaction routes for direct database access.
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import Optional, Dict, Any
 from pydantic import BaseModel
+from firebase_admin import firestore
 from ..services.transaction_storage_service import transaction_storage_service
 from ..dependencies import get_current_user_id
 from ..utils.logger import get_logger
@@ -22,6 +23,7 @@ class PaginatedTransactionsResponse(BaseModel):
     totalPages: int
     hasNextPage: bool
     hasPreviousPage: bool
+    transactionType: str  # Added to show which type was queried
 
 
 @router.get("/transactions/paginated", response_model=PaginatedTransactionsResponse)
@@ -32,6 +34,11 @@ def get_transactions_paginated(
     ),
     sortBy: str = Query("date", description="Field to sort by"),
     sortOrder: str = Query("desc", regex="^(asc|desc)$", description="Sort order"),
+    transactionType: str = Query(
+        "added",
+        regex="^(added|modified|removed|all)$",
+        description="Type of transactions to fetch",
+    ),
     accountId: Optional[str] = Query(None, description="Filter by account ID"),
     itemId: Optional[str] = Query(None, description="Filter by item ID (bank)"),
     institutionName: Optional[str] = Query(
@@ -47,7 +54,9 @@ def get_transactions_paginated(
 ):
     """Get paginated transactions from Firestore with filtering and sorting."""
     try:
-        logger.info(f"Getting paginated transactions for user {user_id}, page {page}")
+        logger.info(
+            f"Getting paginated {transactionType} transactions for user {user_id}, page {page}"
+        )
 
         # Build filters dictionary
         filters = {}
@@ -66,7 +75,7 @@ def get_transactions_paginated(
         if searchTerm:
             filters["search_term"] = searchTerm
 
-        # Get paginated transactions
+        # Get paginated transactions with transaction type
         transactions, total_count, total_pages, has_next, has_previous = (
             transaction_storage_service.get_transactions_paginated(
                 user_id=user_id,
@@ -75,6 +84,7 @@ def get_transactions_paginated(
                 sort_by=sortBy,
                 sort_order=sortOrder,
                 filters=filters if filters else None,
+                transaction_type=transactionType,
             )
         )
 
@@ -86,6 +96,7 @@ def get_transactions_paginated(
             totalPages=total_pages,
             hasNextPage=has_next,
             hasPreviousPage=has_previous,
+            transactionType=transactionType,
         )
 
     except Exception as e:

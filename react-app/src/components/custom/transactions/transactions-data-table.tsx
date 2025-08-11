@@ -51,19 +51,23 @@ export function TransactionsDataTable({ columns, initialRequest }: DataTableProp
   const [globalFilter, setGlobalFilter] = React.useState('');
 
   // Create the request object for the API
-  const apiRequest: PaginatedTransactionsRequest = React.useMemo(
-    () => ({
+  const apiRequest: PaginatedTransactionsRequest = React.useMemo(() => {
+    const request: PaginatedTransactionsRequest = {
       page: pagination.pageIndex + 1, // Convert back to 1-based indexing for API
       pageSize: pagination.pageSize,
       sortBy: sorting.length > 0 ? sorting[0].id : undefined,
-      sortOrder: sorting.length > 0 ? (sorting[0].desc ? 'desc' : 'asc') : undefined,
+      sortOrder:
+        sorting.length > 0 ? (sorting[0].desc ? ('desc' as const) : ('asc' as const)) : undefined,
+      transactionType: initialRequest.transactionType, // Include transaction type
       filters: {
         searchTerm: globalFilter || undefined,
         ...initialRequest.filters, // Include any preset filters
       },
-    }),
-    [pagination, sorting, globalFilter, initialRequest.filters],
-  );
+    };
+
+    console.log('TransactionsDataTable: apiRequest changed', request);
+    return request;
+  }, [pagination, sorting, globalFilter, initialRequest.filters, initialRequest.transactionType]);
 
   // Fetch data using the API request
   const { data, isLoading, error } = useTransactionsPaginatedQuery(apiRequest);

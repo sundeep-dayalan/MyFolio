@@ -11,9 +11,14 @@ export const FIRESTORE_QUERY_KEYS = {
 } as const;
 
 export const useTransactionsPaginatedQuery = (request: PaginatedTransactionsRequest) => {
+  console.log('useTransactionsPaginatedQuery: request', request);
+
   return useQuery<PaginatedTransactionsResponse>({
     queryKey: [FIRESTORE_QUERY_KEYS.transactions, request],
-    queryFn: () => FirestoreService.getTransactionsPaginated(request),
+    queryFn: () => {
+      console.log('useTransactionsPaginatedQuery: making API call with', request);
+      return FirestoreService.getTransactionsPaginated(request);
+    },
     staleTime: 2 * 60 * 1000, // 2 minutes
     refetchOnMount: true,
     placeholderData: (previousData) => previousData, // Keep previous data while loading
