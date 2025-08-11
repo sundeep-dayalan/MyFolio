@@ -4,7 +4,8 @@ import {
   PlaidService,
   type PlaidItemsResponse,
   type PlaidTransactionsResponse,
-  type PlaidTransactionsByItemResponse,
+  type RefreshTransactionsResponse,
+  type ForceRefreshTransactionsResponse,
 } from '@/services/PlaidService';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
@@ -158,11 +159,25 @@ export const useTransactionsByAccountQuery = (
 export const useRefreshTransactionsMutation = () => {
   const queryClient = useQueryClient();
 
-  return useMutation<PlaidTransactionsByItemResponse, Error, { itemId: string; days?: number }>({
-    mutationFn: ({ itemId, days = 30 }) => PlaidService.refreshTransactions(itemId, days),
+  return useMutation<RefreshTransactionsResponse, Error, { itemId: string }>({
+    mutationFn: ({ itemId }) => PlaidService.refreshTransactions(itemId),
     onSuccess: () => {
       // Invalidate transactions queries to refetch with fresh data
       queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.transactions] });
+      // Also invalidate Firestore transactions queries
+      queryClient.invalidateQueries({ queryKey: ['firestore-transactions'] });
+    },
+    onError: () => {},
+  });
+};
+
+// Force Refresh Transactions Mutation
+export const useForceRefreshTransactionsMutation = () => {
+  return useMutation<ForceRefreshTransactionsResponse, Error, { itemId: string }>({
+    mutationFn: ({ itemId }) => PlaidService.forceRefreshTransactions(itemId),
+    onSuccess: () => {
+      // Note: Don't invalidate queries immediately since this is async processing
+      // The user will need to manually refresh later to see results
     },
     onError: () => {},
   });

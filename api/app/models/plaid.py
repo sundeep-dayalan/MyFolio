@@ -82,6 +82,7 @@ class PlaidAccountWithBalance(BaseModel):
     balances: PlaidBalance
     institution_name: Optional[str] = None
     institution_id: Optional[str] = None
+    logo: Optional[str] = None  # Institution logo URL
 
     class Config:
         from_attributes = True

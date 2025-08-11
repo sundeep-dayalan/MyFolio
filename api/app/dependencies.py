@@ -41,24 +41,25 @@ async def get_current_user_id(
     auth_service: AuthService = Depends(get_auth_service),
 ) -> str:
     """
-    Get current user ID from authentication token.
+    Get current user ID from authentication token or session.
     """
-    if not credentials:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication credentials required",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    # First try to get from Authorization header (Bearer token)
+    if credentials:
+        user = await auth_service.verify_access_token(credentials.credentials)
+        if user:
+            return user.id
 
-    user = await auth_service.verify_access_token(credentials.credentials)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    # Fallback to session-based authentication
+    session = request.session
+    if "user_id" in session:
+        return session["user_id"]
 
-    return user.id
+    # If neither method works, raise authentication error
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Authentication credentials required",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
 
 
 async def get_current_user(

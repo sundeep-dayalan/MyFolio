@@ -1,28 +1,18 @@
-import React, { useState, useEffect, useContext } from 'react';
-import { Check, ChevronsUpDown } from 'lucide-react';
+import React, { useState, useContext, useMemo, useEffect } from 'react';
 import { AuthContext } from '../context/AuthContext';
 import {
-  useTransactionsQuery,
-  useRefreshTransactionsMutation,
   useAccountsQuery,
   useItemsQuery,
+  useRefreshTransactionsMutation,
+  useForceRefreshTransactionsMutation,
 } from '../hooks/usePlaidApi';
 import type { AuthContextType } from '@/types/types';
-import type { PlaidTransaction } from '@/services/PlaidService';
 import { TransactionsHeader } from '@/components/custom/transactions/transactions-header';
-import { TransactionsAccountTabs } from '@/components/custom/transactions/transactions-account-tabs';
 import { TransactionsEmptyState } from '@/components/custom/transactions/transactions-empty-state';
-import { cn } from '@/lib/utils';
-import { Button } from '@/components/ui/button';
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from '@/components/ui/command';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { toast } from 'sonner';
+import { TransactionsDataTable } from '@/components/custom/transactions/transactions-data-table';
+import { columns } from '@/components/custom/transactions/transactions-columns';
+import type { PaginatedTransactionsRequest } from '@/services/FirestoreService';
 
 const TransactionsPage: React.FC = () => {
   const auth = useContext(AuthContext) as AuthContextType;
@@ -34,255 +24,191 @@ const TransactionsPage: React.FC = () => {
     return null;
   }
 
-  // State
-  const [days] = useState(30);
-  const [activeBankTab, setActiveBankTab] = useState<string | null>(null);
-  const [activeAccountTabs, setActiveAccountTabs] = useState<{ [bankName: string]: string }>({});
+  // State for filtering and UI
   const [errorMessage, setErrorMessage] = useState<string>('');
+  const [selectedBank, setSelectedBank] = useState<string | null>(null);
+  const [transactionType, setTransactionType] = useState<'added' | 'modified' | 'removed' | 'all'>(
+    'added',
+  );
 
-  // API calls
-  const {
-    data: transactionsData,
-    isLoading: transactionsLoading,
-    error: transactionsError,
-  } = useTransactionsQuery(days);
-  const { data: accountsData } = useAccountsQuery();
-  const { data: itemsData } = useItemsQuery();
+  // API calls for accounts and items
+  const { data: accountsData, isLoading: accountsLoading } = useAccountsQuery();
+  const { data: itemsData, isLoading: itemsLoading } = useItemsQuery();
   const refreshTransactionsMutation = useRefreshTransactionsMutation();
+  const forceRefreshTransactionsMutation = useForceRefreshTransactionsMutation();
 
-  const transactions = transactionsData?.transactions || [];
   const accounts = accountsData?.accounts || [];
   const items = itemsData?.items || [];
 
-  // Group transactions by bank and then by account
-  const groupTransactionsByBankAndAccount = () => {
-    const grouped: { [bankName: string]: { [accountId: string]: PlaidTransaction[] } } = {};
-
-    transactions.forEach((transaction) => {
-      const bankName = transaction.institution_name || 'Unknown Bank';
-      const accountId = transaction.account_id;
-
-      if (!grouped[bankName]) {
-        grouped[bankName] = {};
-      }
-      if (!grouped[bankName][accountId]) {
-        grouped[bankName][accountId] = [];
-      }
-      grouped[bankName][accountId].push(transaction);
-    });
-
-    return grouped;
-  };
-
-  // Group accounts by bank
-  const groupAccountsByBank = () => {
-    const grouped: { [bankName: string]: typeof accounts } = {};
+  // Get unique institution names from accounts
+  const availableBanks = useMemo(() => {
+    const uniqueInstitutions = new Set<string>();
     accounts.forEach((account) => {
-      const bankName = account.institution_name || 'Unknown Bank';
-      if (!grouped[bankName]) {
-        grouped[bankName] = [];
-      }
-      grouped[bankName].push(account);
-    });
-    return grouped;
-  };
-
-  const transactionsByBankAndAccount = groupTransactionsByBankAndAccount();
-  const accountsByBank = groupAccountsByBank();
-  const bankNames = Object.keys(transactionsByBankAndAccount);
-
-  // Set initial active tab
-  useEffect(() => {
-    if (bankNames.length > 0 && !activeBankTab) {
-      setActiveBankTab(bankNames[0]);
-    }
-  }, [bankNames, activeBankTab]);
-
-  // Set initial account tab for each bank
-  useEffect(() => {
-    const newActiveAccountTabs = { ...activeAccountTabs };
-    let hasChanges = false;
-
-    bankNames.forEach((bankName) => {
-      if (!newActiveAccountTabs[bankName]) {
-        const bankAccounts = accountsByBank[bankName] || [];
-        if (bankAccounts.length > 0) {
-          newActiveAccountTabs[bankName] = bankAccounts[0].account_id;
-          hasChanges = true;
-        }
+      if (account.institution_name) {
+        uniqueInstitutions.add(account.institution_name);
       }
     });
+    return Array.from(uniqueInstitutions).sort();
+  }, [accounts]);
 
-    if (hasChanges) {
-      setActiveAccountTabs(newActiveAccountTabs);
-    }
-  }, [bankNames, accountsByBank, activeAccountTabs]);
-
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 2,
-    }).format(Math.abs(amount));
-  };
-
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
+  // Map institution name to item_id
+  const institutionToItemMap = useMemo(() => {
+    const map = new Map<string, string>();
+    items.forEach((item) => {
+      if (item.institution_name && item.item_id) {
+        map.set(item.institution_name, item.item_id);
+      }
     });
-  };
+    return map;
+  }, [items]);
 
-  const getCategoryIcon = (categories: string[]) => {
-    const category = categories[0]?.toLowerCase() || '';
-    if (category.includes('food')) return '🍕';
-    if (category.includes('transfer')) return '🔄';
-    if (category.includes('payment')) return '💳';
-    if (category.includes('deposit')) return '💰';
-    if (category.includes('gas') || category.includes('automotive')) return '⛽';
-    if (category.includes('shopping') || category.includes('general merchandise')) return '🛍️';
-    if (category.includes('entertainment')) return '🎬';
-    if (category.includes('healthcare')) return '🏥';
-    if (category.includes('travel')) return '✈️';
-    if (category.includes('bills') || category.includes('utilities')) return '📋';
-    return '💼';
-  };
+  // Auto-select first bank if none selected and banks are available
+  useEffect(() => {
+    if (!selectedBank && availableBanks.length > 0 && !accountsLoading && !itemsLoading) {
+      setSelectedBank(availableBanks[0]);
+    }
+  }, [availableBanks, selectedBank, accountsLoading, itemsLoading]);
 
-  const getTransactionTypeColor = (amount: number) => {
-    return amount > 0 ? 'text-red-600' : 'text-green-600';
-  };
+  // Initial request for the data table with item_id filter (more efficient than institution_name)
+  const initialRequest: PaginatedTransactionsRequest = useMemo(() => {
+    const itemId = selectedBank ? institutionToItemMap.get(selectedBank) : null;
+    const request: PaginatedTransactionsRequest = {
+      page: 1,
+      pageSize: 20,
+      sortBy: 'date',
+      sortOrder: 'desc' as const,
+      transactionType: transactionType,
+      filters: {
+        ...(itemId && { itemId: itemId }),
+      },
+    };
 
+    return request;
+  }, [selectedBank, institutionToItemMap, transactionType]);
   const handleGoToAccounts = () => {
     window.location.href = '/accounts';
   };
 
-  const handleRefresh = async (bankName: string) => {
-    const item = items.find((item) => item.institution_name === bankName);
-    if (item) {
-      try {
-        setErrorMessage('');
-        await refreshTransactionsMutation.mutateAsync({ itemId: item.item_id, days });
-      } catch (error) {
-        console.error('Failed to refresh transactions for bank:', bankName, error);
-        setErrorMessage(`Failed to refresh transactions for ${bankName}. Please try again.`);
+  const handleBankChange = (bankName: string | null) => {
+    setSelectedBank(bankName);
+    setErrorMessage(''); // Clear any previous errors
+  };
+
+  const handleRefreshBank = async (bankName: string) => {
+    const itemId = institutionToItemMap.get(bankName);
+    if (!itemId) {
+      setErrorMessage(`Could not find item ID for ${bankName}`);
+      return;
+    }
+
+    try {
+      setErrorMessage('');
+      const result = await refreshTransactionsMutation.mutateAsync({ itemId });
+
+      // Show success toast with transaction counts
+      if (result.success) {
+        if (result.total_processed === 0) {
+          toast.success(`No recent transactions found for ${bankName}`, {
+            description: 'Your account is up to date',
+          });
+        } else {
+          // Create detailed description with counts
+          const details = [];
+          if (result.transactions_added > 0) {
+            details.push(`${result.transactions_added} added`);
+          }
+          if (result.transactions_modified > 0) {
+            details.push(`${result.transactions_modified} updated`);
+          }
+          if (result.transactions_removed > 0) {
+            details.push(`${result.transactions_removed} removed`);
+          }
+
+          toast.success(result.message || 'Transactions updated successfully!', {
+            description: `${bankName}: ${details.join(', ')}`,
+            duration: 5000, // Show longer for transaction updates
+          });
+        }
       }
+
+      // The mutation will automatically invalidate the query cache
+    } catch (error) {
+      setErrorMessage(
+        `Failed to refresh transactions: ${error instanceof Error ? error.message : String(error)}`,
+      );
+
+      toast.error('Failed to refresh transactions', {
+        description: error instanceof Error ? error.message : String(error),
+      });
     }
   };
 
-  const getAccountName = (accountId: string) => {
-    const account = accounts.find((acc) => acc.account_id === accountId);
-    return account?.name || 'Unknown Account';
+  const handleForceRefreshBank = async (bankName: string) => {
+    const itemId = institutionToItemMap.get(bankName);
+    if (!itemId) {
+      setErrorMessage(`Could not find item ID for ${bankName}`);
+      return;
+    }
+
+    try {
+      setErrorMessage('');
+      const result = await forceRefreshTransactionsMutation.mutateAsync({ itemId });
+
+      // Show success toast for async operation
+      if (result.success && result.async_operation) {
+        toast.success(`Resync transactions request submitted for ${bankName}`, {
+          description:
+            'Check back later for updated transactions. This process may take a few minutes.',
+          duration: 7000, // Show longer for async operations
+        });
+      }
+
+      // Note: Don't invalidate queries here since processing is async
+    } catch (error) {
+      setErrorMessage(
+        `Failed to submit force refresh request: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+
+      toast.error('Failed to submit force refresh request', {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    }
   };
 
-  // Bank Selector Component
-  const BankSelector = () => {
-    const [open, setOpen] = useState(false);
-
-    return (
-      <div className="w-full max-w-sm">
-        <Popover open={open} onOpenChange={setOpen}>
-          <PopoverTrigger asChild>
-            <Button
-              variant="outline"
-              role="combobox"
-              aria-expanded={open}
-              className="w-full justify-between"
-            >
-              {activeBankTab ? bankNames.find((bank) => bank === activeBankTab) : 'Select bank...'}
-              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent className="w-full p-0">
-            <Command>
-              <CommandInput placeholder="Search bank..." className="h-9" />
-              <CommandList>
-                <CommandEmpty>No bank found.</CommandEmpty>
-                <CommandGroup>
-                  {bankNames.map((bankName) => (
-                    <CommandItem
-                      key={bankName}
-                      value={bankName}
-                      onSelect={(currentValue) => {
-                        const selectedBank = bankNames.find(
-                          (bank) => bank.toLowerCase() === currentValue.toLowerCase(),
-                        );
-                        setActiveBankTab(selectedBank || currentValue);
-                        setOpen(false);
-                      }}
-                    >
-                      {bankName}
-                      <Check
-                        className={cn(
-                          'ml-auto h-4 w-4',
-                          activeBankTab === bankName ? 'opacity-100' : 'opacity-0',
-                        )}
-                      />
-                    </CommandItem>
-                  ))}
-                </CommandGroup>
-              </CommandList>
-            </Command>
-          </PopoverContent>
-        </Popover>
-      </div>
-    );
-  };
-
-  // const getAccountType = (accountId: string) => {
-  //   const account = accounts.find((acc) => acc.account_id === accountId);
-  //   return account?.type || '';
-  // };
-
-  // Main render following HomePage pattern
+  // Main render with new data table
   return (
     <>
       <div className="flex flex-1 flex-col">
         <div className="@container/main flex flex-1 flex-col gap-2">
           <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6">
             <TransactionsHeader
-              activeBankName={activeBankTab}
-              onRefreshBank={handleRefresh}
+              activeBankName={selectedBank}
+              availableBanks={availableBanks}
+              onBankChange={handleBankChange}
+              onRefreshBank={handleRefreshBank}
               isRefreshing={refreshTransactionsMutation.isPending}
+              onForceRefreshBank={handleForceRefreshBank}
+              isForceRefreshing={forceRefreshTransactionsMutation.isPending}
               errorMessage={errorMessage}
+              transactionType={transactionType}
+              onTransactionTypeChange={setTransactionType}
             />
 
+            {/* Show empty state only if we have no accounts */}
             <TransactionsEmptyState
-              isLoading={transactionsLoading}
-              hasError={!!transactionsError}
-              hasTransactions={bankNames.length > 0}
+              isLoading={accountsLoading || itemsLoading}
+              hasError={!!errorMessage}
+              hasTransactions={accounts.length > 0}
               onGoToAccounts={handleGoToAccounts}
             />
 
-            {bankNames.length > 0 && (
-              <>
-                <div className="px-4 lg:px-6">
-                  <div className="flex flex-col gap-2">
-                    <label className="text-sm font-medium">Select Bank:</label>
-                    <BankSelector />
-                  </div>
-                </div>
-
-                {activeBankTab && (
-                  <TransactionsAccountTabs
-                    activeBankName={activeBankTab}
-                    accountsByBank={accountsByBank}
-                    activeAccountTabs={activeAccountTabs}
-                    transactionsByBankAndAccount={transactionsByBankAndAccount}
-                    onAccountTabChange={(bankName, accountId) =>
-                      setActiveAccountTabs((prev) => ({
-                        ...prev,
-                        [bankName]: accountId,
-                      }))
-                    }
-                    getAccountName={getAccountName}
-                    formatCurrency={formatCurrency}
-                    formatDate={formatDate}
-                    getCategoryIcon={getCategoryIcon}
-                    getTransactionTypeColor={getTransactionTypeColor}
-                  />
-                )}
-              </>
+            {/* Main data table */}
+            {accounts.length > 0 && selectedBank && (
+              <div className="px-4 lg:px-6">
+                <TransactionsDataTable columns={columns} initialRequest={initialRequest} />
+              </div>
             )}
           </div>
         </div>
