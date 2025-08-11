@@ -1,9 +1,14 @@
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Check, ChevronDown } from 'lucide-react';
 import { IconRefresh, IconAlertTriangle } from '@tabler/icons-react';
+import { cn } from '@/lib/utils';
 
 interface TransactionsHeaderProps {
   activeBankName: string | null;
+  availableBanks: string[];
+  onBankChange: (bankName: string | null) => void;
   onRefreshBank: (bankName: string) => Promise<void>;
   isRefreshing: boolean;
   errorMessage?: string;
@@ -11,6 +16,8 @@ interface TransactionsHeaderProps {
 
 export const TransactionsHeader: React.FC<TransactionsHeaderProps> = ({
   activeBankName,
+  availableBanks,
+  onBankChange,
   onRefreshBank,
   isRefreshing,
   errorMessage,
@@ -24,8 +31,62 @@ export const TransactionsHeader: React.FC<TransactionsHeaderProps> = ({
             View and manage your transaction history across all connected accounts
           </p>
         </div>
-        {activeBankName && (
-          <div className="flex items-center space-x-2">
+        
+        <div className="flex items-center space-x-2">
+          {/* Bank Selector */}
+          {availableBanks.length > 0 && (
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" size="sm" className="justify-between min-w-[160px]">
+                  {activeBankName || 'Select Bank'}
+                  <ChevronDown className="ml-2 h-4 w-4" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[200px] p-0" align="end">
+                <div className="p-1">
+                  {/* Option for All Banks */}
+                  <button
+                    className={cn(
+                      'w-full flex items-center px-2 py-2 text-sm rounded-sm hover:bg-accent hover:text-accent-foreground',
+                      !activeBankName && 'bg-accent'
+                    )}
+                    onClick={() => onBankChange(null)}
+                  >
+                    <Check 
+                      className={cn(
+                        'mr-2 h-4 w-4',
+                        !activeBankName ? 'opacity-100' : 'opacity-0'
+                      )} 
+                    />
+                    All Banks
+                  </button>
+                  
+                  {/* Individual Banks */}
+                  {availableBanks.map((bank) => (
+                    <button
+                      key={bank}
+                      className={cn(
+                        'w-full flex items-center px-2 py-2 text-sm rounded-sm hover:bg-accent hover:text-accent-foreground',
+                        activeBankName === bank && 'bg-accent'
+                      )}
+                      onClick={() => onBankChange(bank)}
+                    >
+                      <Check 
+                        className={cn(
+                          'mr-2 h-4 w-4',
+                          activeBankName === bank ? 'opacity-100' : 'opacity-0'
+                        )} 
+                      />
+                      {bank}
+                    </button>
+                  ))}
+                </div>
+              </PopoverContent>
+            </Popover>
+          )}
+
+          {/* Refresh Button */}
+          {activeBankName && (
             <Button
               onClick={() => onRefreshBank(activeBankName)}
               disabled={isRefreshing}
@@ -39,8 +100,8 @@ export const TransactionsHeader: React.FC<TransactionsHeaderProps> = ({
               )}
               Refresh {activeBankName}
             </Button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {errorMessage && (

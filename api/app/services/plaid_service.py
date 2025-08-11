@@ -384,27 +384,19 @@ class PlaidService:
                     # Decrypt the access token (tokens are always encrypted in Firestore)
                     decrypted_token = TokenEncryption.decrypt_token(token.access_token)
 
-                    # If token doesn't have institution info, fetch it now
-                    institution_name = token.institution_name
-                    institution_id = token.institution_id
+                    # Get institution info (always fetch to ensure we have logo)
+                    institution_info = self._get_institution_info(decrypted_token)
+                    institution_name = institution_info.get("name") or token.institution_name
+                    institution_id = institution_info.get("institution_id") or token.institution_id
+                    institution_logo = institution_info.get("logo")
 
-                    if not institution_name or not institution_id:
-                        logger.info(
-                            f"Fetching missing institution info for token {token.item_id}"
-                        )
-                        institution_info = self._get_institution_info(decrypted_token)
-                        institution_name = institution_info.get("name")
-                        institution_id = institution_info.get("institution_id")
-
-                        # Update the token in database with institution info
-                        if institution_name:
-                            self._update_token_institution_info(
-                                token.item_id, institution_info
-                            )
+                    # Update the token in database with latest institution info if needed
+                    if institution_name and (not token.institution_name or not institution_logo):
+                        self._update_token_institution_info(token.item_id, institution_info)
 
                     # Get accounts for this token
                     accounts = self._get_balance_for_token(
-                        decrypted_token, institution_name, institution_id
+                        decrypted_token, institution_name, institution_id, institution_logo
                     )
                     logger.info(f"Token {i+1} returned {len(accounts)} accounts")
 
@@ -564,6 +556,7 @@ class PlaidService:
         access_token: str,
         institution_name: str = None,
         institution_id: str = None,
+        institution_logo: str = None,
     ) -> List[PlaidAccountWithBalance]:
         """Retrieve account balances for a specific access token."""
         try:
@@ -612,6 +605,7 @@ class PlaidService:
                     balances=balance,
                     institution_name=institution_name,
                     institution_id=institution_id,
+                    logo=institution_logo,
                 )
 
                 accounts.append(account_with_balance)
@@ -979,10 +973,12 @@ class PlaidService:
 
             # Clean up transaction data for this specific item
             try:
-                logger.info(
-                    f"Cleaning up transaction data for unlinked item {item_id}"
+                logger.info(f"Cleaning up transaction data for unlinked item {item_id}")
+                transaction_cleanup_success = (
+                    transaction_storage_service.delete_item_transactions(
+                        user_id, item_id
+                    )
                 )
-                transaction_cleanup_success = transaction_storage_service.delete_item_transactions(user_id, item_id)
                 if transaction_cleanup_success:
                     logger.info(
                         f"Successfully cleaned up transaction data for item {item_id}"
@@ -1076,20 +1072,24 @@ class PlaidService:
                     logger.info(
                         f"Cleaning up all data for user {user_id} after revoking all {revoked_count} tokens"
                     )
-                    
+
                     # Delete transactions first (while we still have access to item IDs from items_map)
                     logger.info(f"Deleting transactions for {len(items_map)} items")
                     for item_id in items_map.keys():
                         try:
-                            transaction_storage_service.delete_item_transactions(user_id, item_id)
+                            transaction_storage_service.delete_item_transactions(
+                                user_id, item_id
+                            )
                             logger.info(f"Deleted transactions for item {item_id}")
                         except Exception as tx_error:
-                            logger.error(f"Failed to delete transactions for item {item_id}: {tx_error}")
+                            logger.error(
+                                f"Failed to delete transactions for item {item_id}: {tx_error}"
+                            )
                             # Continue with other items
-                    
+
                     # Clear account data
                     account_storage_service.clear_data(user_id)
-                    
+
                     logger.info(f"Successfully cleaned up all data for user {user_id}")
 
                 except Exception as cleanup_error:
@@ -1099,9 +1099,7 @@ class PlaidService:
                     # Don't fail the entire operation if cleanup fails
 
                 # Finally, delete the plaid_tokens document
-                logger.info(
-                    f"Deleting plaid_tokens document for user {user_id}"
-                )
+                logger.info(f"Deleting plaid_tokens document for user {user_id}")
                 doc_ref.delete()
 
             logger.info(f"Revoked {revoked_count} tokens for user {user_id}")
@@ -1455,19 +1453,22 @@ class PlaidService:
 
             # Sort transactions by date (most recent first)
             transactions.sort(key=lambda x: x.get("date", ""), reverse=True)
+            
+            # Enrich transactions with account data
+            enriched_transactions = self._enrich_transactions_with_account_data(user_id, transactions)
 
             # Update token last used
             self._update_token_last_used(item_id)
 
             result = {
-                "transactions": transactions,
-                "transaction_count": len(transactions),
+                "transactions": enriched_transactions,
+                "transaction_count": len(enriched_transactions),
                 "institution_name": target_token.institution_name,
                 "item_id": item_id,
             }
 
             logger.info(
-                f"Successfully refreshed {len(transactions)} transactions for item {item_id}"
+                f"Successfully refreshed {len(enriched_transactions)} transactions for item {item_id}"
             )
             return result
 
@@ -1507,6 +1508,69 @@ class PlaidService:
         # Return all other compatible types (str, int, float, bool)
         return data
 
+    def _enrich_transactions_with_account_data(self, user_id: str, transactions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Enrich transactions with account names and institution information.
+        
+        Args:
+            user_id: User ID to get account data for
+            transactions: List of transaction dictionaries
+            
+        Returns:
+            List of enriched transaction dictionaries
+        """
+        try:
+            # Get stored account data for the user
+            stored_account_data = account_storage_service.get_stored_account_data(user_id)
+            if not stored_account_data:
+                logger.warning(f"No stored account data found for user {user_id}, cannot enrich transactions")
+                return transactions
+                
+            accounts = stored_account_data.get("accounts", [])
+            if not accounts:
+                logger.warning(f"No accounts found in stored data for user {user_id}")
+                return transactions
+            
+            # Create lookup maps for account_id -> account_name and account_id -> institution data
+            account_lookup = {}
+            for account in accounts:
+                account_id = account.get("account_id")
+                if account_id:
+                    account_lookup[account_id] = {
+                        "account_name": account.get("name", "Unknown Account"),
+                        "institution_name": account.get("institution_name", "Unknown Institution"),
+                        "logo_url": account.get("logo", None)
+                    }
+            
+            logger.info(f"Created account lookup for {len(account_lookup)} accounts for user {user_id}")
+            
+            # Enrich each transaction
+            enriched_transactions = []
+            for transaction in transactions:
+                enriched_transaction = transaction.copy()
+                account_id = transaction.get("account_id")
+                
+                if account_id and account_id in account_lookup:
+                    account_info = account_lookup[account_id]
+                    enriched_transaction["account_name"] = account_info["account_name"]
+                    enriched_transaction["institution_name"] = account_info["institution_name"]
+                    if account_info["logo_url"]:
+                        enriched_transaction["logo_url"] = account_info["logo_url"]
+                else:
+                    # Add default values if account not found
+                    enriched_transaction["account_name"] = "Unknown Account"
+                    enriched_transaction["institution_name"] = "Unknown Institution"
+                    
+                enriched_transactions.append(enriched_transaction)
+            
+            logger.info(f"Enriched {len(enriched_transactions)} transactions with account data")
+            return enriched_transactions
+            
+        except Exception as e:
+            logger.error(f"Failed to enrich transactions with account data: {e}")
+            # Return original transactions if enrichment fails
+            return transactions
+
     # The main sync function
     def sync_all_transactions_for_item(
         self, user_id: str, item_id: str, access_token: str
@@ -1526,7 +1590,11 @@ class PlaidService:
             total_transactions_fetched = 0
 
             while has_more:
-                request_args = {"access_token": decrypted_token, "count": 500}
+                request_args = {
+                    "access_token": decrypted_token,
+                    "count": 500,
+                    "options": {"days_requested": 730},
+                }
                 if cursor:
                     request_args["cursor"] = cursor
 
@@ -1545,12 +1613,17 @@ class PlaidService:
                         for tx in added_transactions
                     ]
 
-                    # 2. Delegate the database write operation to the storage service
-                    success = transaction_storage_service.store_transactions_batch(
-                        user_id, item_id, cleaned_transactions
+                    # 2. Enrich transactions with account and institution names
+                    enriched_transactions = self._enrich_transactions_with_account_data(
+                        user_id, cleaned_transactions
                     )
 
-                    # 3. Handle the result
+                    # 3. Delegate the database write operation to the storage service
+                    success = transaction_storage_service.store_transactions_batch(
+                        user_id, item_id, enriched_transactions
+                    )
+
+                    # 4. Handle the result
                     if success:
                         total_transactions_fetched += len(added_transactions)
                     else:
