@@ -142,15 +142,23 @@ class TransactionStorageService:
                 item_id = item_doc.id
                 logger.info(f"Deleting all data for item {item_id}")
 
-                # Delete all transactions in the data subcollection
-                data_ref = item_doc.reference.collection("data")
-                deleted_count = self._delete_collection_in_batches(data_ref)
-                deleted_transactions += deleted_count
+                # Delete all transaction type collections: added, modified, removed
+                transaction_types = ["added", "modified", "removed"]
+                item_deleted_count = 0
+
+                for transaction_type in transaction_types:
+                    type_ref = item_doc.reference.collection(transaction_type)
+                    type_deleted_count = self._delete_collection_in_batches(type_ref)
+                    item_deleted_count += type_deleted_count
+
+                deleted_transactions += item_deleted_count
 
                 # Delete the item document itself
                 item_doc.reference.delete()
                 deleted_items += 1
-                logger.info(f"Deleted item {item_id} with {deleted_count} transactions")
+                logger.info(
+                    f"Deleted item {item_id} with {item_deleted_count} transactions"
+                )
 
             # Delete the user document itself (if it exists)
             if user_doc.exists:
@@ -195,17 +203,28 @@ class TransactionStorageService:
                 .document(item_id)
             )
 
-            # Don't check if item document exists - subcollections can exist without parent documents
-            # Instead, try to delete the 'data' subcollection directly
-            data_ref = item_ref.collection("data")
+            # Delete all transaction type collections: added, modified, removed
+            transaction_types = ["added", "modified", "removed"]
+            total_deleted = 0
 
-            # Check if there are any documents in the data collection
-            data_docs = list(data_ref.limit(1).stream())
-            if not data_docs:
+            for transaction_type in transaction_types:
+                type_ref = item_ref.collection(transaction_type)
+
+                # Check if there are any documents in this transaction type collection
+                type_docs = list(type_ref.limit(1).stream())
+                if type_docs:
+                    logger.info(
+                        f"Deleting {transaction_type} transactions for item {item_id}"
+                    )
+                    deleted_count = self._delete_collection_in_batches(type_ref)
+                    total_deleted += deleted_count
+                    logger.info(
+                        f"Deleted {deleted_count} {transaction_type} transactions"
+                    )
+
+            if total_deleted == 0:
                 logger.info(f"No transaction data found for item {item_id}")
                 return True
-
-            self._delete_collection_in_batches(data_ref)
 
             # Delete the item document itself (if it exists)
             if item_ref.get().exists:
