@@ -18,6 +18,17 @@ class ExchangeTokenRequest(BaseModel):
     public_token: str
 
 
+class RefreshTransactionsResponse(BaseModel):
+    success: bool
+    transactions_added: int
+    transactions_modified: int
+    transactions_removed: int
+    total_processed: int
+    item_id: str
+    institution_name: str
+    message: str
+
+
 def get_plaid_service() -> PlaidService:
     return PlaidService()
 
@@ -195,16 +206,20 @@ def get_transactions_by_account(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.post("/transactions/refresh/{item_id}")
+@router.post(
+    "/transactions/refresh/{item_id}", response_model=RefreshTransactionsResponse
+)
 def refresh_transactions(
     item_id: str,
-    days: int = 30,
     user_id: str = Depends(get_current_user_id),
     plaid_service: PlaidService = Depends(get_plaid_service),
 ):
-    """Refresh transactions for a specific item/bank."""
+    """
+    Refresh transactions for a specific item/bank using sync API.
+    Fetches only new transactions since the last sync.
+    """
     try:
-        result = plaid_service.refresh_transactions(user_id, item_id, days=days)
+        result = plaid_service.refresh_transactions(user_id, item_id)
         return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))

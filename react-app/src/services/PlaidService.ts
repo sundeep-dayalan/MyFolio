@@ -117,6 +117,17 @@ export interface PlaidTransactionsByItemResponse {
   };
 }
 
+export interface RefreshTransactionsResponse {
+  success: boolean;
+  transactions_added: number;
+  transactions_modified: number;
+  transactions_removed: number;
+  total_processed: number;
+  item_id: string;
+  institution_name: string;
+  message: string;
+}
+
 const getAuthHeaders = (): HeadersInit => {
   const token = localStorage.getItem('authToken');
 
@@ -400,18 +411,12 @@ export const PlaidService = {
     }
   },
 
-  async refreshTransactions(
-    itemId: string,
-    days: number = 30,
-  ): Promise<PlaidTransactionsByItemResponse> {
+  async refreshTransactions(itemId: string): Promise<RefreshTransactionsResponse> {
     try {
-      const response = await fetch(
-        `${API_BASE}/plaid/transactions/refresh/${itemId}?days=${days}`,
-        {
-          method: 'POST',
-          headers: getAuthHeaders(),
-        },
-      );
+      const response = await fetch(`${API_BASE}/plaid/transactions/refresh/${itemId}`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      });
 
       if (response.status === 401) {
         localStorage.removeItem('authToken');
@@ -423,7 +428,7 @@ export const PlaidService = {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      const data = (await response.json()) as PlaidTransactionsByItemResponse;
+      const data = (await response.json()) as RefreshTransactionsResponse;
       return data;
     } catch (error) {
       throw new Error('Failed to refresh transactions');

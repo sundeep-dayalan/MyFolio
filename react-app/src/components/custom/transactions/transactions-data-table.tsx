@@ -65,7 +65,6 @@ export function TransactionsDataTable({ columns, initialRequest }: DataTableProp
       },
     };
 
-    console.log('TransactionsDataTable: apiRequest changed', request);
     return request;
   }, [pagination, sorting, globalFilter, initialRequest.filters, initialRequest.transactionType]);
 

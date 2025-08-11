@@ -8,6 +8,7 @@ import {
 import type { AuthContextType } from '@/types/types';
 import { TransactionsHeader } from '@/components/custom/transactions/transactions-header';
 import { TransactionsEmptyState } from '@/components/custom/transactions/transactions-empty-state';
+import { toast } from 'sonner';
 import { TransactionsDataTable } from '@/components/custom/transactions/transactions-data-table';
 import { columns } from '@/components/custom/transactions/transactions-columns';
 import type { PaginatedTransactionsRequest } from '@/services/FirestoreService';
@@ -80,10 +81,8 @@ const TransactionsPage: React.FC = () => {
       },
     };
 
-    console.log('TransactionsPage: initialRequest changed', request);
     return request;
   }, [selectedBank, institutionToItemMap, transactionType]);
-
   const handleGoToAccounts = () => {
     window.location.href = '/accounts';
   };
@@ -102,12 +101,43 @@ const TransactionsPage: React.FC = () => {
 
     try {
       setErrorMessage('');
-      await refreshTransactionsMutation.mutateAsync({ itemId });
+      const result = await refreshTransactionsMutation.mutateAsync({ itemId });
+
+      // Show success toast with transaction counts
+      if (result.success) {
+        if (result.total_processed === 0) {
+          toast.success(`No recent transactions found for ${bankName}`, {
+            description: 'Your account is up to date',
+          });
+        } else {
+          // Create detailed description with counts
+          const details = [];
+          if (result.transactions_added > 0) {
+            details.push(`${result.transactions_added} added`);
+          }
+          if (result.transactions_modified > 0) {
+            details.push(`${result.transactions_modified} updated`);
+          }
+          if (result.transactions_removed > 0) {
+            details.push(`${result.transactions_removed} removed`);
+          }
+
+          toast.success(result.message || 'Transactions updated successfully!', {
+            description: `${bankName}: ${details.join(', ')}`,
+            duration: 5000, // Show longer for transaction updates
+          });
+        }
+      }
+
       // The mutation will automatically invalidate the query cache
     } catch (error) {
       setErrorMessage(
         `Failed to refresh transactions: ${error instanceof Error ? error.message : String(error)}`,
       );
+
+      toast.error('Failed to refresh transactions', {
+        description: error instanceof Error ? error.message : String(error),
+      });
     }
   };
 
