@@ -2,18 +2,19 @@ import React, { useContext } from 'react';
 import { Navigate } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext';
 import { Spinner } from './ui/spinner';
+import { logger } from '../services/LoggerService';
 import type { AuthContextType } from '@/types/types';
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const auth = useContext(AuthContext) as AuthContextType;
 
-  console.log('ProtectedRoute: Current auth state:', {
+  logger.debug('Current auth state', 'PROTECTED_ROUTE', {
     loading: auth.loading,
     user: auth.user ? 'present' : 'missing',
     isAuthenticated: auth.isAuthenticated,
   });
 
   if (auth.loading) {
-    console.log('ProtectedRoute: Still loading, showing spinner');
+    logger.debug('Still loading, showing spinner', 'PROTECTED_ROUTE');
     return (
       <div className="flex items-center justify-center min-h-screen ">
         <div className="text-center">
@@ -25,11 +26,11 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
   }
 
   if (!auth.user) {
-    console.log('ProtectedRoute: No user found, redirecting to login');
+    logger.info('No user found, redirecting to login', 'PROTECTED_ROUTE');
     return <Navigate to="/login" replace />;
   }
 
-  console.log('ProtectedRoute: User authenticated, rendering children');
+  logger.debug('User authenticated, rendering children', 'PROTECTED_ROUTE');
   return <>{children}</>;
 };
 

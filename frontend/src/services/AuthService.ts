@@ -1,5 +1,6 @@
 import type { OAuthCallbackResponse, UserResponse, Token } from '@/types/types';
 import { config } from '../config/env';
+import { logger } from './LoggerService';
 
 const API_BASE_URL = config.apiBaseUrl;
 
@@ -58,7 +59,7 @@ export class AuthService {
 
       return { success: true };
     } catch (error) {
-      console.error('OAuth callback error:', error);
+      logger.error('OAuth callback error', 'AUTH', error);
       return { success: false, error: 'Network error during authentication' };
     }
   }
@@ -79,10 +80,10 @@ export class AuthService {
             Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify({ token }),
-        }).catch(console.warn); // Don't fail logout if revocation fails
+        }).catch((error) => logger.warn('Token revocation failed during logout', 'AUTH', error)); // Don't fail logout if revocation fails
       }
     } catch (error) {
-      console.warn('Error during token revocation:', error);
+      logger.warn('Error during token revocation', 'AUTH', error);
     } finally {
       // Always clear local auth data
       this.clearAuthData();
