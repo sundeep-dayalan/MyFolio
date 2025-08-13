@@ -89,3 +89,12 @@ venv.bak/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+
+
+# Claude files
+.claude.json
+.claude/settings.local.json
+
+# Claude MCP files
+.serena/

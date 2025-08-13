@@ -7,6 +7,7 @@ MyFolio is a comprehensive personal wealth management application that integrate
 ## 🏗️ Architecture
 
 ### System Architecture
+
 ```
 Frontend (React + TypeScript)
 ├── Vite Build System
@@ -29,9 +30,10 @@ External Services
 ```
 
 ### Project Structure
+
 ```
 personal-wealth-management/
-├── api/                          # Backend FastAPI application
+├── server/                       # Backend FastAPI application
 │   ├── app/                      # Main application package
 │   │   ├── main.py              # Application factory and startup
 │   │   ├── config.py            # Environment configuration
@@ -47,7 +49,7 @@ personal-wealth-management/
 │   ├── requirements-dev.txt     # Development dependencies
 │   ├── Dockerfile              # Container definition
 │   └── run.py                  # Application entry point
-└── react-app/                  # Frontend React application
+└── frontend/                    # Frontend React application
     ├── components/             # Reusable React components
     ├── pages/                  # Page components
     ├── services/              # API service layer
@@ -60,6 +62,7 @@ personal-wealth-management/
 ## 🚀 Features
 
 ### Financial Management
+
 - **Account Integration**: Connect multiple bank accounts through Plaid
 - **Real-time Balances**: View current account balances and positions
 - **Transaction Tracking**: Monitor and categorize financial transactions
@@ -67,12 +70,14 @@ personal-wealth-management/
 - **Security**: End-to-end encrypted token storage
 
 ### User Experience
+
 - **Google OAuth**: Seamless authentication with Google accounts
 - **Responsive Design**: Mobile-first responsive interface
 - **Real-time Updates**: Live data synchronization
 - **Intuitive Navigation**: Clean, modern user interface
 
 ### Technical Features
+
 - **Production Ready**: Optimized for production deployment
 - **Type Safety**: Full TypeScript implementation
 - **Error Handling**: Comprehensive error management
@@ -82,6 +87,7 @@ personal-wealth-management/
 ## 🛠️ Technology Stack
 
 ### Frontend
+
 - **React 19.1.1**: Modern React with hooks and context
 - **TypeScript**: Type-safe development
 - **Vite**: Fast build tool and development server
@@ -91,6 +97,7 @@ personal-wealth-management/
 - **React Plaid Link**: Official Plaid React component
 
 ### Backend
+
 - **FastAPI**: Modern Python web framework
 - **Python 3.12+**: Latest Python features
 - **Pydantic**: Data validation and settings management
@@ -99,6 +106,7 @@ personal-wealth-management/
 - **JWT**: Secure token-based authentication
 
 ### Infrastructure
+
 - **Google Cloud Run**: Serverless container deployment
 - **Firebase Firestore**: NoSQL document database
 - **Google Cloud Build**: CI/CD pipeline
@@ -107,6 +115,7 @@ personal-wealth-management/
 ## 🔧 Installation & Setup
 
 ### Prerequisites
+
 - Python 3.12+
 - Node.js 18+
 - Google Cloud Platform account
@@ -114,17 +123,21 @@ personal-wealth-management/
 - Plaid developer account
 
 ### Backend Setup
+
 1. **Navigate to API directory**
+
    ```bash
-   cd api
+   cd server
    ```
 
 2. **Install dependencies**
+
    ```bash
    pip install -r requirements.txt
    ```
 
 3. **Configure environment variables**
+
    ```bash
    cp .env.template .env
    # Edit .env with your credentials
@@ -136,17 +149,21 @@ personal-wealth-management/
    ```
 
 ### Frontend Setup
+
 1. **Navigate to React app directory**
+
    ```bash
-   cd react-app
+   cd frontend
    ```
 
 2. **Install dependencies**
+
    ```bash
    npm install
    ```
 
 3. **Configure environment**
+
    ```bash
    cp .env.template .env.development
    # Edit environment files as needed
@@ -160,17 +177,19 @@ personal-wealth-management/
 ## 🌐 Deployment
 
 ### Production Deployment
+
 The application is configured for deployment on Google Cloud Platform:
 
 1. **API Deployment** (Google Cloud Run)
+
    ```bash
-   cd api
+   cd server
    gcloud run deploy myfolio-api --source .
    ```
 
 2. **Frontend Deployment** (Firebase Hosting)
    ```bash
-   cd react-app
+   cd frontend
    npm run build
    firebase deploy
    ```
@@ -178,6 +197,7 @@ The application is configured for deployment on Google Cloud Platform:
 ### Environment Configuration
 
 #### Backend (.env)
+
 ```bash
 # Application Settings
 DEBUG=false
@@ -204,26 +224,30 @@ PLAID_ENV=production
 ```
 
 #### Frontend (.env.production)
+
 ```bash
-VITE_API_BASE_URL=https://your-api-domain/api/v1
+VITE_API_BASE_URL=https://your-server-domain/api/v1
 VITE_APP_ENV=production
 ```
 
 ## 🔐 Security
 
 ### Authentication & Authorization
+
 - **Google OAuth 2.0**: Secure user authentication
 - **JWT Tokens**: Stateless authentication with configurable expiration
 - **Token Encryption**: Access tokens encrypted using Fernet encryption
 - **Secure Storage**: Encrypted tokens stored in Firebase Firestore
 
 ### API Security
+
 - **CORS Configuration**: Proper cross-origin request handling
 - **Input Validation**: Comprehensive request validation with Pydantic
 - **Error Handling**: Secure error responses without sensitive data exposure
 - **Rate Limiting**: Built-in protection against abuse
 
 ### Data Protection
+
 - **Encryption at Rest**: Sensitive data encrypted in database
 - **HTTPS Only**: All communications over secure connections
 - **Environment Variables**: Secure configuration management
@@ -232,41 +256,49 @@ VITE_APP_ENV=production
 ## 📊 API Documentation
 
 ### Authentication Endpoints
+
 - `POST /auth/google/login` - Google OAuth login
 - `POST /auth/refresh` - Refresh JWT token
 - `POST /auth/logout` - User logout
 
 ### Plaid Integration Endpoints
+
 - `POST /plaid/create_link_token` - Create Plaid Link tokens
 - `POST /plaid/exchange_public_token` - Exchange and store access tokens
 - `GET /plaid/accounts` - Get account balances
 - `GET /plaid/transactions` - Retrieve transactions
 
 ### User Management
+
 - `GET /users/me` - Get current user profile
 - `PUT /users/me` - Update user profile
 - `DELETE /users/me` - Delete user account
 
 ### Health & Monitoring
+
 - `GET /health` - Application health check
 - `GET /api/v1/docs` - Interactive API documentation
 
 ## 🧪 Testing
 
 ### Backend Testing
+
 ```bash
-cd api
+cd server
 pytest tests/
 ```
 
 ### Frontend Testing
+
 ```bash
 cd react-app
 npm test
 ```
 
 ### Integration Testing
+
 The application includes comprehensive testing for:
+
 - Plaid integration flows
 - Authentication mechanisms
 - API endpoints
@@ -275,12 +307,14 @@ The application includes comprehensive testing for:
 ## 📈 Monitoring & Logging
 
 ### Application Monitoring
+
 - **Structured Logging**: JSON-formatted logs for analysis
 - **Request Tracking**: Unique request IDs for tracing
 - **Error Monitoring**: Comprehensive error logging and alerting
 - **Performance Metrics**: Response times and throughput monitoring
 
 ### Health Checks
+
 - **API Health**: Built-in health check endpoints
 - **Database Connectivity**: Firebase connection monitoring
 - **External Service Status**: Plaid API availability checks
@@ -288,12 +322,14 @@ The application includes comprehensive testing for:
 ## 🔮 Production Optimization
 
 ### Performance Features
+
 - **Query Optimization**: Efficient Firestore queries with fallback strategies
 - **Connection Pooling**: Optimized Firebase connection management
 - **Caching Strategy**: Client-side data storage with React Query
 - **Bundle Optimization**: Tree shaking and code splitting
 
 ### Scalability
+
 - **Horizontal Scaling**: Stateless API design for scaling
 - **Database Indexing**: Optimized Firestore indexes for performance
 - **CDN Integration**: Static asset delivery optimization
@@ -302,12 +338,14 @@ The application includes comprehensive testing for:
 ## 📚 Development Guidelines
 
 ### Code Quality
+
 - **TypeScript**: Full type safety across the application
 - **Linting**: ESLint and Pylint for code consistency
 - **Formatting**: Prettier and Black for code formatting
 - **Testing**: Comprehensive test coverage
 
 ### Best Practices
+
 - **Separation of Concerns**: Layered architecture
 - **Error Handling**: Comprehensive error management
 - **Security First**: Security considerations in all development
@@ -316,11 +354,14 @@ The application includes comprehensive testing for:
 ## 🆘 Troubleshooting
 
 ### Common Issues
+
 1. **Firebase Connection Issues**
+
    - Verify service account credentials
    - Check Firestore rules and indexes
 
 2. **Plaid Integration Problems**
+
    - Confirm API keys and environment settings
    - Review sandbox vs production configuration
 
@@ -329,7 +370,9 @@ The application includes comprehensive testing for:
    - Check JWT secret and expiration settings
 
 ### Support
+
 For issues and questions:
+
 1. Check the logs for detailed error messages
 2. Review the API documentation at `/api/v1/docs`
 3. Verify environment configuration
@@ -338,6 +381,7 @@ For issues and questions:
 ## 🔄 Version History
 
 ### Latest Production Release
+
 - ✅ Full Plaid integration with production-ready token management
 - ✅ Google OAuth authentication
 - ✅ Firebase Firestore database integration
