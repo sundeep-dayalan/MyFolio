@@ -5,12 +5,12 @@ on:
     branches:
       - main
     paths:
-      - 'api/**'
+      - 'server/**'
   pull_request:
     branches:
       - main
     paths:
-      - 'api/**'
+      - 'server/**'
   workflow_dispatch:
 
 env:
@@ -25,7 +25,7 @@ jobs:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     defaults:
       run:
-        working-directory: ./api
+        working-directory: ./server
 
     steps:
     - name: Checkout code

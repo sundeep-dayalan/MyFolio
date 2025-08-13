@@ -8,7 +8,7 @@ MyFolio is a personal wealth management application with a React frontend and Fa
 
 ## Development Commands
 
-### Backend (API)
+### Backend (Server)
 
 **Port Management**: Backend runs on port 8000. Always check if port is busy before starting:
 
@@ -17,16 +17,16 @@ MyFolio is a personal wealth management application with a React frontend and Fa
 lsof -ti:8000 | xargs kill -9  # Kill process if busy
 ```
 
-- Start development server: `cd api && python3 run.py`
-- Alternative with uvicorn reload: `cd api && uvicorn app.main:app --reload --host 0.0.0.0 --port 8000`
-- Install dependencies: `cd api && pip3 install -r requirements.txt`
-- Install dev dependencies: `cd api && pip3 install -r requirements-dev.txt`
-- Run tests: `cd api && pytest tests/`
-- Code formatting: `cd api && black .`
-- Linting: `cd api && flake8`
-- Type checking: `cd api && mypy .`
+- Start development server: `cd server && python3 run.py`
+- Alternative with uvicorn reload: `cd server && uvicorn app.main:app --reload --host 0.0.0.0 --port 8000`
+- Install dependencies: `cd server && pip3 install -r requirements.txt`
+- Install dev dependencies: `cd server && pip3 install -r requirements-dev.txt`
+- Run tests: `cd server && pytest tests/`
+- Code formatting: `cd server && black .`
+- Linting: `cd server && flake8`
+- Type checking: `cd server && mypy .`
 
-### Frontend (React App)
+### Frontend
 
 **Port Management**: Frontend runs on http://localhost:5173/. Check if port is busy before starting:
 
@@ -35,18 +35,18 @@ lsof -ti:8000 | xargs kill -9  # Kill process if busy
 lsof -ti:5173 | xargs kill -9  # Kill process if busy
 ```
 
-- Start development server: `cd react-app && npm run dev` (runs on http://localhost:5173/)
-- Install dependencies: `cd react-app && npm install`
-- Build for production: `cd react-app && npm run build`
-- Lint code: `cd react-app && npm run lint`
-- Preview build: `cd react-app && npm run preview`
+- Start development server: `cd frontend && npm run dev` (runs on http://localhost:5173/)
+- Install dependencies: `cd frontend && npm install`
+- Build for production: `cd frontend && npm run build`
+- Lint code: `cd frontend && npm run lint`
+- Preview build: `cd frontend && npm run preview`
 
 ## Architecture
 
 ### Backend Structure
 
 ```
-api/
+server/
 ├── app/
 │   ├── main.py              # FastAPI app entry point
 │   ├── config.py            # Environment configuration
@@ -69,7 +69,7 @@ api/
 ### Frontend Structure
 
 ```
-react-app/src/
+frontend/src/
 ├── App.tsx                  # Main app component with routing
 ├── components/
 │   ├── ui/                  # Shadcn/UI components
@@ -161,10 +161,10 @@ VITE_APP_ENV=development
 
 ## Common Development Tasks
 
-- **Adding new API endpoints**: Create in `api/app/routers/`
-- **Adding new React components**: Use existing patterns in `react-app/src/components/`
-- **Database operations**: Use services in `api/app/services/`
-- **Frontend API calls**: Use hooks in `react-app/src/hooks/`
+- **Adding new API endpoints**: Create in `server/app/routers/`
+- **Adding new React components**: Use existing patterns in `frontend/src/components/`
+- **Database operations**: Use services in `server/app/services/`
+- **Frontend API calls**: Use hooks in `frontend/src/hooks/`
 
 ## Security Considerations
 

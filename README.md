@@ -33,7 +33,7 @@ External Services
 
 ```
 personal-wealth-management/
-├── api/                          # Backend FastAPI application
+├── server/                       # Backend FastAPI application
 │   ├── app/                      # Main application package
 │   │   ├── main.py              # Application factory and startup
 │   │   ├── config.py            # Environment configuration
@@ -49,7 +49,7 @@ personal-wealth-management/
 │   ├── requirements-dev.txt     # Development dependencies
 │   ├── Dockerfile              # Container definition
 │   └── run.py                  # Application entry point
-└── react-app/                  # Frontend React application
+└── frontend/                    # Frontend React application
     ├── components/             # Reusable React components
     ├── pages/                  # Page components
     ├── services/              # API service layer
@@ -127,7 +127,7 @@ personal-wealth-management/
 1. **Navigate to API directory**
 
    ```bash
-   cd api
+   cd server
    ```
 
 2. **Install dependencies**
@@ -153,7 +153,7 @@ personal-wealth-management/
 1. **Navigate to React app directory**
 
    ```bash
-   cd react-app
+   cd frontend
    ```
 
 2. **Install dependencies**
@@ -183,13 +183,13 @@ The application is configured for deployment on Google Cloud Platform:
 1. **API Deployment** (Google Cloud Run)
 
    ```bash
-   cd api
+   cd server
    gcloud run deploy myfolio-api --source .
    ```
 
 2. **Frontend Deployment** (Firebase Hosting)
    ```bash
-   cd react-app
+   cd frontend
    npm run build
    firebase deploy
    ```
@@ -226,7 +226,7 @@ PLAID_ENV=production
 #### Frontend (.env.production)
 
 ```bash
-VITE_API_BASE_URL=https://your-api-domain/api/v1
+VITE_API_BASE_URL=https://your-server-domain/api/v1
 VITE_APP_ENV=production
 ```
 
@@ -284,7 +284,7 @@ VITE_APP_ENV=production
 ### Backend Testing
 
 ```bash
-cd api
+cd server
 pytest tests/
 ```
 
