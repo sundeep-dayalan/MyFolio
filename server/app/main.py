@@ -111,9 +111,6 @@ def create_app() -> FastAPI:
     app.include_router(plaid_router, prefix=settings.api_v1_prefix)
     # Firestore direct access endpoints
     app.include_router(firestore_router, prefix=settings.api_v1_prefix)
-    # Setup and configuration endpoints
-    from .routers.setup import router as setup_router
-    app.include_router(setup_router, prefix=settings.api_v1_prefix)
 
     # Health check endpoint
     @app.get("/health")
