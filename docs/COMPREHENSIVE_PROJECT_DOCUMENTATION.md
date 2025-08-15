@@ -1,4 +1,4 @@
-# MyFolio - Comprehensive Project Documentation
+# Sage - Comprehensive Project Documentation
 
 ## Table of Contents
 1. [Project Overview](#project-overview)
@@ -16,7 +16,7 @@
 
 ## Project Overview
 
-MyFolio is a comprehensive personal wealth management application that provides:
+Sage is a comprehensive financial management application that provides:
 - Real-time financial data integration through Plaid
 - Google OAuth 2.0 authentication
 - Transaction tracking and categorization
@@ -801,7 +801,7 @@ The application features an intelligent caching system that significantly reduce
 
 ## Summary
 
-This comprehensive documentation covers the complete MyFolio application flow, from user authentication through data synchronization. The application follows modern best practices with:
+This comprehensive documentation covers the complete Sage application flow, from user authentication through data synchronization. The application follows modern best practices with:
 
 - **Layered Architecture**: Clear separation between presentation, business logic, and data layers
 - **Security First**: OAuth 2.0, JWT tokens, encrypted storage, and input validation

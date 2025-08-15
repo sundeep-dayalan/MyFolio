@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Google Cloud Deployment Script for MyFolio FastAPI Application
+# Google Cloud Deployment Script for Sage FastAPI Application
 # This script sets up and deploys your FastAPI app to Google Cloud Run
 
 set -e  # Exit on any error
@@ -15,10 +15,10 @@ NC='\033[0m' # No Color
 # Configuration variables (update these)
 PROJECT_ID="fit-guide-465001-p3"
 REGION="us-central1"
-SERVICE_NAME="myfolio-api"
+SERVICE_NAME="sage-api"
 IMAGE_NAME="gcr.io/${PROJECT_ID}/${SERVICE_NAME}"
 
-echo -e "${BLUE}🚀 MyFolio FastAPI Deployment to Google Cloud Run${NC}"
+echo -e "${BLUE}🚀 Sage FastAPI Deployment to Google Cloud Run${NC}"
 echo "=================================================="
 
 # Function to print colored output
@@ -140,7 +140,7 @@ if [ "$HEALTH_STATUS" = "healthy" ]; then
     echo "🔗 Health Check: $SERVICE_URL/health"
 else
     echo "⚠️  Health check failed. Please check the logs:"
-    echo "   gcloud logs read --service=myfolio-api --limit=50"
+    echo "   gcloud logs read --service=sage-api --limit=50"
 fi
 
 echo ""
@@ -151,6 +151,6 @@ echo "3. Set up monitoring and alerting"
 echo "4. Consider setting up a custom domain"
 echo ""
 echo "📊 Useful commands:"
-echo "  View logs: gcloud logs read --service=myfolio-api --limit=50"
-echo "  Update service: gcloud run deploy myfolio-api --image gcr.io/$PROJECT_ID/myfolio-api"
-echo "  Get service details: gcloud run services describe myfolio-api --region=$REGION"
+echo "  View logs: gcloud logs read --service=sage-api --limit=50"
+echo "  Update service: gcloud run deploy sage-api --image gcr.io/$PROJECT_ID/sage-api"
+echo "  Get service details: gcloud run services describe sage-api --region=$REGION"
