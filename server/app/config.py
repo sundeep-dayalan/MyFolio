@@ -16,7 +16,7 @@ class Settings(BaseSettings):
 
     # API Settings
     project_name: str = Field(
-        default="Personal Wealth Management API", env="PROJECT_NAME"
+        default="Sage API", env="PROJECT_NAME"
     )
     version: str = Field(default="2.0.0", env="VERSION")
     api_v1_prefix: str = Field(default="/api/v1", env="API_V1_PREFIX")
@@ -56,7 +56,7 @@ class Settings(BaseSettings):
         default=None, env="FIREBASE_CREDENTIALS_PATH"
     )
     firebase_database_id: str = Field(
-        default="personal-wealth-management", env="FIREBASE_DATABASE_ID"
+        default="sage", env="FIREBASE_DATABASE_ID"
     )
 
     # Google OAuth Configuration

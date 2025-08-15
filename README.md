@@ -1,8 +1,8 @@
-# MyFolio - Personal Wealth Management Application
+# Sage - Financial Management Application
 
 ## 🌟 Overview
 
-MyFolio is a comprehensive personal wealth management application that integrates with Plaid to provide real-time financial data analysis, transaction tracking, and portfolio management. The application features a modern React frontend with a robust FastAPI backend, all designed for production deployment on Google Cloud Platform.
+Sage is a comprehensive financial management application that integrates with Plaid to provide real-time financial data analysis, transaction tracking, and portfolio management. The application features a modern React frontend with a robust FastAPI backend, all designed for production deployment on Google Cloud Platform.
 
 ## 🏗️ Architecture
 
@@ -401,4 +401,4 @@ This is a personal project. For internal development guidelines, please refer to
 
 ---
 
-**MyFolio** - Bringing clarity to your financial future through intelligent wealth management.
+**Sage** - Bringing clarity to your financial future through intelligent financial management.

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-MyFolio is a personal wealth management application with a React frontend and FastAPI backend that integrates with Plaid for financial data. The application uses Google OAuth for authentication and Firebase Firestore for data storage.
+Sage is a financial management application with a React frontend and FastAPI backend that integrates with Plaid for financial data. The application uses Google OAuth for authentication and Firebase Firestore for data storage.
 
 ## Development Commands
 

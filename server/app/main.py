@@ -1,8 +1,8 @@
 """
-FastAPI application for Personal Wealth Management.
+FastAPI application for Sage.
 Version: 2.0.0 - Production Ready
 
-A streamlined personal wealth management API focused on:
+A streamlined financial management API focused on:
 - Google OAuth 2.0 authentication
 - Plaid financial data integration
 - Real-time account balances and transactions
@@ -42,7 +42,7 @@ logger = get_logger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifespan events."""
     # Startup
-    logger.info("Starting Personal Wealth Management API...")
+    logger.info("Starting Sage API...")
 
     # Skip Firebase connection in test environment
     if settings.environment != "test":
@@ -61,7 +61,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
-    logger.info("Shutting down Personal Wealth Management API...")
+    logger.info("Shutting down Sage API...")
 
     if settings.environment != "test":
         try:
@@ -80,7 +80,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.project_name,
         version=settings.version,
-        description="A comprehensive personal wealth management API with portfolio tracking, transaction management, and financial analytics.",
+        description="A comprehensive financial management API with portfolio tracking, transaction management, and financial analytics.",
         docs_url="/docs",
         redoc_url="/redoc",
         openapi_url="/openapi.json",

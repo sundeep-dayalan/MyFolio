@@ -85,9 +85,9 @@ const LoginPage: React.FC = () => {
                   <div className="flex size-8 items-center justify-center rounded-md">
                     <GalleryVerticalEnd className="size-6" />
                   </div>
-                  <span className="sr-only">MyFolio</span>
+                  <span className="sr-only">Sage</span>
                 </a>
-                <h1 className="text-xl font-bold">Welcome to MyFolio</h1>
+                <h1 className="text-xl font-bold">Welcome to Sage</h1>
                 <div className="text-center text-sm">
                   Product access is limited to authorised users{' '}
                   <Button variant="link" onClick={() => mailTo('example@example.com')}>
