@@ -179,13 +179,13 @@ class AccountStorageService:
             max_age_hours: Maximum age of stored data in hours
 
         Returns:
-            bool: True if valid cache exists, False otherwise
+            bool: True if valid data exists, False otherwise
         """
         try:
-            cached_data = self.get_cached_account_data(user_id, max_age_hours)
-            return cached_data is not None
+            stored_data = self.get_stored_account_data(user_id, max_age_hours)
+            return stored_data is not None
         except Exception as e:
-            logger.error(f"Failed to check cache validity for user {user_id}: {e}")
+            logger.error(f"Failed to check data validity for user {user_id}: {e}")
             return False
 
     def get_data_info(
@@ -198,7 +198,7 @@ class AccountStorageService:
             user_id: User ID to get info for
 
         Returns:
-            Dict containing cache metadata or None if not found
+            Dict containing data metadata or None if not found
         """
         try:
             if not firebase_client.is_connected:
@@ -235,7 +235,7 @@ class AccountStorageService:
             return None
 
         except Exception as e:
-            logger.error(f"Failed to get cache info for user {user_id}: {e}")
+            logger.error(f"Failed to get data info for user {user_id}: {e}")
             return None
 
     def clear_data(self, user_id: str) -> bool:
@@ -243,7 +243,7 @@ class AccountStorageService:
         Clear stored account data for a user.
 
         Args:
-            user_id: User ID to clear cache for
+            user_id: User ID to clear data for
 
         Returns:
             bool: True if successful, False otherwise
@@ -267,9 +267,9 @@ class AccountStorageService:
             logger.error(f"Failed to clear account data for user {user_id}: {e}")
             return False
 
-    def update_cache_metadata(self, user_id: str, metadata: Dict[str, Any]) -> bool:
+    def update_data_metadata(self, user_id: str, metadata: Dict[str, Any]) -> bool:
         """
-        Update cache metadata without changing account data.
+        Update data metadata without changing account data.
 
         Args:
             user_id: User ID to update
@@ -290,7 +290,7 @@ class AccountStorageService:
             return True
 
         except Exception as e:
-            logger.error(f"Failed to update cache metadata for user {user_id}: {e}")
+            logger.error(f"Failed to update data metadata for user {user_id}: {e}")
             return False
 
 

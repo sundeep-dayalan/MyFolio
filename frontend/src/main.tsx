@@ -6,6 +6,10 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { AuthProvider } from './context/AuthContext.tsx';
 import { ThemeProvider } from './components/theme-provider.tsx';
+import { initializeLogging } from './config/logging';
+
+// Initialize logging
+initializeLogging();
 
 // Create a client
 const queryClient = new QueryClient({

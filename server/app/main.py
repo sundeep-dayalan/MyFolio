@@ -16,7 +16,7 @@ Removed unused endpoints:
 """
 
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import FastAPI
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -26,10 +26,10 @@ from .middleware import (
     add_cors_middleware,
     add_exception_handlers,
     add_logging_middleware,
+    RateLimitMiddleware,
 )
 from .routers import plaid_router
 from .routers.oauth import router as oauth_router
-from .routers.firestore import router as firestore_router
 from .routers.firestore import router as firestore_router
 from .utils.logger import setup_logging, get_logger
 
@@ -91,6 +91,10 @@ def create_app() -> FastAPI:
     add_cors_middleware(app)
     add_logging_middleware(app)
     add_exception_handlers(app)
+    
+    # Add rate limiting middleware
+    rate_limiter = RateLimitMiddleware()
+    app.middleware("http")(rate_limiter)
 
     # Add session middleware for OAuth state management
     app.add_middleware(
@@ -105,8 +109,6 @@ def create_app() -> FastAPI:
     app.include_router(oauth_router, prefix=settings.api_v1_prefix)
     # Plaid integration endpoints
     app.include_router(plaid_router, prefix=settings.api_v1_prefix)
-    # Firestore direct access endpoints
-    app.include_router(firestore_router, prefix=settings.api_v1_prefix)
     # Firestore direct access endpoints
     app.include_router(firestore_router, prefix=settings.api_v1_prefix)
 
@@ -127,14 +129,14 @@ def create_app() -> FastAPI:
                 "environment": settings.environment,
                 "firebase": firebase_status,
                 "firebase_connected": firebase_client.is_connected,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
         except Exception as e:
             logger.error(f"Health check failed: {e}")
             return {
                 "status": "unhealthy",
                 "error": str(e),
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
     # Root endpoint
