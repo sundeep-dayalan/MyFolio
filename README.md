@@ -4,16 +4,30 @@
 
 Deploy Sage to Google Cloud in just 5-10 minutes with a single click!
 
-[![Deploy to Google Cloud](https://deploy.cloud.run/button.svg)](https://ssh.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https://github.com/sundeep-dayalan/personal-wealth-management&cloudshell_working_dir=.&cloudshell_tutorial=TUTORIAL.md)
-
 ### Quick Start
 
-1. **Click the "Deploy to Google Cloud" button above**
-2. **Follow the interactive Cloud Shell tutorial**
-3. **Configure your app name and settings**
-4. **Watch as everything deploys automatically**
-5. **Set up Plaid and OAuth credentials**
-6. **Start managing your finances!**
+#### Step 1: Get Your Own Copy
+1. **Fork this repository** to your GitHub account (click "Fork" button above)
+2. **Customize if needed** - edit branding, colors, features in your fork
+
+#### Step 2: Deploy to Google Cloud
+1. **Update the deployment URL** in your fork's README.md:
+   - Replace `YOUR_USERNAME` with your GitHub username
+   - Commit the change to your fork
+
+2. **Click your deployment button**:
+```markdown
+[![Deploy to Google Cloud](https://deploy.cloud.run/button.svg)](https://ssh.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https://github.com/YOUR_USERNAME/personal-wealth-management.git&cloudshell_working_dir=.&cloudshell_tutorial=TUTORIAL.md)
+```
+
+#### Step 3: Automated Setup
+3. **Follow the interactive Cloud Shell tutorial**
+4. **Configure your app name and settings**
+5. **Watch as everything deploys automatically**
+6. **Set up Plaid and OAuth credentials** (5 minutes)
+7. **Start managing your finances!**
+
+> **💡 Pro Tip**: You can customize the app before deploying by editing your fork. Change app name, colors, features, or add your own branding!
 
 **What gets deployed:**
 - ✅ FastAPI backend on Cloud Run
@@ -25,6 +39,14 @@ Deploy Sage to Google Cloud in just 5-10 minutes with a single click!
 - ✅ SSL certificates and custom domains
 
 **Total cost:** ~$5-15/month (includes $10 budget alert)
+
+### 🎯 Why Fork First?
+
+- **🔐 Your Data, Your Control**: Deploy to your own GCP account with full control
+- **🎨 Customization Freedom**: Modify the app before deploying - add features, change branding
+- **🔄 Easy Updates**: Pull updates from the main repo when new features are released
+- **📈 Your Infrastructure**: Own your deployment, scale as needed, add your own features
+- **🛡️ Security**: Your financial data stays in your Google Cloud account only
 
 ---
 
