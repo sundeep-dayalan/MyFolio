@@ -1,5 +1,33 @@
 # Sage - Financial Management Application
 
+## 🚀 One-Click Deployment
+
+Deploy Sage to Google Cloud in just 5-10 minutes with a single click!
+
+[![Deploy to Google Cloud](https://deploy.cloud.run/button.svg)](https://ssh.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https://github.com/sundeep-dayalan/personal-wealth-management&cloudshell_working_dir=.&cloudshell_tutorial=TUTORIAL.md)
+
+### Quick Start
+
+1. **Click the "Deploy to Google Cloud" button above**
+2. **Follow the interactive Cloud Shell tutorial**
+3. **Configure your app name and settings**
+4. **Watch as everything deploys automatically**
+5. **Set up Plaid and OAuth credentials**
+6. **Start managing your finances!**
+
+**What gets deployed:**
+- ✅ FastAPI backend on Cloud Run
+- ✅ React frontend on Cloud Run  
+- ✅ Firestore database with security rules
+- ✅ Google OAuth integration
+- ✅ Service accounts and IAM roles
+- ✅ Budget alerts and monitoring
+- ✅ SSL certificates and custom domains
+
+**Total cost:** ~$5-15/month (includes $10 budget alert)
+
+---
+
 ## 🌟 Overview
 
 Sage is a comprehensive financial management application that integrates with Plaid to provide real-time financial data analysis, transaction tracking, and portfolio management. The application features a modern React frontend with a robust FastAPI backend, all designed for production deployment on Google Cloud Platform.
@@ -176,23 +204,42 @@ personal-wealth-management/
 
 ## 🌐 Deployment
 
-### Production Deployment
+### 🚀 One-Click Deployment (Recommended)
 
-The application is configured for deployment on Google Cloud Platform:
+The fastest way to deploy Sage is using our automated deployment system:
 
-1. **API Deployment** (Google Cloud Run)
+1. **Click the deployment button** at the top of this README
+2. **Follow the interactive tutorial** in Google Cloud Shell
+3. **Complete post-deployment setup** for Plaid and OAuth credentials
+
+### Manual Deployment
+
+For advanced users who want to customize the deployment:
+
+1. **Backend Deployment** (Google Cloud Run)
 
    ```bash
    cd server
-   gcloud run deploy myfolio-api --source .
+   gcloud run deploy sage-backend --source .
    ```
 
-2. **Frontend Deployment** (Firebase Hosting)
+2. **Frontend Deployment** (Google Cloud Run)
    ```bash
    cd frontend
-   npm run build
-   firebase deploy
+   gcloud run deploy sage-frontend --source .
    ```
+
+### Deployment Architecture
+
+```
+Google Cloud Platform
+├── Cloud Run (Backend API)
+├── Cloud Run (Frontend SPA)
+├── Firestore (Database)
+├── Secret Manager (API Keys)
+├── IAM & Service Accounts
+└── Cloud Monitoring & Logging
+```
 
 ### Environment Configuration
 
