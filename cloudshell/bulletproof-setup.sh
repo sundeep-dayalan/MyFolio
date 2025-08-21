@@ -696,133 +696,66 @@ log_info "Building React application for production..."
 if npm run build; then
     log_success "✅ React app built successfully"
     
-    # Create App Engine app.yaml for free tier deployment
-    log_info "📝 Creating App Engine configuration for free tier..."
+    # Create Cloud Run Dockerfile for React app
+    log_info "📝 Creating Cloud Run configuration for React hosting..."
     
-    cat > app.yaml << EOF
-runtime: nodejs18
-service: default
+    cat > Dockerfile << EOF
+# Use nginx to serve static React files
+FROM nginx:alpine
 
-# Free tier configuration based on Google Cloud pricing calculator
-# 1 instance, 730 hours/month, F1 class = $0.00/month
-automatic_scaling:
-  min_instances: 0
-  max_instances: 1
-  max_idle_instances: 1
-  min_idle_instances: 0
-  max_concurrent_requests: 1000
+# Copy built React app to nginx html directory
+COPY dist/ /usr/share/nginx/html/
 
-# F1 instance class (free tier eligible)
-instance_class: F1
+# Create nginx configuration for SPA routing
+RUN echo 'server {' > /etc/nginx/conf.d/default.conf && \
+    echo '    listen 8080;' >> /etc/nginx/conf.d/default.conf && \
+    echo '    server_name localhost;' >> /etc/nginx/conf.d/default.conf && \
+    echo '    location / {' >> /etc/nginx/conf.d/default.conf && \
+    echo '        root /usr/share/nginx/html;' >> /etc/nginx/conf.d/default.conf && \
+    echo '        index index.html index.htm;' >> /etc/nginx/conf.d/default.conf && \
+    echo '        try_files \$uri \$uri/ /index.html;' >> /etc/nginx/conf.d/default.conf && \
+    echo '    }' >> /etc/nginx/conf.d/default.conf && \
+    echo '    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot|map)$ {' >> /etc/nginx/conf.d/default.conf && \
+    echo '        expires 1y;' >> /etc/nginx/conf.d/default.conf && \
+    echo '        add_header Cache-Control "public, immutable";' >> /etc/nginx/conf.d/default.conf && \
+    echo '    }' >> /etc/nginx/conf.d/default.conf && \
+    echo '}' >> /etc/nginx/conf.d/default.conf
 
-# Static file handlers for React app
-handlers:
-# Handle static assets (JS, CSS, images, etc.)
-- url: /(.*\.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot|map|json))$
-  static_files: dist/\1
-  upload: dist/(.*\.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot|map|json))$
-  secure: always
-  expiration: "1d"
+# Expose port 8080 (Cloud Run requirement)
+EXPOSE 8080
 
-# Handle index.html and SPA routing
-- url: /.*
-  static_files: dist/index.html
-  upload: dist/index.html
-  secure: always
-
-# Environment variables
-env_variables:
-  NODE_ENV: production
+# Start nginx
+CMD ["nginx", "-g", "daemon off;"]
 EOF
 
-    log_success "✅ App Engine configuration created for free tier"
+    log_success "✅ Cloud Run Dockerfile created for React hosting"
     
-    # Initialize App Engine application if it doesn't exist
-    log_info "🔧 Initializing App Engine application..."
+    # Deploy React app to Cloud Run
+    log_info "🚀 Deploying React app to Cloud Run..."
     
-    # Check if App Engine app exists, if not create it
-    APP_EXISTS=$(gcloud app describe --project="$PROJECT_ID" 2>&1 || echo "not_found")
-    
-    if echo "$APP_EXISTS" | grep -q "not_found\|does not contain an App Engine application"; then
-        log_info "Creating App Engine application..."
+    if gcloud run deploy sage-frontend \
+        --source . \
+        --region="$REGION" \
+        --platform=managed \
+        --allow-unauthenticated \
+        --memory=512Mi \
+        --cpu=1 \
+        --max-instances=5 \
+        --min-instances=0 \
+        --port=8080 \
+        --set-env-vars="NODE_ENV=production" \
+        --project="$PROJECT_ID" \
+        --quiet; then
         
-        # Use the same region as the backend for consistency
-        CREATE_RESULT=$(gcloud app create --region="$REGION" --project="$PROJECT_ID" --quiet 2>&1 || echo "failed")
-        
-        if echo "$CREATE_RESULT" | grep -q "already contains an App Engine application"; then
-            log_success "✅ App Engine application already exists (detected during create)"
-        elif echo "$CREATE_RESULT" | grep -q "failed"; then
-            log_warning "⚠️ Failed to create App Engine app in $REGION, trying us-central"
-            
-            CREATE_RESULT2=$(gcloud app create --region="us-central" --project="$PROJECT_ID" --quiet 2>&1 || echo "failed")
-            
-            if echo "$CREATE_RESULT2" | grep -q "already contains an App Engine application"; then
-                log_success "✅ App Engine application already exists (detected during create)"
-            elif echo "$CREATE_RESULT2" | grep -q "failed"; then
-                log_error "❌ Failed to create App Engine application"
-                FRONTEND_URL="https://$PROJECT_ID.appspot.com"
-                log_info "🌐 Your app will be available at: $FRONTEND_URL (once manually deployed)"
-                log_info "📋 Manual setup: gcloud app create --region=us-central --project=$PROJECT_ID"
-                DEPLOYMENT_SUCCESS=false
-            else
-                log_success "✅ App Engine application created in region: us-central"
-            fi
-        else
-            log_success "✅ App Engine application created in region: $REGION"
-        fi
-        
-        # Wait for App Engine to be fully initialized
-        sleep 5
+        FRONTEND_URL=$(gcloud run services describe sage-frontend --region="$REGION" --format='value(status.url)' --project="$PROJECT_ID")
+        log_success "✅ Frontend deployed to Cloud Run: $FRONTEND_URL"
+        DEPLOYMENT_SUCCESS=true
     else
-        log_success "✅ App Engine application already exists"
-    fi
-    
-    # Deploy to App Engine with robust error handling
-    if [[ "$DEPLOYMENT_SUCCESS" != "false" ]]; then
-        log_info "🚀 Deploying React app to App Engine..."
-        
-        # Try deployment with detailed error checking
-        DEPLOY_RESULT=$(gcloud app deploy app.yaml --project="$PROJECT_ID" --quiet 2>&1 || echo "DEPLOY_FAILED")
-        
-        if echo "$DEPLOY_RESULT" | grep -q "DEPLOY_FAILED\|does not contain an App Engine application"; then
-            log_warning "⚠️ First deployment failed, trying to force App Engine creation..."
-            
-            # Force create App Engine in multiple regions as fallback
-            for region in "us-central" "us-east1" "europe-west1"; do
-                log_info "Attempting App Engine creation in $region..."
-                CREATE_OUTPUT=$(gcloud app create --region="$region" --project="$PROJECT_ID" --quiet 2>&1 || echo "failed")
-                
-                if echo "$CREATE_OUTPUT" | grep -q "Application created\|already contains an App Engine application"; then
-                    log_success "✅ App Engine ready in region: $region"
-                    sleep 5
-                    
-                    # Try deployment again
-                    if gcloud app deploy app.yaml --project="$PROJECT_ID" --quiet; then
-                        FRONTEND_URL="https://$PROJECT_ID.appspot.com"
-                        log_success "✅ Frontend deployed to App Engine: $FRONTEND_URL"
-                        DEPLOYMENT_SUCCESS=true
-                        break
-                    fi
-                fi
-            done
-            
-            # If still failed, provide manual instructions
-            if [[ "$DEPLOYMENT_SUCCESS" != "true" ]]; then
-                log_error "❌ App Engine deployment failed after multiple attempts"
-                FRONTEND_URL="https://$PROJECT_ID.appspot.com"
-                log_info "🌐 Your app will be available at: $FRONTEND_URL (once manually deployed)"
-                log_info "📋 Manual deployment steps:"
-                log_info "   1. gcloud app create --region=us-central --project=$PROJECT_ID"
-                log_info "   2. cd $FRONTEND_DIR && gcloud app deploy --project=$PROJECT_ID"
-                DEPLOYMENT_SUCCESS=false
-            fi
-        else
-            FRONTEND_URL="https://$PROJECT_ID.appspot.com"
-            log_success "✅ Frontend deployed to App Engine: $FRONTEND_URL"
-            DEPLOYMENT_SUCCESS=true
-        fi
-    else
-        log_info "⏭️ Skipping deployment due to App Engine initialization failure"
+        log_error "❌ Cloud Run deployment failed"
+        FRONTEND_URL="https://sage-frontend-[hash].run.app"
+        log_info "🌐 Your app will be available at: $FRONTEND_URL (once manually deployed)"
+        log_info "📋 Manual deployment: cd $FRONTEND_DIR && gcloud run deploy sage-frontend --source . --region=$REGION --project=$PROJECT_ID"
+        DEPLOYMENT_SUCCESS=false
     fi
     
 else
