@@ -616,14 +616,27 @@ fi
 
 # Prepare deployment directory
 
+
 rm -rf "$DEPLOY_DIR"
 mkdir -p "$DEPLOY_DIR"
-cp -r "$FRONTEND_DIR/dist" "$DEPLOY_DIR/dist"
+# Copy full React source for build in Cloud Run
+cp -r "$FRONTEND_DIR/"* "$DEPLOY_DIR/"
 
 # Replace Dockerfile with static file server Dockerfile for Cloud Run
+
+# Add nginx.conf to listen on port 8080
+
+# Dockerfile for build and serve in Cloud Run
 cat > "$DEPLOY_DIR/Dockerfile" << 'EOF'
+FROM node:18-alpine as builder
+WORKDIR /app
+COPY package*.json ./
+COPY . .
+RUN npm install --legacy-peer-deps --force && npm run build
+
 FROM nginx:alpine
-COPY dist /usr/share/nginx/html
+WORKDIR /usr/share/nginx/html
+COPY --from=builder /app/dist .
 EXPOSE 8080
 CMD ["nginx", "-g", "daemon off;"]
 EOF
