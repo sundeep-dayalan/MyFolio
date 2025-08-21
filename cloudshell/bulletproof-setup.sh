@@ -104,6 +104,7 @@ enable_api_safe "firestore.googleapis.com"
 enable_api_safe "cloudresourcemanager.googleapis.com"
 enable_api_safe "iam.googleapis.com"
 enable_api_safe "firebase.googleapis.com"
+enable_api_safe "firebasehosting.googleapis.com"
 enable_api_safe "appengine.googleapis.com"
 
 # Fix Cloud Build service account permissions
