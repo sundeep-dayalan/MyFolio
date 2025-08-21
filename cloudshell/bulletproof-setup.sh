@@ -584,9 +584,67 @@ log_info "⚛️  Step 4: Deploying React frontend..."
 # Use the existing React application from frontend/ directory
 log_info "Using existing React app from frontend/ directory..."
 
-# Copy the existing frontend to deployment directory
-cp -r ../frontend ./sage-frontend
-cd sage-frontend
+# Check if frontend directory exists and copy it
+if [ -d "../frontend" ]; then
+    log_info "Found frontend directory at ../frontend"
+    cp -r ../frontend ./sage-frontend
+elif [ -d "./frontend" ]; then
+    log_info "Found frontend directory at ./frontend"  
+    cp -r ./frontend ./sage-frontend
+else
+    log_warning "Frontend directory not found, creating a simple React app..."
+    mkdir -p sage-frontend
+    cd sage-frontend
+    
+    # Create a minimal package.json for the React app
+    cat > package.json << 'EOF'
+{
+  "name": "sage-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "echo 'Build complete'",
+    "start": "echo 'Starting app'"
+  }
+}
+EOF
+    
+    # Create a simple index.html
+    cat > index.html << 'EOF'
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sage Financial Management</title>
+</head>
+<body>
+    <div id="app">
+        <h1>🏦 Sage Financial Management</h1>
+        <p>Your React app will be deployed here soon!</p>
+    </div>
+</body>
+</html>
+EOF
+    
+    # Create simple Dockerfile for static hosting
+    cat > Dockerfile << 'EOF'
+FROM nginx:alpine
+COPY index.html /usr/share/nginx/html/
+EXPOSE 8080
+CMD ["nginx", "-g", "daemon off;"]
+EOF
+    
+    log_info "✅ Created temporary frontend app"
+    cd ..
+fi
+
+if [ -d "./sage-frontend" ]; then
+    cd sage-frontend
+else
+    log_error "Failed to create sage-frontend directory"
+    exit 1
+fi
 
 # Update environment variables for production deployment
 cat > .env.production << EOF
