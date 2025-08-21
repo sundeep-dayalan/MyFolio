@@ -741,44 +741,59 @@ EOF
     log_info "🔧 Initializing App Engine application..."
     
     # Check if App Engine app exists, if not create it
-    if ! gcloud app describe --project="$PROJECT_ID" >/dev/null 2>&1; then
+    APP_EXISTS=$(gcloud app describe --project="$PROJECT_ID" 2>&1 || echo "not_found")
+    
+    if echo "$APP_EXISTS" | grep -q "not_found\|does not contain an App Engine application"; then
         log_info "Creating App Engine application..."
         
         # Use the same region as the backend for consistency
-        if gcloud app create --region="$REGION" --project="$PROJECT_ID" --quiet; then
-            log_success "✅ App Engine application created in region: $REGION"
-        else
+        CREATE_RESULT=$(gcloud app create --region="$REGION" --project="$PROJECT_ID" --quiet 2>&1 || echo "failed")
+        
+        if echo "$CREATE_RESULT" | grep -q "already contains an App Engine application"; then
+            log_success "✅ App Engine application already exists (detected during create)"
+        elif echo "$CREATE_RESULT" | grep -q "failed"; then
             log_warning "⚠️ Failed to create App Engine app in $REGION, trying us-central"
-            if gcloud app create --region="us-central" --project="$PROJECT_ID" --quiet; then
-                log_success "✅ App Engine application created in region: us-central"
-            else
+            
+            CREATE_RESULT2=$(gcloud app create --region="us-central" --project="$PROJECT_ID" --quiet 2>&1 || echo "failed")
+            
+            if echo "$CREATE_RESULT2" | grep -q "already contains an App Engine application"; then
+                log_success "✅ App Engine application already exists (detected during create)"
+            elif echo "$CREATE_RESULT2" | grep -q "failed"; then
                 log_error "❌ Failed to create App Engine application"
                 FRONTEND_URL="https://$PROJECT_ID.appspot.com"
                 log_info "🌐 Your app will be available at: $FRONTEND_URL (once manually deployed)"
                 log_info "📋 Manual setup: gcloud app create --region=us-central --project=$PROJECT_ID"
-                return
+                DEPLOYMENT_SUCCESS=false
+            else
+                log_success "✅ App Engine application created in region: us-central"
             fi
+        else
+            log_success "✅ App Engine application created in region: $REGION"
         fi
         
         # Wait for App Engine to be fully initialized
-        sleep 10
+        sleep 5
     else
         log_success "✅ App Engine application already exists"
     fi
     
-    # Deploy to App Engine
-    log_info "🚀 Deploying React app to App Engine..."
-    
-    if gcloud app deploy app.yaml --project="$PROJECT_ID" --quiet; then
-        FRONTEND_URL="https://$PROJECT_ID.appspot.com"
-        log_success "✅ Frontend deployed to App Engine: $FRONTEND_URL"
-        DEPLOYMENT_SUCCESS=true
+    # Deploy to App Engine only if initialization was successful
+    if [[ "$DEPLOYMENT_SUCCESS" != "false" ]]; then
+        log_info "🚀 Deploying React app to App Engine..."
+        
+        if gcloud app deploy app.yaml --project="$PROJECT_ID" --quiet; then
+            FRONTEND_URL="https://$PROJECT_ID.appspot.com"
+            log_success "✅ Frontend deployed to App Engine: $FRONTEND_URL"
+            DEPLOYMENT_SUCCESS=true
+        else
+            log_error "❌ App Engine deployment failed"
+            FRONTEND_URL="https://$PROJECT_ID.appspot.com"
+            log_info "🌐 Your app will be available at: $FRONTEND_URL (once manually deployed)"
+            log_info "📋 Manual deployment: cd $FRONTEND_DIR && gcloud app deploy --project=$PROJECT_ID"
+            DEPLOYMENT_SUCCESS=false
+        fi
     else
-        log_error "❌ App Engine deployment failed"
-        FRONTEND_URL="https://$PROJECT_ID.appspot.com"
-        log_info "🌐 Your app will be available at: $FRONTEND_URL (once manually deployed)"
-        log_info "📋 Manual deployment: cd $FRONTEND_DIR && gcloud app deploy --project=$PROJECT_ID"
-        DEPLOYMENT_SUCCESS=false
+        log_info "⏭️ Skipping deployment due to App Engine initialization failure"
     fi
     
 else
