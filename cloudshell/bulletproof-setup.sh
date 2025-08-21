@@ -10,6 +10,10 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
+# Store initial script directory for reliable navigation
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+INITIAL_DIR="$(pwd)"
+
 log_info() { echo -e "${BLUE}[SAGE]${NC} $1"; }
 log_success() { echo -e "${GREEN}[SAGE]${NC} $1"; }
 log_warning() { echo -e "${YELLOW}[SAGE]${NC} $1"; }
@@ -581,13 +585,46 @@ else
     BACKEND_URL=""
 fi
 
-cd ..
+cd "$SCRIPT_DIR"
 
 echo ""
 log_info "⚛️  Step 4: Deploying React frontend to Firebase Hosting..."
 
+# Find the frontend directory - it could be in different locations
+log_info "🔍 Looking for frontend directory from: $(pwd)"
+FRONTEND_DIR=""
+
+# Check multiple possible locations for the frontend directory
+if [ -d "../frontend" ]; then
+    FRONTEND_DIR="../frontend"
+    log_info "✓ Found frontend at: ../frontend"
+elif [ -d "./frontend" ]; then
+    FRONTEND_DIR="./frontend"
+    log_info "✓ Found frontend at: ./frontend"
+elif [ -d "frontend" ]; then
+    FRONTEND_DIR="frontend"
+    log_info "✓ Found frontend at: frontend"
+elif [ -d "$INITIAL_DIR/frontend" ]; then
+    FRONTEND_DIR="$INITIAL_DIR/frontend"
+    log_info "✓ Found frontend at: $INITIAL_DIR/frontend"
+elif [ -d "${SCRIPT_DIR}/../frontend" ]; then
+    FRONTEND_DIR="${SCRIPT_DIR}/../frontend"
+    log_info "✓ Found frontend at: ${SCRIPT_DIR}/../frontend"
+else
+    log_error "❌ Frontend directory not found in any of these locations:"
+    log_error "   - ../frontend"
+    log_error "   - ./frontend" 
+    log_error "   - frontend"
+    log_error "   - $INITIAL_DIR/frontend"
+    log_error "   - ${SCRIPT_DIR}/../frontend"
+    log_error "Current working directory: $(pwd)"
+    log_error "Script directory: $SCRIPT_DIR"
+    log_error "Initial directory: $INITIAL_DIR"
+    exit 1
+fi
+
 # Navigate to the existing frontend directory
-cd ../frontend
+cd "$FRONTEND_DIR"
 
 # Update Firebase project configuration to match current project
 log_info "Configuring Firebase project..."
@@ -626,7 +663,9 @@ if npm run build; then
     log_success "✅ React app built successfully"
 else
     log_error "❌ React build failed"
-    cd ../cloudshell
+    # Return to script directory
+    SCRIPT_DIR="$(dirname "$(readlink -f "$0")")" 2>/dev/null || SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+    cd "$SCRIPT_DIR"
     exit 1
 fi
 
@@ -639,7 +678,9 @@ if ! command -v firebase &> /dev/null; then
         log_warning "⚠️ Could not install Firebase CLI globally, trying locally..."
         npm install --save-dev firebase-tools --silent 2>/dev/null || {
             log_error "❌ Failed to install Firebase CLI"
-            cd ../cloudshell
+            # Return to script directory
+            SCRIPT_DIR="$(dirname "$(readlink -f "$0")")" 2>/dev/null || SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+            cd "$SCRIPT_DIR"
             exit 1
         }
         # Use local firebase
@@ -727,7 +768,9 @@ if [ "$DEPLOYMENT_SUCCESS" = false ]; then
     log_info "🌐 Your app will be available at: $FRONTEND_URL (once manually deployed)"
 fi
 
-cd ../cloudshell
+# Return to script directory  
+SCRIPT_DIR="$(dirname "$(readlink -f "$0")")" 2>/dev/null || SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR"
 
 echo ""
 log_info "🔐 Step 5: Setting up enhanced OAuth automation..."
