@@ -615,13 +615,19 @@ if [ ! -d "$FRONTEND_DIR/dist" ]; then
 fi
 
 # Prepare deployment directory
+
 rm -rf "$DEPLOY_DIR"
 mkdir -p "$DEPLOY_DIR"
 cp -r "$FRONTEND_DIR/dist" "$DEPLOY_DIR/dist"
-cp "$FRONTEND_DIR/package.json" "$DEPLOY_DIR/"
-if [ -f "$FRONTEND_DIR/Dockerfile" ]; then
-    cp "$FRONTEND_DIR/Dockerfile" "$DEPLOY_DIR/"
-fi
+
+# Replace Dockerfile with static file server Dockerfile for Cloud Run
+cat > "$DEPLOY_DIR/Dockerfile" << 'EOF'
+FROM nginx:alpine
+COPY dist /usr/share/nginx/html
+EXPOSE 8080
+CMD ["nginx", "-g", "daemon off;"]
+EOF
+
 cd "$DEPLOY_DIR"
 
 # Update environment variables for production deployment
