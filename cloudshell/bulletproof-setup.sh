@@ -774,12 +774,19 @@ log_info "🔧 Initializing Firebase hosting..."
 
 # First, try to create the hosting site using Firebase CLI
 log_info "Creating Firebase hosting site..."
-if $FIREBASE_CMD hosting:sites:create "$PROJECT_ID" --project="$PROJECT_ID" 2>/dev/null; then
+
+# Generate a unique site ID
+UNIQUE_SITE_ID="${PROJECT_ID}-$(date +%s)"
+
+# Try different methods to create the site
+if echo "$UNIQUE_SITE_ID" | $FIREBASE_CMD hosting:sites:create --project="$PROJECT_ID" 2>/dev/null; then
+    log_success "✅ Firebase hosting site created: $UNIQUE_SITE_ID"
+elif $FIREBASE_CMD hosting:sites:create "$PROJECT_ID" --project="$PROJECT_ID" --non-interactive 2>/dev/null; then
     log_success "✅ Firebase hosting site created: $PROJECT_ID"
-elif $FIREBASE_CMD hosting:sites:create "${PROJECT_ID}-$(date +%s)" --project="$PROJECT_ID" 2>/dev/null; then
-    log_success "✅ Firebase hosting site created with unique ID"
+    UNIQUE_SITE_ID="$PROJECT_ID"
 else
-    log_info "ℹ️ Firebase hosting site creation failed, will try during deployment"
+    log_info "ℹ️ Firebase hosting site creation failed, will configure during init"
+    UNIQUE_SITE_ID="$PROJECT_ID"
 fi
 
 # Wait a moment for Firebase to propagate
@@ -789,10 +796,11 @@ sleep 5
 if [ ! -f ".firebaserc" ] || ! grep -q "$PROJECT_ID" .firebaserc 2>/dev/null; then
     log_info "Initializing Firebase project configuration..."
     
-    # Create firebase configuration files
+    # Create firebase configuration files with site ID
     cat > firebase.json << EOF
 {
   "hosting": {
+    "site": "$UNIQUE_SITE_ID",
     "public": "dist",
     "ignore": [
       "firebase.json",
@@ -892,9 +900,9 @@ EOF
     fi
     
     if [ "$DEPLOYMENT_SUCCESS" = true ]; then
-        FRONTEND_URL="https://$PROJECT_ID.web.app"
+        FRONTEND_URL="https://$UNIQUE_SITE_ID.web.app"
         log_success "✅ Frontend deployed to Firebase Hosting: $FRONTEND_URL"
-        log_info "✅ Also available at: https://$PROJECT_ID.firebaseapp.com"
+        log_info "✅ Also available at: https://$UNIQUE_SITE_ID.firebaseapp.com"
         break
     else
         if [ $attempt -lt 4 ]; then
@@ -913,7 +921,7 @@ if [ "$DEPLOYMENT_SUCCESS" = false ]; then
     log_info "   1. Check Firebase console: https://console.firebase.google.com/project/$PROJECT_ID/hosting"
     log_info "   2. Verify hosting is enabled for your project"
     log_info "   3. Try: firebase login --reauth"
-    FRONTEND_URL="https://$PROJECT_ID.web.app"
+    FRONTEND_URL="https://$UNIQUE_SITE_ID.web.app"
     log_info "🌐 Your app will be available at: $FRONTEND_URL (once manually deployed)"
 fi
 
