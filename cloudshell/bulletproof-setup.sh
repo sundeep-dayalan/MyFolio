@@ -636,6 +636,39 @@ cat > .firebaserc << EOF
 }
 EOF
 
+# Create proper firebase.json with site configuration
+log_info "Creating Firebase hosting configuration..."
+cat > firebase.json << EOF
+{
+  "hosting": {
+    "site": "$PROJECT_ID",
+    "public": "dist",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ],
+    "headers": [
+      {
+        "source": "**/*.@(js|css)",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "max-age=31536000"
+          }
+        ]
+      }
+    ]
+  }
+}
+EOF
+
 # Update environment variables for production deployment
 log_info "Setting up production environment variables..."
 cat > .env.production << EOF
