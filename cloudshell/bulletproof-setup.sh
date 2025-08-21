@@ -581,12 +581,23 @@ cd ..
 echo ""
 log_info "⚛️  Step 4: Deploying React frontend..."
 
-# Use the existing React application from frontend/ directory
 log_info "Using existing React app from frontend/ directory..."
 
-# Copy the existing frontend to deployment directory
-cp -r ../frontend ./sage-frontend
-cd sage-frontend
+# Build the React frontend before deploying
+cd ../frontend
+log_info "Installing frontend dependencies..."
+npm install --legacy-peer-deps --force || npm install || true
+log_info "Building React frontend for production..."
+npm run build || { log_error "Frontend build failed"; FRONTEND_URL=""; cd ..; cd cloudshell; continue; }
+
+# Prepare deployment directory
+cd ..
+rm -rf cloudshell/sage-frontend
+mkdir -p cloudshell/sage-frontend
+cp -r frontend/dist cloudshell/sage-frontend/dist
+cp frontend/package.json cloudshell/sage-frontend/
+cp frontend/Dockerfile cloudshell/sage-frontend/
+cd cloudshell/sage-frontend
 
 # Update environment variables for production deployment
 cat > .env.production << EOF
@@ -595,11 +606,10 @@ VITE_APP_ENV=production
 VITE_PROJECT_ID=$PROJECT_ID
 EOF
 
-log_info "✅ React app configured for production deployment"
+log_info "✅ React app built and configured for production deployment"
 
-# The React app already has a proper Dockerfile, so we can deploy directly
-log_info "Building and deploying React frontend..."
-
+# Deploy the built frontend using Cloud Run
+log_info "Deploying React frontend to Cloud Run..."
 if gcloud run deploy sage-frontend \
     --source . \
     --region="$REGION" \
@@ -611,7 +621,6 @@ if gcloud run deploy sage-frontend \
     --port=8080 \
     --project="$PROJECT_ID" \
     --quiet; then
-    
     FRONTEND_URL=$(gcloud run services describe sage-frontend --region="$REGION" --format='value(status.url)' --project="$PROJECT_ID")
     log_success "✅ Frontend deployed: $FRONTEND_URL"
 else
