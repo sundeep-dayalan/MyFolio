@@ -583,21 +583,46 @@ log_info "⚛️  Step 4: Deploying React frontend..."
 
 log_info "Using existing React app from frontend/ directory..."
 
-# Build the React frontend before deploying
-cd ../frontend
+# Set absolute paths
+WORKSPACE_DIR="$(dirname $(dirname $(realpath $0)))"
+FRONTEND_DIR="$WORKSPACE_DIR/frontend"
+DEPLOY_DIR="$WORKSPACE_DIR/cloudshell/sage-frontend"
+
+# Check for frontend directory and package.json
+if [ ! -d "$FRONTEND_DIR" ]; then
+    log_error "Frontend directory not found: $FRONTEND_DIR"
+    FRONTEND_URL=""
+    exit 1
+fi
+if [ ! -f "$FRONTEND_DIR/package.json" ]; then
+    log_error "package.json not found in frontend directory: $FRONTEND_DIR/package.json"
+    FRONTEND_URL=""
+    exit 1
+fi
+
+# Build the React frontend
+cd "$FRONTEND_DIR"
 log_info "Installing frontend dependencies..."
 npm install --legacy-peer-deps --force || npm install || true
 log_info "Building React frontend for production..."
-npm run build || { log_error "Frontend build failed"; FRONTEND_URL=""; cd ..; cd cloudshell; continue; }
+npm run build || { log_error "Frontend build failed"; FRONTEND_URL=""; exit 1; }
+
+# Check for dist directory
+if [ ! -d "$FRONTEND_DIR/dist" ]; then
+    log_error "Frontend build output not found: $FRONTEND_DIR/dist"
+    FRONTEND_URL=""
+    exit 1
+fi
 
 # Prepare deployment directory
-cd ..
-rm -rf cloudshell/sage-frontend
-mkdir -p cloudshell/sage-frontend
-cp -r frontend/dist cloudshell/sage-frontend/dist
-cp frontend/package.json cloudshell/sage-frontend/
-cp frontend/Dockerfile cloudshell/sage-frontend/
-cd cloudshell/sage-frontend
+rm -rf "$DEPLOY_DIR"
+mkdir -p "$DEPLOY_DIR"
+cp -r "$FRONTEND_DIR/dist" "$DEPLOY_DIR/dist"
+cp "$FRONTEND_DIR/package.json" "$DEPLOY_DIR/"
+if [ -f "$FRONTEND_DIR/Dockerfile" ]; then
+    cp "$FRONTEND_DIR/Dockerfile" "$DEPLOY_DIR/"
+fi
+cd "$DEPLOY_DIR"
 
 # Update environment variables for production deployment
 cat > .env.production << EOF
@@ -628,7 +653,7 @@ else
     FRONTEND_URL=""
 fi
 
-cd ..
+cd "$WORKSPACE_DIR/cloudshell"
 
 echo ""
 log_info "🔐 Step 5: Setting up enhanced OAuth automation..."
