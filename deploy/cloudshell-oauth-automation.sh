@@ -165,7 +165,7 @@ EOF
                 
                 echo "SUCCESS" > /tmp/oauth_status
                 rm -f /tmp/create_oauth_cloudshell.py /tmp/oauth_result
-                return 0
+                exit 0
             fi
         fi
     fi
@@ -266,4 +266,4 @@ log_success "✅ Intelligent OAuth setup created!"
 log_info "🚀 Run: ./intelligent-oauth-setup.sh $FRONTEND_URL '$APP_NAME'"
 
 echo "MANUAL_SETUP" > /tmp/oauth_status
-return 0
+exit 0

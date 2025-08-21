@@ -97,6 +97,35 @@ enable_api_safe() {
 enable_api_safe "cloudbuild.googleapis.com"
 enable_api_safe "run.googleapis.com"
 enable_api_safe "firestore.googleapis.com"
+enable_api_safe "cloudresourcemanager.googleapis.com"
+enable_api_safe "iam.googleapis.com"
+
+# Fix Cloud Build service account permissions
+log_info "Setting up Cloud Build service account permissions..."
+PROJECT_NUMBER=$(gcloud projects describe "$PROJECT_ID" --format="value(projectNumber)" 2>/dev/null)
+if [[ -n "$PROJECT_NUMBER" ]]; then
+    CLOUD_BUILD_SA="${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com"
+    
+    # Grant necessary roles to Cloud Build service account
+    gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+        --member="serviceAccount:${CLOUD_BUILD_SA}" \
+        --role="roles/run.admin" \
+        --quiet 2>/dev/null || true
+        
+    gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+        --member="serviceAccount:${CLOUD_BUILD_SA}" \
+        --role="roles/iam.serviceAccountUser" \
+        --quiet 2>/dev/null || true
+        
+    gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+        --member="serviceAccount:${CLOUD_BUILD_SA}" \
+        --role="roles/storage.admin" \
+        --quiet 2>/dev/null || true
+        
+    log_success "✅ Cloud Build service account permissions configured"
+else
+    log_warning "⚠️ Could not configure Cloud Build permissions - may need manual setup"
+fi
 
 echo ""
 log_info "🗄️  Step 2: Setting up Firestore databases..."
@@ -556,7 +585,7 @@ log_info "⚛️  Step 4: Deploying frontend..."
 mkdir -p sage-frontend
 cd sage-frontend
 
-# Create beautiful, functional frontend
+# Create beautiful, functional frontend that redirects to React app when backend is ready
 cat > index.html << EOF
 <!DOCTYPE html>
 <html lang="en">
@@ -629,6 +658,11 @@ cat > index.html << EOF
             <p>Your Sage application is now running on Google Cloud</p>
             <p><strong>Environment:</strong> $APP_ENV | <strong>Database:</strong> $FIRESTORE_DB | <strong>Plaid:</strong> $PLAID_ENV</p>
             <p id="backend-status">Checking backend connection...</p>
+            <div id="redirect-notice" style="display: none; background: rgba(34, 197, 94, 0.2); padding: 15px; border-radius: 10px; margin: 10px 0;">
+                <h4 style="color: #22c55e; margin: 0 0 10px 0;">✅ Backend Ready!</h4>
+                <p style="margin: 0;">Redirecting to your full React application in <span id="countdown">5</span> seconds...</p>
+                <button onclick="redirectNow()" style="background: #22c55e; color: white; border: none; padding: 8px 16px; border-radius: 5px; margin-top: 10px; cursor: pointer;">Go Now</button>
+            </div>
         </div>
 
         <div class="steps" id="setup-steps">
@@ -682,13 +716,55 @@ cat > index.html << EOF
         const backendUrl = '$BACKEND_URL';
         document.getElementById('backend-url').textContent = backendUrl || 'Not deployed';
         
+        // Redirect functionality
+        let countdownTimer;
+        
+        function redirectNow() {
+            window.location.href = 'https://sage-app.com'; // Replace with actual React app URL
+        }
+        
+        function startRedirectCountdown() {
+            const redirectNotice = document.getElementById('redirect-notice');
+            const countdownEl = document.getElementById('countdown');
+            let seconds = 5;
+            
+            redirectNotice.style.display = 'block';
+            
+            countdownTimer = setInterval(() => {
+                seconds--;
+                countdownEl.textContent = seconds;
+                
+                if (seconds <= 0) {
+                    clearInterval(countdownTimer);
+                    redirectNow();
+                }
+            }, 1000);
+        }
+        
         async function testBackend() {
             const statusEl = document.getElementById('backend-status');
             try {
                 statusEl.innerHTML = '⏳ Testing backend connection...';
+                
+                if (!backendUrl) {
+                    statusEl.innerHTML = '⚠️ Backend not deployed - showing setup page';
+                    return;
+                }
+                
                 const response = await fetch(backendUrl + '/health');
-                const data = await response.json();
-                statusEl.innerHTML = '✅ Backend is healthy and responding!';
+                if (response.ok) {
+                    const data = await response.json();
+                    statusEl.innerHTML = '✅ Backend is healthy and responding!';
+                    
+                    // Check if this is a proper React app or just setup page
+                    const appResponse = await fetch(backendUrl + '/api/v1/health');
+                    if (appResponse.ok) {
+                        // Backend API is ready, start redirect countdown
+                        setTimeout(startRedirectCountdown, 2000);
+                    }
+                } else {
+                    statusEl.innerHTML = '⚠️ Backend connection issue - check Cloud Run logs';
+                }
             } catch (error) {
                 statusEl.innerHTML = '⚠️ Backend connection issue - check Cloud Run logs';
             }
@@ -1036,6 +1112,3 @@ For support: https://github.com/sundeep-dayalan/sage
 EOF
 
 log_success "Deployment summary saved to deployment-summary.txt"
-EOF
-
-chmod +x cloudshell/bulletproof-setup.sh

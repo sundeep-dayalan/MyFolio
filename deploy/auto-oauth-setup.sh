@@ -88,6 +88,33 @@ EOF
 # Try to create OAuth client using gcloud commands and REST API
 log_info "Creating OAuth consent screen and client..."
 
+# Function to safely enable APIs (define it here since it's missing)
+enable_api_safe() {
+    local api=$1
+    log_info "Enabling $api..."
+    
+    # Check if already enabled
+    if gcloud services list --enabled --filter="name:$api" --format="value(name)" --project="$PROJECT_ID" 2>/dev/null | grep -q "$api"; then
+        log_success "✅ $api (already enabled)"
+        return 0
+    fi
+    
+    # Try to enable with multiple attempts
+    for attempt in 1 2 3; do
+        if gcloud services enable "$api" --project="$PROJECT_ID" --quiet 2>/dev/null; then
+            log_success "✅ $api enabled"
+            return 0
+        fi
+        if [ $attempt -lt 3 ]; then
+            log_info "   Retrying $api (attempt $attempt/3)..."
+            sleep 2
+        fi
+    done
+    
+    log_warning "⚠️  $api enablement skipped (not critical)"
+    return 0
+}
+
 # First, enable the OAuth consent screen APIs
 enable_api_safe "iamcredentials.googleapis.com"
 
@@ -410,7 +437,7 @@ EOF
         
         log_success "✅ OAuth setup documentation saved to oauth-setup-complete.md"
         
-        return 0
+        exit 0
     fi
 fi
 
@@ -477,4 +504,4 @@ log_info "📖 See oauth-manual-setup.md for step-by-step instructions"
 # Clean up temp files
 rm -f /tmp/oauth-*.json
 
-return 0
+exit 0
