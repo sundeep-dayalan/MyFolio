@@ -777,20 +777,49 @@ EOF
         log_success "✅ App Engine application already exists"
     fi
     
-    # Deploy to App Engine only if initialization was successful
+    # Deploy to App Engine with robust error handling
     if [[ "$DEPLOYMENT_SUCCESS" != "false" ]]; then
         log_info "🚀 Deploying React app to App Engine..."
         
-        if gcloud app deploy app.yaml --project="$PROJECT_ID" --quiet; then
+        # Try deployment with detailed error checking
+        DEPLOY_RESULT=$(gcloud app deploy app.yaml --project="$PROJECT_ID" --quiet 2>&1 || echo "DEPLOY_FAILED")
+        
+        if echo "$DEPLOY_RESULT" | grep -q "DEPLOY_FAILED\|does not contain an App Engine application"; then
+            log_warning "⚠️ First deployment failed, trying to force App Engine creation..."
+            
+            # Force create App Engine in multiple regions as fallback
+            for region in "us-central" "us-east1" "europe-west1"; do
+                log_info "Attempting App Engine creation in $region..."
+                CREATE_OUTPUT=$(gcloud app create --region="$region" --project="$PROJECT_ID" --quiet 2>&1 || echo "failed")
+                
+                if echo "$CREATE_OUTPUT" | grep -q "Application created\|already contains an App Engine application"; then
+                    log_success "✅ App Engine ready in region: $region"
+                    sleep 5
+                    
+                    # Try deployment again
+                    if gcloud app deploy app.yaml --project="$PROJECT_ID" --quiet; then
+                        FRONTEND_URL="https://$PROJECT_ID.appspot.com"
+                        log_success "✅ Frontend deployed to App Engine: $FRONTEND_URL"
+                        DEPLOYMENT_SUCCESS=true
+                        break
+                    fi
+                fi
+            done
+            
+            # If still failed, provide manual instructions
+            if [[ "$DEPLOYMENT_SUCCESS" != "true" ]]; then
+                log_error "❌ App Engine deployment failed after multiple attempts"
+                FRONTEND_URL="https://$PROJECT_ID.appspot.com"
+                log_info "🌐 Your app will be available at: $FRONTEND_URL (once manually deployed)"
+                log_info "📋 Manual deployment steps:"
+                log_info "   1. gcloud app create --region=us-central --project=$PROJECT_ID"
+                log_info "   2. cd $FRONTEND_DIR && gcloud app deploy --project=$PROJECT_ID"
+                DEPLOYMENT_SUCCESS=false
+            fi
+        else
             FRONTEND_URL="https://$PROJECT_ID.appspot.com"
             log_success "✅ Frontend deployed to App Engine: $FRONTEND_URL"
             DEPLOYMENT_SUCCESS=true
-        else
-            log_error "❌ App Engine deployment failed"
-            FRONTEND_URL="https://$PROJECT_ID.appspot.com"
-            log_info "🌐 Your app will be available at: $FRONTEND_URL (once manually deployed)"
-            log_info "📋 Manual deployment: cd $FRONTEND_DIR && gcloud app deploy --project=$PROJECT_ID"
-            DEPLOYMENT_SUCCESS=false
         fi
     else
         log_info "⏭️ Skipping deployment due to App Engine initialization failure"
