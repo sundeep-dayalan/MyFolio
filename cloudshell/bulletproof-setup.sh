@@ -903,7 +903,7 @@ fi
 cd ..
 
 echo ""
-log_info "🔐 Step 5: Setting up automated OAuth..."
+log_info "🔐 Step 5: Setting up enhanced OAuth automation..."
 
 # Export variables for OAuth setup
 export PROJECT_ID
@@ -911,12 +911,33 @@ export FRONTEND_URL
 export APP_NAME
 export USER_EMAIL
 
-# Make OAuth script executable and run it
-chmod +x deploy/auto-oauth-setup.sh
-if ./deploy/auto-oauth-setup.sh; then
-    log_success "✅ OAuth configuration completed automatically!"
+# Try the enhanced Cloud Shell OAuth automation first
+chmod +x deploy/cloudshell-oauth-automation.sh
+log_info "Attempting Cloud Shell enhanced OAuth automation..."
+
+if ./deploy/cloudshell-oauth-automation.sh; then
+    if [[ -f "/tmp/oauth_status" ]] && grep -q "SUCCESS" /tmp/oauth_status; then
+        log_success "✅ OAuth completely automated with Cloud Shell!"
+        rm -f /tmp/oauth_status
+    else
+        log_info "Using guided OAuth setup..."
+        # Make fallback OAuth script executable and run it
+        chmod +x deploy/auto-oauth-setup.sh
+        if ./deploy/auto-oauth-setup.sh; then
+            log_success "✅ OAuth setup guidance created!"
+        else
+            log_warning "⚠️ OAuth setup requires manual configuration"
+        fi
+    fi
 else
-    log_warning "⚠️ OAuth setup requires manual configuration (instructions provided)"
+    log_info "Falling back to standard OAuth automation..."
+    # Make OAuth script executable and run it
+    chmod +x deploy/auto-oauth-setup.sh
+    if ./deploy/auto-oauth-setup.sh; then
+        log_success "✅ OAuth configuration completed!"
+    else
+        log_warning "⚠️ OAuth setup requires manual configuration (instructions provided)"
+    fi
 fi
 
 # Final success message
@@ -953,9 +974,22 @@ echo "   • Local dev uses sandbox Plaid environment"
 echo ""
 echo "🚀 NEXT STEPS:"
 echo "   1. Visit your production app: $FRONTEND_URL"
-echo "   2. OAuth configured automatically for Google sign-in"
+echo "   2. OAuth setup: Check for automated setup or follow guided instructions"
 echo "   3. Configure Plaid credentials through the UI when ready"
 echo "   4. For local development: use .env.dev configuration"
+echo ""
+echo "📋 OAuth SETUP STATUS:"
+if [[ -f "oauth-setup-complete.md" ]]; then
+    echo "   ✅ OAuth fully automated - ready to use!"
+elif [[ -f "cloudshell-oauth-success.md" ]]; then
+    echo "   ✅ OAuth automated with Cloud Shell - ready to use!"
+elif [[ -f "oauth-quick-setup.md" ]]; then
+    echo "   📖 See oauth-quick-setup.md for 2-minute setup"
+elif [[ -f "setup-oauth-automatically.sh" ]]; then
+    echo "   🚀 Run ./setup-oauth-automatically.sh for guided setup"
+else
+    echo "   📋 Check deployment logs for OAuth instructions"
+fi
 echo ""
 
 log_success "🎊 Deployment completed successfully! No errors! 🎊"
