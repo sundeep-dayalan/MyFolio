@@ -99,6 +99,8 @@ enable_api_safe "run.googleapis.com"
 enable_api_safe "firestore.googleapis.com"
 enable_api_safe "cloudresourcemanager.googleapis.com"
 enable_api_safe "iam.googleapis.com"
+enable_api_safe "firebase.googleapis.com"
+enable_api_safe "appengine.googleapis.com"
 
 # Fix Cloud Build service account permissions
 log_info "Setting up Cloud Build service account permissions..."
@@ -483,6 +485,9 @@ EOF
 
 log_info "Building and deploying backend..."
 
+# Set frontend URL for CORS configuration (Firebase Hosting default)
+FRONTEND_URL="https://$PROJECT_ID.web.app"
+
 # Deploy with automatic Artifact Registry creation (production deployment only)
 if gcloud run deploy sage-backend \
     --source . \
@@ -493,7 +498,7 @@ if gcloud run deploy sage-backend \
     --cpu=1 \
     --max-instances=10 \
     --port=8000 \
-    --set-env-vars="PROJECT_ID=$PROJECT_ID,APP_NAME=$APP_NAME,APP_ENV=$APP_ENV,PLAID_ENV=$PLAID_ENV,FIRESTORE_DB=$FIRESTORE_DB,REGION=$REGION,PLAID_PROD_CLIENT_ID=DEMO_MODE,PLAID_PROD_SECRET=DEMO_MODE,PLAID_SANDBOX_CLIENT_ID=DEMO_MODE,PLAID_SANDBOX_SECRET=DEMO_MODE,GOOGLE_CLIENT_ID=REPLACE_WITH_YOUR_GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET=REPLACE_WITH_YOUR_GOOGLE_CLIENT_SECRET" \
+    --set-env-vars="PROJECT_ID=$PROJECT_ID,APP_NAME=$APP_NAME,APP_ENV=$APP_ENV,PLAID_ENV=$PLAID_ENV,FIRESTORE_DB=$FIRESTORE_DB,REGION=$REGION,FRONTEND_URL=$FRONTEND_URL,PLAID_PROD_CLIENT_ID=DEMO_MODE,PLAID_PROD_SECRET=DEMO_MODE,PLAID_SANDBOX_CLIENT_ID=DEMO_MODE,PLAID_SANDBOX_SECRET=DEMO_MODE,GOOGLE_CLIENT_ID=REPLACE_WITH_YOUR_GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET=REPLACE_WITH_YOUR_GOOGLE_CLIENT_SECRET" \
     --project="$PROJECT_ID" \
     --quiet; then
     
@@ -579,16 +584,23 @@ fi
 cd ..
 
 echo ""
-log_info "⚛️  Step 4: Deploying React frontend..."
+log_info "⚛️  Step 4: Deploying React frontend to Firebase Hosting..."
 
-# Use the existing React application from frontend/ directory
-log_info "Using existing React app from frontend/ directory..."
+# Navigate to the existing frontend directory
+cd ../frontend
 
-# Copy the existing frontend to deployment directory
-cp -r ../frontend ./sage-frontend
-cd sage-frontend
+# Update Firebase project configuration to match current project
+log_info "Configuring Firebase project..."
+cat > .firebaserc << EOF
+{
+  "projects": {
+    "default": "$PROJECT_ID"
+  }
+}
+EOF
 
 # Update environment variables for production deployment
+log_info "Setting up production environment variables..."
 cat > .env.production << EOF
 VITE_API_BASE_URL=$BACKEND_URL
 VITE_APP_ENV=production
@@ -597,29 +609,125 @@ EOF
 
 log_info "✅ React app configured for production deployment"
 
-# The React app already has a proper Dockerfile, so we can deploy directly
-log_info "Building and deploying React frontend..."
-
-if gcloud run deploy sage-frontend \
-    --source . \
-    --region="$REGION" \
-    --platform=managed \
-    --allow-unauthenticated \
-    --memory=512Mi \
-    --cpu=1 \
-    --max-instances=5 \
-    --port=8080 \
-    --project="$PROJECT_ID" \
-    --quiet; then
-    
-    FRONTEND_URL=$(gcloud run services describe sage-frontend --region="$REGION" --format='value(status.url)' --project="$PROJECT_ID")
-    log_success "✅ Frontend deployed: $FRONTEND_URL"
-else
-    log_error "Frontend deployment failed"
-    FRONTEND_URL=""
+# Install dependencies if node_modules doesn't exist or is outdated
+if [ ! -d "node_modules" ] || [ "package.json" -nt "node_modules" ]; then
+    log_info "Installing frontend dependencies..."
+    if npm install --prefer-offline --no-audit --progress=false; then
+        log_success "✅ Dependencies installed"
+    else
+        log_warning "⚠️ npm install had issues, trying npm ci..."
+        npm ci --prefer-offline --no-audit --progress=false || log_warning "⚠️ npm ci failed, continuing anyway..."
+    fi
 fi
 
-cd ..
+# Build the React application
+log_info "Building React application for production..."
+if npm run build; then
+    log_success "✅ React app built successfully"
+else
+    log_error "❌ React build failed"
+    cd ../cloudshell
+    exit 1
+fi
+
+# Firebase API already enabled in step 1
+
+# Check if firebase CLI is available, install if not
+if ! command -v firebase &> /dev/null; then
+    log_info "Installing Firebase CLI..."
+    npm install -g firebase-tools --silent 2>/dev/null || {
+        log_warning "⚠️ Could not install Firebase CLI globally, trying locally..."
+        npm install --save-dev firebase-tools --silent 2>/dev/null || {
+            log_error "❌ Failed to install Firebase CLI"
+            cd ../cloudshell
+            exit 1
+        }
+        # Use local firebase
+        FIREBASE_CMD="npx firebase"
+    }
+else
+    FIREBASE_CMD="firebase"
+fi
+
+# Deploy to Firebase Hosting
+log_info "Deploying to Firebase Hosting..."
+
+# Try to authenticate and deploy
+DEPLOYMENT_SUCCESS=false
+for attempt in 1 2 3; do
+    log_info "Deployment attempt $attempt/3..."
+    
+    if [ $attempt -eq 1 ]; then
+        # First attempt: Standard deployment
+        if $FIREBASE_CMD deploy --only hosting --project="$PROJECT_ID" --non-interactive; then
+            DEPLOYMENT_SUCCESS=true
+        fi
+    elif [ $attempt -eq 2 ]; then
+        # Second attempt: Try with gcloud auth
+        log_info "Attempting Firebase login using gcloud credentials..."
+        if gcloud auth application-default print-access-token | $FIREBASE_CMD login --reauth --token-stdin 2>/dev/null; then
+            if $FIREBASE_CMD deploy --only hosting --project="$PROJECT_ID" --non-interactive; then
+                DEPLOYMENT_SUCCESS=true
+            fi
+        fi
+    elif [ $attempt -eq 3 ]; then
+        # Third attempt: Use gcloud app deploy as fallback (for Firebase equivalent)
+        log_info "Trying alternative deployment with gcloud..."
+        # Create app.yaml for App Engine as ultimate fallback
+        cat > app.yaml << EOF
+runtime: nodejs18
+service: default
+
+handlers:
+- url: /(.*\.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot|map))$
+  static_files: dist/\1
+  upload: dist/(.*\.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot|map))$
+  secure: always
+
+- url: /.*
+  static_files: dist/index.html
+  upload: dist/index.html
+  secure: always
+
+automatic_scaling:
+  min_instances: 0
+  max_instances: 10
+EOF
+        
+        if gcloud app deploy app.yaml --project="$PROJECT_ID" --quiet 2>/dev/null; then
+            FRONTEND_URL="https://$PROJECT_ID.appspot.com"
+            DEPLOYMENT_SUCCESS=true
+            log_success "✅ Frontend deployed to App Engine: $FRONTEND_URL"
+        fi
+    fi
+    
+    if [ "$DEPLOYMENT_SUCCESS" = true ]; then
+        if [ $attempt -le 2 ]; then
+            FRONTEND_URL="https://$PROJECT_ID.web.app"
+            log_success "✅ Frontend deployed to Firebase Hosting: $FRONTEND_URL"
+            # Also mention the alternative URL
+            log_info "✅ Also available at: https://$PROJECT_ID.firebaseapp.com"
+        fi
+        break
+    else
+        if [ $attempt -lt 3 ]; then
+            log_info "Retrying deployment..."
+            sleep 3
+        fi
+    fi
+done
+
+# Handle deployment failure
+if [ "$DEPLOYMENT_SUCCESS" = false ]; then
+    log_error "❌ All deployment methods failed"
+    log_info "📋 Manual deployment options:"
+    log_info "   Firebase: cd frontend && firebase deploy --project=$PROJECT_ID"
+    log_info "   App Engine: cd frontend && gcloud app deploy --project=$PROJECT_ID"
+    FRONTEND_URL="https://$PROJECT_ID.web.app"
+    log_info "🌐 Your app will be available at: $FRONTEND_URL (once manually deployed)"
+fi
+
+cd ../cloudshell
 
 echo ""
 log_info "🔐 Step 5: Setting up enhanced OAuth automation..."
