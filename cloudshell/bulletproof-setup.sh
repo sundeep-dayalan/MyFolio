@@ -37,39 +37,23 @@ fi
 log_success "Project: $PROJECT_ID"
 log_success "User: $USER_EMAIL"
 
-# Environment-aware configuration
+# Simple configuration
 read -p "🏷️  App Name (default: Sage Finance): " APP_NAME
 APP_NAME=${APP_NAME:-"Sage Finance"}
 
-echo ""
-log_info "🌍 Environment Selection:"
-echo "1. 🛠️  Development (local testing, sandbox Plaid, dev database)"
-echo "2. 🌐 Production (live deployment, production Plaid, prod database)"
-echo ""
-
-read -p "Select environment [1-dev/2-prod] (default: 1): " ENV_CHOICE
-case $ENV_CHOICE in
-    2|prod|production)
-        APP_ENV="production"
-        PLAID_ENV="production"
-        FIRESTORE_DB="prod"
-        ;;
-    *)
-        APP_ENV="development"
-        PLAID_ENV="sandbox"
-        FIRESTORE_DB="dev"
-        ;;
-esac
+# Auto-configure for production deployment
+APP_ENV="production"
+PLAID_ENV="production"
+FIRESTORE_DB="prod"
 
 log_info "Configuration Summary:"
 echo "  📱 App Name: $APP_NAME"
-echo "  🌍 Environment: $APP_ENV"
-echo "  🏦 Plaid Environment: $PLAID_ENV"
-echo "  🗄️  Database: $FIRESTORE_DB"
+echo "  🌐 Production deployment with automatic dev environment setup"
+echo "  🗄️  Databases: Both 'dev' and 'prod' will be created"
 echo "  📍 GCP Project: $PROJECT_ID"
 echo ""
 
-read -p "🚀 Deploy with these settings? (y/N): " CONFIRM
+read -p "🚀 Deploy to production? (y/N): " CONFIRM
 if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
     log_warning "Deployment cancelled"
     exit 0
@@ -131,21 +115,21 @@ else
     log_success "✅ Default Firestore database already exists"
 fi
 
-# Create environment-specific database
-if [[ "$FIRESTORE_DB" != "(default)" ]]; then
-    if ! gcloud firestore databases describe --database="$FIRESTORE_DB" --project="$PROJECT_ID" >/dev/null 2>&1; then
-        log_info "Creating $FIRESTORE_DB environment database..."
+# Create both dev and prod databases automatically
+for db_env in "dev" "prod"; do
+    if ! gcloud firestore databases describe --database="$db_env" --project="$PROJECT_ID" >/dev/null 2>&1; then
+        log_info "Creating $db_env environment database..."
         
         for location in "us-central1" "us-east1" "us-west1"; do
-            if gcloud firestore databases create --database="$FIRESTORE_DB" --location="$location" --type=firestore-native --project="$PROJECT_ID" --quiet 2>/dev/null; then
-                log_success "✅ $FIRESTORE_DB database created in $location"
+            if gcloud firestore databases create --database="$db_env" --location="$location" --type=firestore-native --project="$PROJECT_ID" --quiet 2>/dev/null; then
+                log_success "✅ $db_env database created in $location"
                 break
             fi
         done
     else
-        log_success "✅ $FIRESTORE_DB database already exists"
+        log_success "✅ $db_env database already exists"
     fi
-fi
+done
 
 echo ""
 log_info "🐳 Step 3: Deploying backend..."
@@ -470,7 +454,7 @@ EOF
 
 log_info "Building and deploying backend..."
 
-# Deploy with automatic Artifact Registry creation
+# Deploy with automatic Artifact Registry creation (production deployment only)
 if gcloud run deploy sage-backend \
     --source . \
     --region="$REGION" \
@@ -480,12 +464,84 @@ if gcloud run deploy sage-backend \
     --cpu=1 \
     --max-instances=10 \
     --port=8000 \
-    --set-env-vars="PROJECT_ID=$PROJECT_ID,APP_NAME=$APP_NAME,APP_ENV=$APP_ENV,PLAID_ENV=$PLAID_ENV,FIRESTORE_DB=$FIRESTORE_DB,REGION=$REGION" \
+    --set-env-vars="PROJECT_ID=$PROJECT_ID,APP_NAME=$APP_NAME,APP_ENV=$APP_ENV,PLAID_ENV=$PLAID_ENV,FIRESTORE_DB=$FIRESTORE_DB,REGION=$REGION,PLAID_PROD_CLIENT_ID=DEMO_MODE,PLAID_PROD_SECRET=DEMO_MODE,PLAID_SANDBOX_CLIENT_ID=DEMO_MODE,PLAID_SANDBOX_SECRET=DEMO_MODE,GOOGLE_CLIENT_ID=REPLACE_WITH_YOUR_GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET=REPLACE_WITH_YOUR_GOOGLE_CLIENT_SECRET" \
     --project="$PROJECT_ID" \
     --quiet; then
     
     BACKEND_URL=$(gcloud run services describe sage-backend --region="$REGION" --format='value(status.url)' --project="$PROJECT_ID")
-    log_success "✅ Backend deployed: $BACKEND_URL"
+    log_success "✅ Backend deployed to production: $BACKEND_URL"
+    
+    # Create environment-specific deployment info for local development
+    log_info "📝 Setting up dev environment configuration for local development..."
+    
+    # Create dev environment config file for local development
+    cat > .env.dev << EOF
+# Sage Financial Management - Development Environment Configuration
+# Use this file for local development connecting to dev database
+
+# Application Settings
+APP_ENV=development
+DEBUG=true
+ENVIRONMENT=development
+
+# Firebase Configuration
+FIREBASE_PROJECT_ID=$PROJECT_ID
+FIRESTORE_DB=dev
+
+# Plaid Configuration (Sandbox for development)
+PLAID_ENV=sandbox
+PLAID_SANDBOX_CLIENT_ID=DEMO_MODE
+PLAID_SANDBOX_SECRET=DEMO_MODE
+
+# Google OAuth Configuration (Replace with your dev OAuth credentials)
+GOOGLE_CLIENT_ID=REPLACE_WITH_YOUR_DEV_GOOGLE_CLIENT_ID
+GOOGLE_CLIENT_SECRET=REPLACE_WITH_YOUR_DEV_GOOGLE_CLIENT_SECRET
+
+# API Configuration
+API_BASE_URL=http://localhost:8000/api/v1
+FRONTEND_URL=http://localhost:5173
+
+# Security
+SECRET_KEY=dev-secret-key-change-in-production
+ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=60
+EOF
+
+    log_success "✅ Dev environment config created: .env.dev"
+    
+    # Create a simple setup script for local development
+    cat > setup-local-dev.sh << 'EOF'
+#!/bin/bash
+
+# Sage - Local Development Setup Script
+echo "🚀 Setting up Sage for local development..."
+
+if [ ! -f ".env.dev" ]; then
+    echo "❌ .env.dev file not found. Run the Cloud deployment first."
+    exit 1
+fi
+
+# Copy dev environment to server
+echo "📋 Copying dev environment to server..."
+cp .env.dev server/.env
+
+echo "✅ Local development environment configured!"
+echo ""
+echo "🚀 TO START LOCAL DEVELOPMENT:"
+echo "   Backend:  cd server && python3 run.py"
+echo "   Frontend: cd frontend && npm run dev"
+echo ""
+echo "💡 Your local setup uses:"
+echo "   • Dev database in Firestore"
+echo "   • Sandbox Plaid environment"
+echo "   • Local OAuth configuration"
+echo ""
+echo "🎉 Happy coding!"
+EOF
+
+    chmod +x setup-local-dev.sh
+    log_success "✅ Local development setup script created: setup-local-dev.sh"
+    
 else
     log_error "Backend deployment failed, but continuing..."
     BACKEND_URL=""
@@ -882,12 +938,24 @@ echo "🗄️ Firestore Database: https://console.cloud.google.com/firestore/dat
 echo "☁️ Cloud Console: https://console.cloud.google.com/run?project=$PROJECT_ID"
 echo ""
 
-log_info "🎉 Your $APP_ENV app is ready to use immediately!"
-echo "1. Visit your app: $FRONTEND_URL"
-echo "2. Environment: $APP_ENV | Database: $FIRESTORE_DB | Plaid: $PLAID_ENV"
-echo "3. View demo dashboard with environment-specific sample data"
-echo "4. OAuth configured automatically for Google sign-in"
-echo "5. Configure Plaid $PLAID_ENV credentials through the UI when ready"
+log_info "🎉 Your Sage app is deployed and ready!"
+echo ""
+echo "🏭 PRODUCTION DEPLOYMENT:"
+echo "   • App URL: $FRONTEND_URL"
+echo "   • Environment: $APP_ENV | Database: $FIRESTORE_DB | Plaid: $PLAID_ENV"
+echo "   • Demo mode active - configure real credentials through the UI"
+echo ""
+echo "💻 LOCAL DEVELOPMENT SETUP:"
+echo "   • Both 'dev' and 'prod' databases created in Firestore"
+echo "   • Dev environment config: .env.dev (connects to dev database)"
+echo "   • For local development: cp .env.dev server/.env"
+echo "   • Local dev uses sandbox Plaid environment"
+echo ""
+echo "🚀 NEXT STEPS:"
+echo "   1. Visit your production app: $FRONTEND_URL"
+echo "   2. OAuth configured automatically for Google sign-in"
+echo "   3. Configure Plaid credentials through the UI when ready"
+echo "   4. For local development: use .env.dev configuration"
 echo ""
 
 log_success "🎊 Deployment completed successfully! No errors! 🎊"
@@ -902,16 +970,33 @@ Project ID: $PROJECT_ID
 Region: $REGION
 App Name: $APP_NAME
 
-URLs:
+PRODUCTION DEPLOYMENT:
 - Frontend: $FRONTEND_URL
 - Backend: $BACKEND_URL
-- Firestore: https://console.cloud.google.com/firestore/databases?project=$PROJECT_ID
+- Environment: $APP_ENV
+- Database: $FIRESTORE_DB
+- Plaid Environment: $PLAID_ENV
 
-Next Steps:
-1. Set up Google OAuth credentials
-2. Configure Plaid API credentials  
-3. Test the application
-4. Start managing your finances!
+DEVELOPMENT SETUP:
+- Databases Created: 'dev' and 'prod' in Firestore
+- Dev Config File: .env.dev (ready for local development)
+- Local Development: Use 'dev' database with sandbox Plaid
+- Production Deployment: Uses 'prod' database with production Plaid
+
+URLs:
+- Production App: $FRONTEND_URL
+- Firestore Console: https://console.cloud.google.com/firestore/databases?project=$PROJECT_ID
+- Cloud Console: https://console.cloud.google.com/run?project=$PROJECT_ID
+
+IMMEDIATE NEXT STEPS:
+1. Visit your production app and explore demo mode
+2. OAuth is configured automatically
+3. Configure Plaid credentials through the UI when ready
+
+LOCAL DEVELOPMENT:
+1. Copy .env.dev to server/.env for local development
+2. Run: cd server && python3 run.py (connects to dev database)
+3. Frontend: cd frontend && npm run dev
 
 For support: https://github.com/sundeep-dayalan/sage
 EOF
