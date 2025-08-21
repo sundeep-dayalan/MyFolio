@@ -33,20 +33,15 @@ fi
 
 log_info "Enabling Google Cloud APIs for project: $PROJECT_ID"
 
-# List of required APIs
+# List of required APIs (streamlined to essential ones)
 APIS=(
     "cloudbuild.googleapis.com"          # Cloud Build for container building
     "run.googleapis.com"                 # Cloud Run for hosting applications
     "firestore.googleapis.com"           # Firestore for database
-    "firebase.googleapis.com"            # Firebase services
-    "identitytoolkit.googleapis.com"     # Identity Toolkit for authentication
-    "oauth2.googleapis.com"              # OAuth 2.0 for Google sign-in
     "iam.googleapis.com"                 # Identity and Access Management
-    "cloudresourcemanager.googleapis.com" # Resource Manager
+    "secretmanager.googleapis.com"       # Secret Manager for sensitive data
     "logging.googleapis.com"             # Cloud Logging
     "monitoring.googleapis.com"          # Cloud Monitoring
-    "secretmanager.googleapis.com"       # Secret Manager for sensitive data
-    "artifactregistry.googleapis.com"    # Artifact Registry for container images
 )
 
 # Function to enable a single API with retry logic

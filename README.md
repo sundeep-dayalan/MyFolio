@@ -25,7 +25,7 @@ Deploy Sage to Google Cloud in just 5-10 minutes with a single click!
 #### Step 3: Automated Setup
 3. **Follow the interactive Cloud Shell tutorial**
 4. **Configure your app name and settings**
-5. **Watch as everything deploys automatically**
+5. **Watch the bulletproof deployment system work** (no failures!)
 6. **Set up Plaid and OAuth credentials** (5 minutes)
 7. **Start managing your finances!**
 

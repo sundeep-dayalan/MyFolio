@@ -1,8 +1,18 @@
 #!/bin/bash
 
 # Sage Financial Management App - One-Click Deployment
-# This script orchestrates the complete deployment to Google Cloud
+# This script now uses the bulletproof deployment system
 
+echo "🚀 Redirecting to bulletproof deployment system..."
+
+# Check if bulletproof script exists
+if [ -f "cloudshell/bulletproof-setup.sh" ]; then
+    exec ./cloudshell/bulletproof-setup.sh "$@"
+else
+    echo "❌ Bulletproof script not found, using fallback..."
+fi
+
+# Fallback to original script if bulletproof doesn't exist
 # Don't exit on error immediately - we want to handle them gracefully
 set +e
 

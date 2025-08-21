@@ -64,6 +64,8 @@ chmod +x cloudshell/setup.sh
 ./cloudshell/setup.sh
 ```
 
+The setup script will automatically use our bulletproof deployment system for a smooth, reliable experience!
+
 <walkthrough-editor-open-file filePath="deploy/deploy.sh">You can also view the deployment script</walkthrough-editor-open-file>
 
 This will:
