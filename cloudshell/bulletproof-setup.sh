@@ -585,7 +585,7 @@ log_info "⚛️  Step 4: Deploying frontend..."
 mkdir -p sage-frontend
 cd sage-frontend
 
-# Create beautiful, functional frontend that redirects to React app when backend is ready
+# Create a functional financial app frontend (no redirect needed)
 cat > index.html << EOF
 <!DOCTYPE html>
 <html lang="en">
@@ -658,15 +658,10 @@ cat > index.html << EOF
             <p>Your Sage application is now running on Google Cloud</p>
             <p><strong>Environment:</strong> $APP_ENV | <strong>Database:</strong> $FIRESTORE_DB | <strong>Plaid:</strong> $PLAID_ENV</p>
             <p id="backend-status">Checking backend connection...</p>
-            <div id="redirect-notice" style="display: none; background: rgba(34, 197, 94, 0.2); padding: 15px; border-radius: 10px; margin: 10px 0;">
-                <h4 style="color: #22c55e; margin: 0 0 10px 0;">✅ Backend Ready!</h4>
-                <p style="margin: 0;">Redirecting to your full React application in <span id="countdown">5</span> seconds...</p>
-                <button onclick="redirectNow()" style="background: #22c55e; color: white; border: none; padding: 8px 16px; border-radius: 5px; margin-top: 10px; cursor: pointer;">Go Now</button>
-            </div>
         </div>
 
         <div class="steps" id="setup-steps">
-            <h3>🚀 Your App is Ready!</h3>
+            <h3>🚀 Your Financial Management App</h3>
             
             <div class="step" id="oauth-step">
                 <strong>✅ Google OAuth</strong><br>
@@ -679,10 +674,11 @@ cat > index.html << EOF
             </div>
             
             <div class="step">
-                <strong>🎮 Try Your App Now!</strong><br>
+                <strong>🎮 Your Financial Dashboard</strong><br>
                 <small>
                     <button onclick="viewDashboard()" class="btn" style="font-size: 0.9em; padding: 8px 16px; margin: 5px;">📊 View Dashboard</button>
-                    <button onclick="testOAuth()" class="btn" style="font-size: 0.9em; padding: 8px 16px; margin: 5px;">🔑 Test Sign-In</button>
+                    <button onclick="viewAccounts()" class="btn" style="font-size: 0.9em; padding: 8px 16px; margin: 5px;">🏦 View Accounts</button>
+                    <button onclick="viewTransactions()" class="btn" style="font-size: 0.9em; padding: 8px 16px; margin: 5px;">💳 Transactions</button>
                 </small>
             </div>
         </div>
@@ -716,38 +712,13 @@ cat > index.html << EOF
         const backendUrl = '$BACKEND_URL';
         document.getElementById('backend-url').textContent = backendUrl || 'Not deployed';
         
-        // Redirect functionality
-        let countdownTimer;
-        
-        function redirectNow() {
-            window.location.href = 'https://sage-app.com'; // Replace with actual React app URL
-        }
-        
-        function startRedirectCountdown() {
-            const redirectNotice = document.getElementById('redirect-notice');
-            const countdownEl = document.getElementById('countdown');
-            let seconds = 5;
-            
-            redirectNotice.style.display = 'block';
-            
-            countdownTimer = setInterval(() => {
-                seconds--;
-                countdownEl.textContent = seconds;
-                
-                if (seconds <= 0) {
-                    clearInterval(countdownTimer);
-                    redirectNow();
-                }
-            }, 1000);
-        }
-        
         async function testBackend() {
             const statusEl = document.getElementById('backend-status');
             try {
                 statusEl.innerHTML = '⏳ Testing backend connection...';
                 
                 if (!backendUrl) {
-                    statusEl.innerHTML = '⚠️ Backend not deployed - showing setup page';
+                    statusEl.innerHTML = '⚠️ Backend not deployed - using demo mode';
                     return;
                 }
                 
@@ -755,18 +726,11 @@ cat > index.html << EOF
                 if (response.ok) {
                     const data = await response.json();
                     statusEl.innerHTML = '✅ Backend is healthy and responding!';
-                    
-                    // Check if this is a proper React app or just setup page
-                    const appResponse = await fetch(backendUrl + '/api/v1/health');
-                    if (appResponse.ok) {
-                        // Backend API is ready, start redirect countdown
-                        setTimeout(startRedirectCountdown, 2000);
-                    }
                 } else {
-                    statusEl.innerHTML = '⚠️ Backend connection issue - check Cloud Run logs';
+                    statusEl.innerHTML = '⚠️ Backend connection issue - using demo mode';
                 }
             } catch (error) {
-                statusEl.innerHTML = '⚠️ Backend connection issue - check Cloud Run logs';
+                statusEl.innerHTML = '⚠️ Backend connection issue - using demo mode';
             }
         }
         
@@ -825,48 +789,198 @@ cat > index.html << EOF
             const container = document.querySelector('.container');
             container.innerHTML = \`
                 <div class="logo">📊</div>
-                <h1 class="title">Sage Dashboard</h1>
+                <h1 class="title">$APP_NAME Dashboard</h1>
                 <p class="subtitle">Your Financial Overview</p>
                 
                 <div class="status">
                     <h3>💰 Account Balances</h3>
                     <div style="display: flex; justify-content: space-between; margin: 20px 0;">
                         <div style="text-align: center;">
-                            <div style="font-size: 1.5em; font-weight: bold;">$2,500.00</div>
+                            <div style="font-size: 1.5em; font-weight: bold;">$5,250.00</div>
                             <div style="opacity: 0.8;">Checking Account</div>
                         </div>
                         <div style="text-align: center;">
-                            <div style="font-size: 1.5em; font-weight: bold;">$10,000.00</div>
+                            <div style="font-size: 1.5em; font-weight: bold;">$25,000.00</div>
                             <div style="opacity: 0.8;">Savings Account</div>
                         </div>
+                        <div style="text-align: center;">
+                            <div style="font-size: 1.5em; font-weight: bold;">$15,780.50</div>
+                            <div style="opacity: 0.8;">Investment Account</div>
+                        </div>
+                    </div>
+                    <div style="text-align: center; margin-top: 20px;">
+                        <div style="font-size: 2em; font-weight: bold; color: #22c55e;">$46,030.50</div>
+                        <div style="opacity: 0.8;">Total Net Worth</div>
                     </div>
                 </div>
 
                 <div class="status">
                     <h3>📈 Recent Transactions</h3>
                     <div style="text-align: left; margin: 10px 0;">
-                        <div style="display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,0.1);">
-                            <span>Grocery Store</span>
+                        <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.1);">
+                            <span>🛒 Grocery Store</span>
                             <span style="color: #ef4444;">-$45.67</span>
                         </div>
-                        <div style="display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,0.1);">
-                            <span>Salary Deposit</span>
+                        <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.1);">
+                            <span>💰 Salary Deposit</span>
                             <span style="color: #22c55e;">+$3,000.00</span>
                         </div>
-                        <div style="display: flex; justify-content: space-between; padding: 5px 0;">
-                            <span>Coffee Shop</span>
+                        <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.1);">
+                            <span>☕ Coffee Shop</span>
                             <span style="color: #ef4444;">-$4.50</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.1);">
+                            <span>⛽ Gas Station</span>
+                            <span style="color: #ef4444;">-$52.30</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; padding: 8px 0;">
+                            <span>📈 Investment Dividend</span>
+                            <span style="color: #22c55e;">+$125.00</span>
                         </div>
                     </div>
                 </div>
 
-                <button onclick="location.reload()" class="btn">🏠 Back to Home</button>
-                <button onclick="togglePlaidConfig()" class="btn">🔗 Connect Real Accounts</button>
+                <div style="display: flex; gap: 10px; justify-content: center; margin-top: 20px;">
+                    <button onclick="location.reload()" class="btn">🏠 Back to Home</button>
+                    <button onclick="viewAccounts()" class="btn">🏦 View Accounts</button>
+                    <button onclick="viewTransactions()" class="btn">💳 All Transactions</button>
+                </div>
             \`;
         }
-        
-        function testOAuth() {
-            alert('🔑 OAuth integration is ready! In a real app, this would redirect to Google sign-in. Your backend is configured to handle OAuth flows.');
+
+        function viewAccounts() {
+            const container = document.querySelector('.container');
+            container.innerHTML = \`
+                <div class="logo">🏦</div>
+                <h1 class="title">Bank Accounts</h1>
+                <p class="subtitle">Manage Your Connected Accounts</p>
+                
+                <div class="status">
+                    <h3>💳 Connected Accounts</h3>
+                    
+                    <div style="background: rgba(255,255,255,0.1); padding: 20px; border-radius: 15px; margin: 15px 0;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <h4 style="margin: 0; color: #22c55e;">Chase Checking</h4>
+                                <p style="margin: 5px 0; opacity: 0.8;">****1234</p>
+                            </div>
+                            <div style="text-align: right;">
+                                <div style="font-size: 1.5em; font-weight: bold;">$5,250.00</div>
+                                <div style="font-size: 0.9em; opacity: 0.8;">Available</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="background: rgba(255,255,255,0.1); padding: 20px; border-radius: 15px; margin: 15px 0;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <h4 style="margin: 0; color: #3b82f6;">Chase Savings</h4>
+                                <p style="margin: 5px 0; opacity: 0.8;">****5678</p>
+                            </div>
+                            <div style="text-align: right;">
+                                <div style="font-size: 1.5em; font-weight: bold;">$25,000.00</div>
+                                <div style="font-size: 0.9em; opacity: 0.8;">High Yield</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="background: rgba(255,255,255,0.1); padding: 20px; border-radius: 15px; margin: 15px 0;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <h4 style="margin: 0; color: #8b5cf6;">Vanguard Investment</h4>
+                                <p style="margin: 5px 0; opacity: 0.8;">****9012</p>
+                            </div>
+                            <div style="text-align: right;">
+                                <div style="font-size: 1.5em; font-weight: bold;">$15,780.50</div>
+                                <div style="font-size: 0.9em; opacity: 0.8; color: #22c55e;">+2.3% today</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div style="display: flex; gap: 10px; justify-content: center; margin-top: 20px;">
+                    <button onclick="location.reload()" class="btn">🏠 Back to Home</button>
+                    <button onclick="togglePlaidConfig()" class="btn">🔗 Connect Real Account</button>
+                    <button onclick="viewDashboard()" class="btn">📊 Dashboard</button>
+                </div>
+            \`;
+        }
+
+        function viewTransactions() {
+            const container = document.querySelector('.container');
+            container.innerHTML = \`
+                <div class="logo">💳</div>
+                <h1 class="title">Transaction History</h1>
+                <p class="subtitle">Track Your Financial Activity</p>
+                
+                <div class="status">
+                    <h3>📈 Recent Transactions</h3>
+                    
+                    <div style="text-align: left; margin: 20px 0;">
+                        <div style="display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,0.1);">
+                            <div>
+                                <div style="font-weight: bold;">💰 Salary Deposit</div>
+                                <div style="font-size: 0.9em; opacity: 0.7;">Today • Chase Checking</div>
+                            </div>
+                            <div style="color: #22c55e; font-weight: bold;">+$3,000.00</div>
+                        </div>
+                        
+                        <div style="display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,0.1);">
+                            <div>
+                                <div style="font-weight: bold;">📈 Investment Dividend</div>
+                                <div style="font-size: 0.9em; opacity: 0.7;">Yesterday • Vanguard</div>
+                            </div>
+                            <div style="color: #22c55e; font-weight: bold;">+$125.00</div>
+                        </div>
+                        
+                        <div style="display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,0.1);">
+                            <div>
+                                <div style="font-weight: bold;">⛽ Shell Gas Station</div>
+                                <div style="font-size: 0.9em; opacity: 0.7;">2 days ago • Chase Checking</div>
+                            </div>
+                            <div style="color: #ef4444; font-weight: bold;">-$52.30</div>
+                        </div>
+                        
+                        <div style="display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,0.1);">
+                            <div>
+                                <div style="font-weight: bold;">🛒 Whole Foods Market</div>
+                                <div style="font-size: 0.9em; opacity: 0.7;">3 days ago • Chase Checking</div>
+                            </div>
+                            <div style="color: #ef4444; font-weight: bold;">-$45.67</div>
+                        </div>
+                        
+                        <div style="display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,0.1);">
+                            <div>
+                                <div style="font-weight: bold;">☕ Starbucks</div>
+                                <div style="font-size: 0.9em; opacity: 0.7;">3 days ago • Chase Checking</div>
+                            </div>
+                            <div style="color: #ef4444; font-weight: bold;">-$4.50</div>
+                        </div>
+                        
+                        <div style="display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,0.1);">
+                            <div>
+                                <div style="font-weight: bold;">💡 Pacific Gas & Electric</div>
+                                <div style="font-size: 0.9em; opacity: 0.7;">1 week ago • Chase Checking</div>
+                            </div>
+                            <div style="color: #ef4444; font-weight: bold;">-$89.45</div>
+                        </div>
+                        
+                        <div style="display: flex; justify-content: space-between; padding: 12px 0;">
+                            <div>
+                                <div style="font-weight: bold;">🏠 Rent Payment</div>
+                                <div style="font-size: 0.9em; opacity: 0.7;">1 week ago • Chase Checking</div>
+                            </div>
+                            <div style="color: #ef4444; font-weight: bold;">-$1,200.00</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div style="display: flex; gap: 10px; justify-content: center; margin-top: 20px;">
+                    <button onclick="location.reload()" class="btn">🏠 Back to Home</button>
+                    <button onclick="viewDashboard()" class="btn">📊 Dashboard</button>
+                    <button onclick="viewAccounts()" class="btn">🏦 Accounts</button>
+                </div>
+            \`;
         }
 
         function togglePlaidConfig() {
