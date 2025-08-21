@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "./node_modules/.bin/tsc --noEmit && npx vite build",
+    "build": "node ./node_modules/typescript/bin/tsc --noEmit && npx vite build",
     "lint": "eslint .",
     "preview": "vite preview"
   },
