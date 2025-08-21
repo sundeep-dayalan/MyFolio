@@ -4,6 +4,8 @@
 
 Deploy Sage to Google Cloud in just 5-10 minutes with a single click!
 
+[![Deploy to Google Cloud](https://deploy.cloud.run/button.svg)](https://ssh.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https://github.com/sundeep-dayalan/sage.git&cloudshell_working_dir=.&cloudshell_tutorial=TUTORIAL.md)
+
 ### Quick Start
 
 #### Step 1: Get Your Own Copy
@@ -17,7 +19,7 @@ Deploy Sage to Google Cloud in just 5-10 minutes with a single click!
 
 2. **Click your deployment button**:
 ```markdown
-[![Deploy to Google Cloud](https://deploy.cloud.run/button.svg)](https://ssh.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https://github.com/YOUR_USERNAME/personal-wealth-management.git&cloudshell_working_dir=.&cloudshell_tutorial=TUTORIAL.md)
+[![Deploy to Google Cloud](https://deploy.cloud.run/button.svg)](https://ssh.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https://github.com/YOUR_USERNAME/sage.git&cloudshell_working_dir=.&cloudshell_tutorial=TUTORIAL.md)
 ```
 
 #### Step 3: Automated Setup

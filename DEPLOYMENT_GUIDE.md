@@ -12,7 +12,7 @@ This guide explains how to deploy your own instance of Sage Financial Management
 
 ### Step 1: Fork the Repository
 
-1. **Visit the Sage repository**: [https://github.com/sundeep-dayalan/personal-wealth-management](https://github.com/sundeep-dayalan/personal-wealth-management)
+1. **Visit the Sage repository**: [https://github.com/sundeep-dayalan/sage](https://github.com/sundeep-dayalan/sage)
 2. **Click "Fork"** in the top-right corner
 3. **Select your account** as the destination
 4. **Wait for the fork to complete**
@@ -47,7 +47,7 @@ Edit `frontend/src/styles/globals.css` or `frontend/tailwind.config.js`
 3. **Replace `YOUR_USERNAME`** with your actual GitHub username:
 
 ```markdown
-[![Deploy to Google Cloud](https://deploy.cloud.run/button.svg)](https://ssh.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https://github.com/your-actual-username/personal-wealth-management.git&cloudshell_working_dir=.&cloudshell_tutorial=TUTORIAL.md)
+[![Deploy to Google Cloud](https://deploy.cloud.run/button.svg)](https://ssh.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https://github.com/your-actual-username/sage.git&cloudshell_working_dir=.&cloudshell_tutorial=TUTORIAL.md)
 ```
 
 4. **Commit the change**
@@ -113,7 +113,7 @@ To get new features from the main repository:
 
 ```bash
 # Add the main repo as upstream
-git remote add upstream https://github.com/sundeep-dayalan/personal-wealth-management.git
+git remote add upstream https://github.com/sundeep-dayalan/sage.git
 
 # Fetch and merge updates
 git fetch upstream
