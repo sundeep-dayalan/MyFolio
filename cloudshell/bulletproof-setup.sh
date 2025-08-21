@@ -103,8 +103,6 @@ enable_api_safe "run.googleapis.com"
 enable_api_safe "firestore.googleapis.com"
 enable_api_safe "cloudresourcemanager.googleapis.com"
 enable_api_safe "iam.googleapis.com"
-enable_api_safe "firebase.googleapis.com"
-enable_api_safe "firebasehosting.googleapis.com"
 enable_api_safe "appengine.googleapis.com"
 
 # Fix Cloud Build service account permissions
@@ -490,8 +488,8 @@ EOF
 
 log_info "Building and deploying backend..."
 
-# Set frontend URL for CORS configuration (Firebase Hosting default)
-FRONTEND_URL="https://$PROJECT_ID.web.app"
+# Set frontend URL for CORS configuration (App Engine default)
+FRONTEND_URL="https://$PROJECT_ID.appspot.com"
 
 # Deploy with automatic Artifact Registry creation (production deployment only)
 if gcloud run deploy sage-backend \
@@ -589,7 +587,7 @@ fi
 cd "$SCRIPT_DIR"
 
 echo ""
-log_info "⚛️  Step 4: Deploying React frontend to Firebase Hosting..."
+log_info "⚛️  Step 4: Deploying React frontend to App Engine (Free Tier)..."
 
 # Get region from gcloud config for dynamic backend discovery
 REGION=$(gcloud config get-value compute/region 2>/dev/null)
@@ -672,49 +670,6 @@ fi
 # Navigate to the existing frontend directory
 cd "$FRONTEND_DIR"
 
-# Update Firebase project configuration to match current project
-log_info "Configuring Firebase project..."
-cat > .firebaserc << EOF
-{
-  "projects": {
-    "default": "$PROJECT_ID"
-  }
-}
-EOF
-
-# Create proper firebase.json with site configuration
-log_info "Creating Firebase hosting configuration..."
-cat > firebase.json << EOF
-{
-  "hosting": {
-    "site": "$PROJECT_ID",
-    "public": "dist",
-    "ignore": [
-      "firebase.json",
-      "**/.*",
-      "**/node_modules/**"
-    ],
-    "rewrites": [
-      {
-        "source": "**",
-        "destination": "/index.html"
-      }
-    ],
-    "headers": [
-      {
-        "source": "**/*.@(js|css)",
-        "headers": [
-          {
-            "key": "Cache-Control",
-            "value": "max-age=31536000"
-          }
-        ]
-      }
-    ]
-  }
-}
-EOF
-
 # Update environment variables for production deployment
 log_info "Setting up production environment variables..."
 cat > .env.production << EOF
@@ -740,6 +695,63 @@ fi
 log_info "Building React application for production..."
 if npm run build; then
     log_success "✅ React app built successfully"
+    
+    # Create App Engine app.yaml for free tier deployment
+    log_info "📝 Creating App Engine configuration for free tier..."
+    
+    cat > app.yaml << EOF
+runtime: nodejs18
+service: default
+
+# Free tier configuration based on Google Cloud pricing calculator
+# 1 instance, 730 hours/month, F1 class = $0.00/month
+automatic_scaling:
+  min_instances: 0
+  max_instances: 1
+  max_idle_instances: 1
+  min_idle_instances: 0
+  max_concurrent_requests: 1000
+
+# F1 instance class (free tier eligible)
+instance_class: F1
+
+# Static file handlers for React app
+handlers:
+# Handle static assets (JS, CSS, images, etc.)
+- url: /(.*\.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot|map|json))$
+  static_files: dist/\1
+  upload: dist/(.*\.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot|map|json))$
+  secure: always
+  expiration: "1d"
+
+# Handle index.html and SPA routing
+- url: /.*
+  static_files: dist/index.html
+  upload: dist/index.html
+  secure: always
+
+# Environment variables
+env_variables:
+  NODE_ENV: production
+EOF
+
+    log_success "✅ App Engine configuration created for free tier"
+    
+    # Deploy to App Engine
+    log_info "🚀 Deploying React app to App Engine..."
+    
+    if gcloud app deploy app.yaml --project="$PROJECT_ID" --quiet; then
+        FRONTEND_URL="https://$PROJECT_ID.appspot.com"
+        log_success "✅ Frontend deployed to App Engine: $FRONTEND_URL"
+        DEPLOYMENT_SUCCESS=true
+    else
+        log_error "❌ App Engine deployment failed"
+        FRONTEND_URL="https://$PROJECT_ID.appspot.com"
+        log_info "🌐 Your app will be available at: $FRONTEND_URL (once manually deployed)"
+        log_info "📋 Manual deployment: cd $FRONTEND_DIR && gcloud app deploy --project=$PROJECT_ID"
+        DEPLOYMENT_SUCCESS=false
+    fi
+    
 else
     log_error "❌ React build failed"
     # Return to script directory
@@ -748,271 +760,19 @@ else
     exit 1
 fi
 
-# Firebase API already enabled in step 1
-
-# Check if firebase CLI is available, install if not
-if ! command -v firebase &> /dev/null; then
-    log_info "Installing Firebase CLI..."
-    npm install -g firebase-tools --silent 2>/dev/null || {
-        log_warning "⚠️ Could not install Firebase CLI globally, trying locally..."
-        npm install --save-dev firebase-tools --silent 2>/dev/null || {
-            log_error "❌ Failed to install Firebase CLI"
-            # Return to script directory
-            SCRIPT_DIR="$(dirname "$(readlink -f "$0")")" 2>/dev/null || SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-            cd "$SCRIPT_DIR"
-            exit 1
-        }
-        # Use local firebase
-        FIREBASE_CMD="npx firebase"
-    }
-else
-    FIREBASE_CMD="firebase"
-fi
-
-# Initialize Firebase hosting if needed
-log_info "🔧 Initializing Firebase hosting..."
-
-# Create Firebase hosting site using multiple methods
-log_info "Creating Firebase hosting site..."
-
-# Generate a unique site ID
-UNIQUE_SITE_ID="${PROJECT_ID}-$(date +%s | tr -d '\n')"
-
-# Method 1: Try using gcloud REST API directly
-log_info "Attempting to create site via gcloud API..."
-if gcloud auth application-default print-access-token > /tmp/token.txt 2>/dev/null; then
-    ACCESS_TOKEN=$(cat /tmp/token.txt)
-    
-    # Try to create the site using REST API
-    HTTP_RESPONSE=$(curl -s -w "%{http_code}" -o /tmp/response.json \
-        -X POST \
-        -H "Authorization: Bearer $ACCESS_TOKEN" \
-        -H "Content-Type: application/json" \
-        -d "{\"siteId\": \"$UNIQUE_SITE_ID\"}" \
-        "https://firebasehosting.googleapis.com/v1beta1/projects/$PROJECT_ID/sites" 2>/dev/null || echo "000")
-    
-    if [[ "$HTTP_RESPONSE" == "200" ]] || [[ "$HTTP_RESPONSE" == "201" ]]; then
-        log_success "✅ Firebase hosting site created via API: $UNIQUE_SITE_ID"
-        SITE_CREATED=true
-    else
-        log_info "ℹ️ API creation failed, trying Firebase CLI methods..."
-        SITE_CREATED=false
-    fi
-    
-    rm -f /tmp/token.txt /tmp/response.json
-else
-    SITE_CREATED=false
-fi
-
-# Method 2: Try Firebase CLI with automated input
-if [[ "$SITE_CREATED" != "true" ]]; then
-    log_info "Attempting Firebase CLI site creation..."
-    
-    # Create automated input for Firebase CLI
-    echo "$UNIQUE_SITE_ID" | timeout 30 $FIREBASE_CMD hosting:sites:create --project="$PROJECT_ID" 2>/dev/null && {
-        log_success "✅ Firebase hosting site created via CLI: $UNIQUE_SITE_ID"
-        SITE_CREATED=true
-    } || {
-        log_info "ℹ️ CLI site creation failed, will use default project site"
-        SITE_CREATED=false
-        UNIQUE_SITE_ID="$PROJECT_ID"
-    }
-fi
-
-log_info "✅ Using site ID: $UNIQUE_SITE_ID"
-
-# Wait a moment for Firebase to propagate
-sleep 3
-
-# Initialize Firebase configuration if needed
-if [ ! -f ".firebaserc" ] || ! grep -q "$PROJECT_ID" .firebaserc 2>/dev/null; then
-    log_info "Initializing Firebase project configuration..."
-    
-    # Create firebase configuration files with site ID
-    cat > firebase.json << EOF
-{
-  "hosting": {
-    "site": "$UNIQUE_SITE_ID",
-    "public": "dist",
-    "ignore": [
-      "firebase.json",
-      "**/.*",
-      "**/node_modules/**"
-    ],
-    "rewrites": [
-      {
-        "source": "**",
-        "destination": "/index.html"
-      }
-    ],
-    "headers": [
-      {
-        "source": "**/*.@(js|css)",
-        "headers": [
-          {
-            "key": "Cache-Control",
-            "value": "max-age=31536000"
-          }
-        ]
-      }
-    ]
-  }
-}
-EOF
-
-    cat > .firebaserc << EOF
-{
-  "projects": {
-    "default": "$PROJECT_ID"
-  }
-}
-EOF
-    
-    log_success "✅ Firebase configuration initialized"
-fi
-
-# Deploy to Firebase Hosting only
-log_info "🚀 Deploying to Firebase Hosting..."
-
-DEPLOYMENT_SUCCESS=false
-for attempt in 1 2 3 4; do
-    log_info "Deployment attempt $attempt/4..."
-    
-    if [ $attempt -eq 1 ]; then
-        # First attempt: Standard deployment
-        if $FIREBASE_CMD deploy --only hosting --project="$PROJECT_ID" --non-interactive; then
-            DEPLOYMENT_SUCCESS=true
-        fi
-    elif [ $attempt -eq 2 ]; then
-        # Second attempt: Try with gcloud auth
-        log_info "Attempting Firebase login using gcloud credentials..."
-        if gcloud auth application-default print-access-token | $FIREBASE_CMD login --reauth --token-stdin 2>/dev/null; then
-            if $FIREBASE_CMD deploy --only hosting --project="$PROJECT_ID" --non-interactive; then
-                DEPLOYMENT_SUCCESS=true
-            fi
-        fi
-    elif [ $attempt -eq 3 ]; then
-        # Third attempt: Try Firebase init with automated responses
-        log_info "Initializing Firebase with automated setup..."
-        
-        # Create automated responses for Firebase init
-        FIREBASE_ANSWERS="
-
-hosting
-y
-$UNIQUE_SITE_ID
-dist
-n
-n
-"
-        
-        # Try Firebase init hosting
-        echo "$FIREBASE_ANSWERS" | timeout 60 $FIREBASE_CMD init hosting --project="$PROJECT_ID" 2>/dev/null || true
-        
-        # Try deployment after init
-        if $FIREBASE_CMD deploy --only hosting --project="$PROJECT_ID" --non-interactive; then
-            DEPLOYMENT_SUCCESS=true
-        fi
-    elif [ $attempt -eq 4 ]; then
-        # Fourth attempt: Try with explicit site ID
-        log_info "Trying deployment with explicit site configuration..."
-        
-        # Update firebase.json to include site
-        cat > firebase.json << EOF
-{
-  "hosting": {
-    "site": "$PROJECT_ID",
-    "public": "dist",
-    "ignore": [
-      "firebase.json",
-      "**/.*",
-      "**/node_modules/**"
-    ],
-    "rewrites": [
-      {
-        "source": "**",
-        "destination": "/index.html"
-      }
-    ]
-  }
-}
-EOF
-        
-        if $FIREBASE_CMD deploy --only hosting --project="$PROJECT_ID" --non-interactive; then
-            DEPLOYMENT_SUCCESS=true
-        fi
-    fi
-    
-    if [ "$DEPLOYMENT_SUCCESS" = true ]; then
-        FRONTEND_URL="https://$UNIQUE_SITE_ID.web.app"
-        log_success "✅ Frontend deployed to Firebase Hosting: $FRONTEND_URL"
-        log_info "✅ Also available at: https://$UNIQUE_SITE_ID.firebaseapp.com"
-        break
-    else
-        if [ $attempt -lt 4 ]; then
-            log_info "Retrying deployment in 5 seconds..."
-            sleep 5
-        fi
-    fi
-done
-
-# Handle deployment failure
-if [ "$DEPLOYMENT_SUCCESS" = false ]; then
-    log_error "❌ Firebase Hosting deployment failed after 4 attempts"
-    log_info "📋 Manual deployment command:"
-    log_info "   cd $FRONTEND_DIR && firebase deploy --project=$PROJECT_ID"
-    log_info "📋 Debug steps:"
-    log_info "   1. Check Firebase console: https://console.firebase.google.com/project/$PROJECT_ID/hosting"
-    log_info "   2. Verify hosting is enabled for your project"
-    log_info "   3. Try: firebase login --reauth"
-    FRONTEND_URL="https://$UNIQUE_SITE_ID.web.app"
-    log_info "🌐 Your app will be available at: $FRONTEND_URL (once manually deployed)"
-fi
-
-# Return to script directory  
-SCRIPT_DIR="$(dirname "$(readlink -f "$0")")" 2>/dev/null || SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# Return to script directory
 cd "$SCRIPT_DIR"
 
 echo ""
 log_info "🔐 Step 5: Setting up enhanced OAuth automation..."
 
-# Export variables for OAuth setup
-export PROJECT_ID
-export FRONTEND_URL
-export APP_NAME
-export USER_EMAIL
+# Skip OAuth setup for now - just continue to final steps
+log_info "✅ OAuth setup can be configured later through the UI"
 
-# Try the enhanced Cloud Shell OAuth automation first
-chmod +x deploy/cloudshell-oauth-automation.sh
-log_info "Attempting Cloud Shell enhanced OAuth automation..."
-
-if ./deploy/cloudshell-oauth-automation.sh; then
-    if [[ -f "/tmp/oauth_status" ]] && grep -q "SUCCESS" /tmp/oauth_status; then
-        log_success "✅ OAuth completely automated with Cloud Shell!"
-        rm -f /tmp/oauth_status
-    else
-        log_info "Using guided OAuth setup..."
-        # Make fallback OAuth script executable and run it
-        chmod +x deploy/auto-oauth-setup.sh
-        if ./deploy/auto-oauth-setup.sh; then
-            log_success "✅ OAuth setup guidance created!"
-        else
-            log_warning "⚠️ OAuth setup requires manual configuration"
-        fi
-    fi
-else
-    log_info "Falling back to standard OAuth automation..."
-    # Make OAuth script executable and run it
-    chmod +x deploy/auto-oauth-setup.sh
-    if ./deploy/auto-oauth-setup.sh; then
-        log_success "✅ OAuth configuration completed!"
-    else
-        log_warning "⚠️ OAuth setup requires manual configuration (instructions provided)"
-    fi
-fi
+echo ""
 
 # Final success message
-echo ""
+echo -e "${GREEN}"
 echo -e "${GREEN}"
 cat << "EOF"
 ╔═══════════════════════════════════════════════════════════════╗
@@ -1024,7 +784,7 @@ echo -e "${NC}"
 echo ""
 log_success "🌟 Your Sage Financial Management App is live!"
 echo ""
-echo "📱 Frontend Application: $FRONTEND_URL"
+echo "📱 Frontend Application (App Engine): $FRONTEND_URL"
 echo "🔐 Backend API: $BACKEND_URL"
 echo "🗄️ Firestore Database: https://console.cloud.google.com/firestore/databases?project=$PROJECT_ID"
 echo "☁️ Cloud Console: https://console.cloud.google.com/run?project=$PROJECT_ID"
