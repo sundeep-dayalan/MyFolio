@@ -750,20 +750,6 @@ fi
 
 # Firebase API already enabled in step 1
 
-# Initialize Firebase hosting if needed
-log_info "🔧 Initializing Firebase hosting..."
-
-# First, try to create the hosting site
-log_info "Creating Firebase hosting site..."
-if gcloud firebase hosting sites create "$PROJECT_ID" --project="$PROJECT_ID" 2>/dev/null; then
-    log_success "✅ Firebase hosting site created: $PROJECT_ID"
-else
-    log_info "ℹ️ Firebase hosting site may already exist or will be auto-created"
-fi
-
-# Wait a moment for Firebase to propagate
-sleep 5
-
 # Check if firebase CLI is available, install if not
 if ! command -v firebase &> /dev/null; then
     log_info "Installing Firebase CLI..."
@@ -782,6 +768,22 @@ if ! command -v firebase &> /dev/null; then
 else
     FIREBASE_CMD="firebase"
 fi
+
+# Initialize Firebase hosting if needed
+log_info "🔧 Initializing Firebase hosting..."
+
+# First, try to create the hosting site using Firebase CLI
+log_info "Creating Firebase hosting site..."
+if $FIREBASE_CMD hosting:sites:create "$PROJECT_ID" --project="$PROJECT_ID" 2>/dev/null; then
+    log_success "✅ Firebase hosting site created: $PROJECT_ID"
+elif $FIREBASE_CMD hosting:sites:create "${PROJECT_ID}-$(date +%s)" --project="$PROJECT_ID" 2>/dev/null; then
+    log_success "✅ Firebase hosting site created with unique ID"
+else
+    log_info "ℹ️ Firebase hosting site creation failed, will try during deployment"
+fi
+
+# Wait a moment for Firebase to propagate
+sleep 5
 
 # Initialize Firebase configuration if needed
 if [ ! -f ".firebaserc" ] || ! grep -q "$PROJECT_ID" .firebaserc 2>/dev/null; then
