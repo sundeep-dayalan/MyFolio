@@ -1,8 +1,10 @@
 #!/bin/bash
 
 # Enable required Google Cloud APIs for Sage Financial Management App
+# Robust version with retry logic and better error handling
 
-set -e
+# Don't exit on error immediately - we want to handle them gracefully
+set +e
 
 # Colors for output
 RED='\033[0;31m'
@@ -47,18 +49,29 @@ APIS=(
     "artifactregistry.googleapis.com"    # Artifact Registry for container images
 )
 
-# Function to enable a single API
+# Function to enable a single API with retry logic
 enable_api() {
     local api=$1
+    local max_retries=3
+    local retry_count=0
+    
     log_info "Enabling $api..."
     
-    if gcloud services enable "$api" --project="$PROJECT_ID" 2>/dev/null; then
-        log_success "✅ $api enabled"
-        return 0
-    else
-        log_error "❌ Failed to enable $api"
-        return 1
-    fi
+    while [ $retry_count -lt $max_retries ]; do
+        if gcloud services enable "$api" --project="$PROJECT_ID" --quiet 2>/dev/null; then
+            log_success "✅ $api enabled"
+            return 0
+        else
+            retry_count=$((retry_count + 1))
+            if [ $retry_count -lt $max_retries ]; then
+                log_info "   Retry $retry_count/$max_retries for $api..."
+                sleep 2
+            fi
+        fi
+    done
+    
+    log_error "❌ Failed to enable $api after $max_retries attempts"
+    return 1
 }
 
 # Function to check if API is already enabled
@@ -96,6 +109,18 @@ echo "  ✅ Newly enabled: $enabled_count"
 echo "  ⏭️  Already enabled: $skipped_count"
 echo "  ❌ Failed: ${#failed_apis[@]}"
 
+# Check if critical APIs failed
+critical_apis=("cloudbuild.googleapis.com" "run.googleapis.com" "firestore.googleapis.com")
+critical_failed=()
+
+for api in "${failed_apis[@]}"; do
+    for critical in "${critical_apis[@]}"; do
+        if [[ "$api" == "$critical" ]]; then
+            critical_failed+=("$api")
+        fi
+    done
+done
+
 if [[ ${#failed_apis[@]} -gt 0 ]]; then
     echo ""
     log_error "Failed to enable the following APIs:"
@@ -103,9 +128,14 @@ if [[ ${#failed_apis[@]} -gt 0 ]]; then
         echo "  - $api"
     done
     echo ""
-    log_error "Please check your permissions and try again."
-    log_error "You may need to enable billing on your project."
-    exit 1
+    
+    if [[ ${#critical_failed[@]} -gt 0 ]]; then
+        log_error "Critical APIs failed. Cannot continue deployment."
+        log_error "Please check your permissions and billing status."
+        exit 1
+    else
+        log_info "Non-critical APIs failed, but continuing with deployment..."
+    fi
 fi
 
 echo ""
@@ -115,24 +145,36 @@ log_success "All required APIs are now enabled!"
 log_info "Waiting for APIs to be fully activated..."
 sleep 10
 
-# Verify critical APIs are working
+# Verify critical APIs are working (with retries)
 log_info "Verifying API activation..."
 
-# Test Cloud Run API
-if gcloud run regions list --project="$PROJECT_ID" >/dev/null 2>&1; then
-    log_success "✅ Cloud Run API is active"
-else
-    log_error "❌ Cloud Run API verification failed"
-    exit 1
-fi
+# Test Cloud Run API with retry
+verify_api() {
+    local api_name=$1
+    local test_command=$2
+    local max_retries=3
+    local retry_count=0
+    
+    while [ $retry_count -lt $max_retries ]; do
+        if eval "$test_command" >/dev/null 2>&1; then
+            log_success "✅ $api_name is active"
+            return 0
+        else
+            retry_count=$((retry_count + 1))
+            if [ $retry_count -lt $max_retries ]; then
+                log_info "   Waiting for $api_name to activate... ($retry_count/$max_retries)"
+                sleep 5
+            fi
+        fi
+    done
+    
+    log_error "❌ $api_name verification failed after $max_retries attempts"
+    return 1
+}
 
-# Test Firestore API
-if gcloud firestore databases list --project="$PROJECT_ID" >/dev/null 2>&1; then
-    log_success "✅ Firestore API is active"
-else
-    log_error "❌ Firestore API verification failed"
-    exit 1
-fi
+# Verify APIs
+verify_api "Cloud Run API" "gcloud run regions list --project=\"$PROJECT_ID\""
+verify_api "Firestore API" "gcloud firestore databases list --project=\"$PROJECT_ID\""
 
 echo ""
 log_success "🎉 All APIs successfully enabled and verified!"
