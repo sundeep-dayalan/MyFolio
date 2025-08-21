@@ -772,16 +772,57 @@ fi
 # Initialize Firebase hosting if needed
 log_info "🔧 Initializing Firebase hosting..."
 
-# Skip Firebase hosting site creation for now - it will be auto-created during deployment
-log_info "Configuring Firebase hosting..."
+# Create Firebase hosting site using multiple methods
+log_info "Creating Firebase hosting site..."
 
 # Generate a unique site ID
 UNIQUE_SITE_ID="${PROJECT_ID}-$(date +%s | tr -d '\n')"
 
+# Method 1: Try using gcloud REST API directly
+log_info "Attempting to create site via gcloud API..."
+if gcloud auth application-default print-access-token > /tmp/token.txt 2>/dev/null; then
+    ACCESS_TOKEN=$(cat /tmp/token.txt)
+    
+    # Try to create the site using REST API
+    HTTP_RESPONSE=$(curl -s -w "%{http_code}" -o /tmp/response.json \
+        -X POST \
+        -H "Authorization: Bearer $ACCESS_TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "{\"siteId\": \"$UNIQUE_SITE_ID\"}" \
+        "https://firebasehosting.googleapis.com/v1beta1/projects/$PROJECT_ID/sites" 2>/dev/null || echo "000")
+    
+    if [[ "$HTTP_RESPONSE" == "200" ]] || [[ "$HTTP_RESPONSE" == "201" ]]; then
+        log_success "✅ Firebase hosting site created via API: $UNIQUE_SITE_ID"
+        SITE_CREATED=true
+    else
+        log_info "ℹ️ API creation failed, trying Firebase CLI methods..."
+        SITE_CREATED=false
+    fi
+    
+    rm -f /tmp/token.txt /tmp/response.json
+else
+    SITE_CREATED=false
+fi
+
+# Method 2: Try Firebase CLI with automated input
+if [[ "$SITE_CREATED" != "true" ]]; then
+    log_info "Attempting Firebase CLI site creation..."
+    
+    # Create automated input for Firebase CLI
+    echo "$UNIQUE_SITE_ID" | timeout 30 $FIREBASE_CMD hosting:sites:create --project="$PROJECT_ID" 2>/dev/null && {
+        log_success "✅ Firebase hosting site created via CLI: $UNIQUE_SITE_ID"
+        SITE_CREATED=true
+    } || {
+        log_info "ℹ️ CLI site creation failed, will use default project site"
+        SITE_CREATED=false
+        UNIQUE_SITE_ID="$PROJECT_ID"
+    }
+fi
+
 log_info "✅ Using site ID: $UNIQUE_SITE_ID"
 
 # Wait a moment for Firebase to propagate
-sleep 5
+sleep 3
 
 # Initialize Firebase configuration if needed
 if [ ! -f ".firebaserc" ] || ! grep -q "$PROJECT_ID" .firebaserc 2>/dev/null; then
@@ -851,33 +892,26 @@ for attempt in 1 2 3 4; do
             fi
         fi
     elif [ $attempt -eq 3 ]; then
-        # Third attempt: Try to create site during deployment
-        log_info "Creating hosting site during deployment..."
+        # Third attempt: Try Firebase init with automated responses
+        log_info "Initializing Firebase with automated setup..."
         
-        # Create a simple firebase.json without site ID
-        cat > firebase.json << EOF
-{
-  "hosting": {
-    "public": "dist",
-    "ignore": [
-      "firebase.json",
-      "**/.*",
-      "**/node_modules/**"
-    ],
-    "rewrites": [
-      {
-        "source": "**",
-        "destination": "/index.html"
-      }
-    ]
-  }
-}
-EOF
+        # Create automated responses for Firebase init
+        FIREBASE_ANSWERS="
+
+hosting
+y
+$UNIQUE_SITE_ID
+dist
+n
+n
+"
         
+        # Try Firebase init hosting
+        echo "$FIREBASE_ANSWERS" | timeout 60 $FIREBASE_CMD init hosting --project="$PROJECT_ID" 2>/dev/null || true
+        
+        # Try deployment after init
         if $FIREBASE_CMD deploy --only hosting --project="$PROJECT_ID" --non-interactive; then
             DEPLOYMENT_SUCCESS=true
-            # Update the site ID to the default project site
-            UNIQUE_SITE_ID="$PROJECT_ID"
         fi
     elif [ $attempt -eq 4 ]; then
         # Fourth attempt: Try with explicit site ID
