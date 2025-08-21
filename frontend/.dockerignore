@@ -44,7 +44,6 @@ Thumbs.db
 .gitattributes
 
 # Docker
-Dockerfile*
 .dockerignore
 docker-compose*.yml
 
@@ -140,7 +139,6 @@ temp/
 *.njsproj
 *.sln
 *.sw?
-
 # Local development
 .local/
 
