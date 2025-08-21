@@ -772,22 +772,13 @@ fi
 # Initialize Firebase hosting if needed
 log_info "🔧 Initializing Firebase hosting..."
 
-# First, try to create the hosting site using Firebase CLI
-log_info "Creating Firebase hosting site..."
+# Skip Firebase hosting site creation for now - it will be auto-created during deployment
+log_info "Configuring Firebase hosting..."
 
 # Generate a unique site ID
-UNIQUE_SITE_ID="${PROJECT_ID}-$(date +%s)"
+UNIQUE_SITE_ID="${PROJECT_ID}-$(date +%s | tr -d '\n')"
 
-# Try different methods to create the site
-if echo "$UNIQUE_SITE_ID" | $FIREBASE_CMD hosting:sites:create --project="$PROJECT_ID" 2>/dev/null; then
-    log_success "✅ Firebase hosting site created: $UNIQUE_SITE_ID"
-elif $FIREBASE_CMD hosting:sites:create "$PROJECT_ID" --project="$PROJECT_ID" --non-interactive 2>/dev/null; then
-    log_success "✅ Firebase hosting site created: $PROJECT_ID"
-    UNIQUE_SITE_ID="$PROJECT_ID"
-else
-    log_info "ℹ️ Firebase hosting site creation failed, will configure during init"
-    UNIQUE_SITE_ID="$PROJECT_ID"
-fi
+log_info "✅ Using site ID: $UNIQUE_SITE_ID"
 
 # Wait a moment for Firebase to propagate
 sleep 5
@@ -860,14 +851,33 @@ for attempt in 1 2 3 4; do
             fi
         fi
     elif [ $attempt -eq 3 ]; then
-        # Third attempt: Try to reinitialize and deploy
-        log_info "Reinitializing Firebase hosting..."
+        # Third attempt: Try to create site during deployment
+        log_info "Creating hosting site during deployment..."
         
-        # Try using Firebase init
-        echo -e "\n\n\n\ndist\nn\n" | $FIREBASE_CMD init hosting --project="$PROJECT_ID" 2>/dev/null || true
+        # Create a simple firebase.json without site ID
+        cat > firebase.json << EOF
+{
+  "hosting": {
+    "public": "dist",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  }
+}
+EOF
         
         if $FIREBASE_CMD deploy --only hosting --project="$PROJECT_ID" --non-interactive; then
             DEPLOYMENT_SUCCESS=true
+            # Update the site ID to the default project site
+            UNIQUE_SITE_ID="$PROJECT_ID"
         fi
     elif [ $attempt -eq 4 ]; then
         # Fourth attempt: Try with explicit site ID
