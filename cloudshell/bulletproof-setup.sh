@@ -737,6 +737,35 @@ EOF
 
     log_success "✅ App Engine configuration created for free tier"
     
+    # Initialize App Engine application if it doesn't exist
+    log_info "🔧 Initializing App Engine application..."
+    
+    # Check if App Engine app exists, if not create it
+    if ! gcloud app describe --project="$PROJECT_ID" >/dev/null 2>&1; then
+        log_info "Creating App Engine application..."
+        
+        # Use the same region as the backend for consistency
+        if gcloud app create --region="$REGION" --project="$PROJECT_ID" --quiet; then
+            log_success "✅ App Engine application created in region: $REGION"
+        else
+            log_warning "⚠️ Failed to create App Engine app in $REGION, trying us-central"
+            if gcloud app create --region="us-central" --project="$PROJECT_ID" --quiet; then
+                log_success "✅ App Engine application created in region: us-central"
+            else
+                log_error "❌ Failed to create App Engine application"
+                FRONTEND_URL="https://$PROJECT_ID.appspot.com"
+                log_info "🌐 Your app will be available at: $FRONTEND_URL (once manually deployed)"
+                log_info "📋 Manual setup: gcloud app create --region=us-central --project=$PROJECT_ID"
+                return
+            fi
+        fi
+        
+        # Wait for App Engine to be fully initialized
+        sleep 10
+    else
+        log_success "✅ App Engine application already exists"
+    fi
+    
     # Deploy to App Engine
     log_info "🚀 Deploying React app to App Engine..."
     
