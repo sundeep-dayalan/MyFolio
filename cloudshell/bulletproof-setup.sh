@@ -591,6 +591,43 @@ cd "$SCRIPT_DIR"
 echo ""
 log_info "⚛️  Step 4: Deploying React frontend to Firebase Hosting..."
 
+# Get region from gcloud config for dynamic backend discovery
+REGION=$(gcloud config get-value compute/region 2>/dev/null)
+if [[ -z "$REGION" ]]; then
+    REGION="us-central1"
+    log_info "⚠️ No region set, using default: $REGION"
+fi
+
+# Find backend service dynamically - look for any service with 'backend' in the name
+log_info "🔍 Looking for backend service in region: $REGION"
+BACKEND_SERVICE=$(gcloud run services list --region="$REGION" --project="$PROJECT_ID" --format="value(metadata.name)" --filter="metadata.name~backend" --limit=1 2>/dev/null)
+
+if [[ -z "$BACKEND_SERVICE" ]]; then
+    log_info "⚠️ No backend service found in $REGION. Looking in all regions..."
+    # Try to find any backend service in any region
+    BACKEND_INFO=$(gcloud run services list --project="$PROJECT_ID" --format="value(metadata.name,spec.template.metadata.labels.\"cloud.googleapis.com/location\")" --filter="metadata.name~backend" --limit=1 2>/dev/null)
+    
+    if [[ -n "$BACKEND_INFO" ]]; then
+        BACKEND_SERVICE=$(echo "$BACKEND_INFO" | cut -f1)
+        REGION=$(echo "$BACKEND_INFO" | cut -f2)
+        log_success "✓ Found backend service: $BACKEND_SERVICE in region: $REGION"
+    else
+        log_error "❌ No backend service found. Using the pre-set BACKEND_URL"
+    fi
+else
+    log_success "✓ Found backend service: $BACKEND_SERVICE"
+fi
+
+# Get backend URL dynamically
+if [[ -n "$BACKEND_SERVICE" ]]; then
+    BACKEND_URL=$(gcloud run services describe "$BACKEND_SERVICE" --region="$REGION" --format='value(status.url)' --project="$PROJECT_ID" 2>/dev/null)
+    if [[ -n "$BACKEND_URL" ]]; then
+        log_success "🔗 Backend URL: $BACKEND_URL"
+    else
+        log_warning "⚠️ Could not get backend URL for service: $BACKEND_SERVICE"
+    fi
+fi
+
 # Find the frontend directory - it could be in different locations
 log_info "🔍 Looking for frontend directory from: $(pwd)"
 FRONTEND_DIR=""
@@ -612,16 +649,24 @@ elif [ -d "${SCRIPT_DIR}/../frontend" ]; then
     FRONTEND_DIR="${SCRIPT_DIR}/../frontend"
     log_info "✓ Found frontend at: ${SCRIPT_DIR}/../frontend"
 else
-    log_error "❌ Frontend directory not found in any of these locations:"
-    log_error "   - ../frontend"
-    log_error "   - ./frontend" 
-    log_error "   - frontend"
-    log_error "   - $INITIAL_DIR/frontend"
-    log_error "   - ${SCRIPT_DIR}/../frontend"
-    log_error "Current working directory: $(pwd)"
-    log_error "Script directory: $SCRIPT_DIR"
-    log_error "Initial directory: $INITIAL_DIR"
-    exit 1
+    # Try to find any directory with package.json that looks like a React app
+    log_info "🔍 Searching for React application..."
+    FRONTEND_DIR=$(find . -name "package.json" -exec grep -l "react" {} \; | head -1 | xargs dirname 2>/dev/null)
+    
+    if [[ -z "$FRONTEND_DIR" ]]; then
+        log_error "❌ Frontend directory not found in any of these locations:"
+        log_error "   - ../frontend"
+        log_error "   - ./frontend" 
+        log_error "   - frontend"
+        log_error "   - $INITIAL_DIR/frontend"
+        log_error "   - ${SCRIPT_DIR}/../frontend"
+        log_error "Current working directory: $(pwd)"
+        log_error "Script directory: $SCRIPT_DIR"
+        log_error "Initial directory: $INITIAL_DIR"
+        exit 1
+    else
+        log_success "✓ Found React app at: $FRONTEND_DIR"
+    fi
 fi
 
 # Navigate to the existing frontend directory
@@ -705,6 +750,20 @@ fi
 
 # Firebase API already enabled in step 1
 
+# Initialize Firebase hosting if needed
+log_info "🔧 Initializing Firebase hosting..."
+
+# First, try to create the hosting site
+log_info "Creating Firebase hosting site..."
+if gcloud firebase hosting sites create "$PROJECT_ID" --project="$PROJECT_ID" 2>/dev/null; then
+    log_success "✅ Firebase hosting site created: $PROJECT_ID"
+else
+    log_info "ℹ️ Firebase hosting site may already exist or will be auto-created"
+fi
+
+# Wait a moment for Firebase to propagate
+sleep 5
+
 # Check if firebase CLI is available, install if not
 if ! command -v firebase &> /dev/null; then
     log_info "Installing Firebase CLI..."
@@ -724,13 +783,58 @@ else
     FIREBASE_CMD="firebase"
 fi
 
-# Deploy to Firebase Hosting
-log_info "Deploying to Firebase Hosting..."
+# Initialize Firebase configuration if needed
+if [ ! -f ".firebaserc" ] || ! grep -q "$PROJECT_ID" .firebaserc 2>/dev/null; then
+    log_info "Initializing Firebase project configuration..."
+    
+    # Create firebase configuration files
+    cat > firebase.json << EOF
+{
+  "hosting": {
+    "public": "dist",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ],
+    "headers": [
+      {
+        "source": "**/*.@(js|css)",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "max-age=31536000"
+          }
+        ]
+      }
+    ]
+  }
+}
+EOF
 
-# Try to authenticate and deploy
+    cat > .firebaserc << EOF
+{
+  "projects": {
+    "default": "$PROJECT_ID"
+  }
+}
+EOF
+    
+    log_success "✅ Firebase configuration initialized"
+fi
+
+# Deploy to Firebase Hosting only
+log_info "🚀 Deploying to Firebase Hosting..."
+
 DEPLOYMENT_SUCCESS=false
-for attempt in 1 2 3; do
-    log_info "Deployment attempt $attempt/3..."
+for attempt in 1 2 3 4; do
+    log_info "Deployment attempt $attempt/4..."
     
     if [ $attempt -eq 1 ]; then
         # First attempt: Standard deployment
@@ -746,58 +850,67 @@ for attempt in 1 2 3; do
             fi
         fi
     elif [ $attempt -eq 3 ]; then
-        # Third attempt: Use gcloud app deploy as fallback (for Firebase equivalent)
-        log_info "Trying alternative deployment with gcloud..."
-        # Create app.yaml for App Engine as ultimate fallback
-        cat > app.yaml << EOF
-runtime: nodejs18
-service: default
-
-handlers:
-- url: /(.*\.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot|map))$
-  static_files: dist/\1
-  upload: dist/(.*\.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot|map))$
-  secure: always
-
-- url: /.*
-  static_files: dist/index.html
-  upload: dist/index.html
-  secure: always
-
-automatic_scaling:
-  min_instances: 0
-  max_instances: 10
+        # Third attempt: Try to reinitialize and deploy
+        log_info "Reinitializing Firebase hosting..."
+        
+        # Try using Firebase init
+        echo -e "\n\n\n\ndist\nn\n" | $FIREBASE_CMD init hosting --project="$PROJECT_ID" 2>/dev/null || true
+        
+        if $FIREBASE_CMD deploy --only hosting --project="$PROJECT_ID" --non-interactive; then
+            DEPLOYMENT_SUCCESS=true
+        fi
+    elif [ $attempt -eq 4 ]; then
+        # Fourth attempt: Try with explicit site ID
+        log_info "Trying deployment with explicit site configuration..."
+        
+        # Update firebase.json to include site
+        cat > firebase.json << EOF
+{
+  "hosting": {
+    "site": "$PROJECT_ID",
+    "public": "dist",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  }
+}
 EOF
         
-        if gcloud app deploy app.yaml --project="$PROJECT_ID" --quiet 2>/dev/null; then
-            FRONTEND_URL="https://$PROJECT_ID.appspot.com"
+        if $FIREBASE_CMD deploy --only hosting --project="$PROJECT_ID" --non-interactive; then
             DEPLOYMENT_SUCCESS=true
-            log_success "✅ Frontend deployed to App Engine: $FRONTEND_URL"
         fi
     fi
     
     if [ "$DEPLOYMENT_SUCCESS" = true ]; then
-        if [ $attempt -le 2 ]; then
-            FRONTEND_URL="https://$PROJECT_ID.web.app"
-            log_success "✅ Frontend deployed to Firebase Hosting: $FRONTEND_URL"
-            # Also mention the alternative URL
-            log_info "✅ Also available at: https://$PROJECT_ID.firebaseapp.com"
-        fi
+        FRONTEND_URL="https://$PROJECT_ID.web.app"
+        log_success "✅ Frontend deployed to Firebase Hosting: $FRONTEND_URL"
+        log_info "✅ Also available at: https://$PROJECT_ID.firebaseapp.com"
         break
     else
-        if [ $attempt -lt 3 ]; then
-            log_info "Retrying deployment..."
-            sleep 3
+        if [ $attempt -lt 4 ]; then
+            log_info "Retrying deployment in 5 seconds..."
+            sleep 5
         fi
     fi
 done
 
 # Handle deployment failure
 if [ "$DEPLOYMENT_SUCCESS" = false ]; then
-    log_error "❌ All deployment methods failed"
-    log_info "📋 Manual deployment options:"
-    log_info "   Firebase: cd frontend && firebase deploy --project=$PROJECT_ID"
-    log_info "   App Engine: cd frontend && gcloud app deploy --project=$PROJECT_ID"
+    log_error "❌ Firebase Hosting deployment failed after 4 attempts"
+    log_info "📋 Manual deployment command:"
+    log_info "   cd $FRONTEND_DIR && firebase deploy --project=$PROJECT_ID"
+    log_info "📋 Debug steps:"
+    log_info "   1. Check Firebase console: https://console.firebase.google.com/project/$PROJECT_ID/hosting"
+    log_info "   2. Verify hosting is enabled for your project"
+    log_info "   3. Try: firebase login --reauth"
     FRONTEND_URL="https://$PROJECT_ID.web.app"
     log_info "🌐 Your app will be available at: $FRONTEND_URL (once manually deployed)"
 fi
