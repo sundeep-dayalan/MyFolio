@@ -592,51 +592,8 @@ elif [ -d "./frontend" ]; then
     log_info "Found frontend directory at ./frontend"  
     cp -r ./frontend ./sage-frontend
 else
-    log_warning "Frontend directory not found, creating a simple React app..."
-    mkdir -p sage-frontend
-    cd sage-frontend
-    
-    # Create a minimal package.json for the React app
-    cat > package.json << 'EOF'
-{
-  "name": "sage-frontend",
-  "version": "1.0.0",
-  "private": true,
-  "scripts": {
-    "build": "echo 'Build complete'",
-    "start": "echo 'Starting app'"
-  }
-}
-EOF
-    
-    # Create a simple index.html
-    cat > index.html << 'EOF'
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sage Financial Management</title>
-</head>
-<body>
-    <div id="app">
-        <h1>🏦 Sage Financial Management</h1>
-        <p>Your React app will be deployed here soon!</p>
-    </div>
-</body>
-</html>
-EOF
-    
-    # Create simple Dockerfile for static hosting
-    cat > Dockerfile << 'EOF'
-FROM nginx:alpine
-COPY index.html /usr/share/nginx/html/
-EXPOSE 8080
-CMD ["nginx", "-g", "daemon off;"]
-EOF
-    
-    log_info "✅ Created temporary frontend app"
-    cd ..
+    log_error "Frontend directory not found. Please ensure the 'frontend' directory is present in your project."
+    exit 1
 fi
 
 if [ -d "./sage-frontend" ]; then
@@ -645,6 +602,20 @@ else
     log_error "Failed to create sage-frontend directory"
     exit 1
 fi
+
+# ============================================================================
+# AUTOMATED FIX FOR .dockerignore
+# This command removes the line that ignores the Dockerfile, ensuring a
+# successful build.
+# ============================================================================
+log_info "Applying automated fix to .dockerignore..."
+if [ -f ".dockerignore" ]; then
+    sed -i '/Dockerfile*/d' .dockerignore
+    log_success "✅ .dockerignore has been automatically corrected."
+else
+    log_warning "⚠️ .dockerignore not found, but continuing with deployment."
+fi
+
 
 # Update environment variables for production deployment
 cat > .env.production << EOF
