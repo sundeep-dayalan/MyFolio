@@ -604,18 +604,14 @@ else
 fi
 
 # ============================================================================
-# AUTOMATED FIX FOR .dockerignore
-# This command removes the line that ignores the Dockerfile, ensuring a
-# successful build.
+# AUTOMATED FIX: Remove the problematic .dockerignore file
+# This ensures the Dockerfile is always included in the build context.
 # ============================================================================
-log_info "Applying automated fix to .dockerignore..."
+log_info "Applying automated fix to ensure Dockerfile is used..."
 if [ -f ".dockerignore" ]; then
-    sed -i '/Dockerfile*/d' .dockerignore
-    log_success "✅ .dockerignore has been automatically corrected."
-else
-    log_warning "⚠️ .dockerignore not found, but continuing with deployment."
+    rm -f .dockerignore
+    log_success "✅ Removed .dockerignore to ensure a successful Docker build."
 fi
-
 
 # Update environment variables for production deployment
 cat > .env.production << EOF
