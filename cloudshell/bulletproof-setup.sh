@@ -691,14 +691,20 @@ if [ ! -d "node_modules" ] || [ "package.json" -nt "node_modules" ]; then
     fi
 fi
 
-# Build the React application
-log_info "Building React application for production..."
-if npm run build; then
-    log_success "✅ React app built successfully"
+# Check if production Dockerfile exists to determine build strategy
+if [[ -f "Dockerfile" ]]; then
+    log_success "✅ Using existing production Dockerfile for Cloud Run deployment (includes build process)"
+else
+    # Build the React application first for simple Dockerfile
+    log_info "Building React application for production..."
+    if npm run build; then
+        log_success "✅ React app built successfully"
+    else
+        log_error "❌ React build failed"
+        exit 1
+    fi
     
-    # Create Cloud Run Dockerfile for React app
-    log_info "📝 Creating Cloud Run configuration for React hosting..."
-    
+    log_info "📝 Creating Cloud Run Dockerfile for React hosting..."
     cat > Dockerfile << EOF
 # Use nginx to serve static React files
 FROM nginx:alpine
@@ -727,10 +733,10 @@ EXPOSE 8080
 # Start nginx
 CMD ["nginx", "-g", "daemon off;"]
 EOF
-
     log_success "✅ Cloud Run Dockerfile created for React hosting"
-    
-    # Deploy React app to Cloud Run
+fi
+
+# Deploy React app to Cloud Run
     log_info "🚀 Deploying React app to Cloud Run..."
     
     if gcloud run deploy sage-frontend \
@@ -757,14 +763,6 @@ EOF
         log_info "📋 Manual deployment: cd $FRONTEND_DIR && gcloud run deploy sage-frontend --source . --region=$REGION --project=$PROJECT_ID"
         DEPLOYMENT_SUCCESS=false
     fi
-    
-else
-    log_error "❌ React build failed"
-    # Return to script directory
-    SCRIPT_DIR="$(dirname "$(readlink -f "$0")")" 2>/dev/null || SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-    cd "$SCRIPT_DIR"
-    exit 1
-fi
 
 # Return to script directory
 cd "$SCRIPT_DIR"
