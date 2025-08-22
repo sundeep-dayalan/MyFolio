@@ -45,6 +45,7 @@ jobs:
           pip install -r requirements.txt --no-cache-dir
           echo "Dependencies installed successfully"
 
+
       - name: Zip artifact for deployment
         run: |
           cd ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
@@ -52,6 +53,9 @@ jobs:
           zip -r ../backend-deployment.zip function_app.py host.json requirements.txt app/
           echo "Deployment package created:"
           ls -lh ../backend-deployment.zip
+
+      - name: List contents of deployment zip
+        run: unzip -l backend-deployment.zip
 
       - name: Deploy to Azure Functions
         uses: Azure/functions-action@v1
