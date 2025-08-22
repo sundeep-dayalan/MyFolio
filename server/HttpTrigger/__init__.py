@@ -8,9 +8,8 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
     # Get request details
     method = req.method
     url = req.url
-    params = dict(req.params)
     
-    logging.info(f'Method: {method}, URL: {url}, Params: {params}')
+    logging.info(f'Method: {method}, URL: {url}')
     
     # Simple response that works for any request
     response_data = {
@@ -19,7 +18,6 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         "service": "sage-api",
         "method": method,
         "url": str(url),
-        "params": params,
         "timestamp": "2025-01-22"
     }
     
