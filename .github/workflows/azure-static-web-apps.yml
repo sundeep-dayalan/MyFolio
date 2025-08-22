@@ -32,11 +32,13 @@ jobs:
           cache: 'npm'
           cache-dependency-path: '${{ env.APP_LOCATION }}/package-lock.json'
 
-      - name: Install dependencies and Build
-        run: |
-          cd ${{ env.APP_LOCATION }}
-          npm install
-          npm run build
+      - name: Install dependencies
+        run: npm install
+        working-directory: ${{ env.APP_LOCATION }}
+
+      - name: Build application
+        run: npm run build
+        working-directory: ${{ env.APP_LOCATION }}
         env:
           VITE_API_BASE_URL: https://sage-24293-api.azurewebsites.net/api
           VITE_APP_ENV: production
@@ -48,11 +50,6 @@ jobs:
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           action: 'upload'
-
-          # Point to the correct locations for deployment
           app_location: ${{ env.APP_LOCATION }}
           output_location: ${{ env.OUTPUT_LOCATION }}
-
-          # Because we are building in a previous step, we tell the action to skip its own build.
-          # The action will now correctly look inside the app_location for the output_location folder and deploy only that.
           skip_app_build: true
