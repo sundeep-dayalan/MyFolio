@@ -1,23 +1,49 @@
+import logging
 import azure.functions as func
-from fastapi import FastAPI
+import json
 
-# Create a minimal FastAPI app for testing
-test_app = FastAPI(
-    title="Sage API Test",
-    description="Minimal test version to verify Azure Functions deployment"
-)
+def main(req: func.HttpRequest) -> func.HttpResponse:
+    logging.info('Python HTTP trigger function processed a request.')
 
-@test_app.get("/")
-async def root():
-    return {"message": "Azure Functions with FastAPI is working!", "status": "success"}
+    # Get the route path
+    route = req.route_params.get('route', '')
+    method = req.method
+    
+    logging.info(f'Route: {route}, Method: {method}')
+    
+    # Handle different routes
+    if route == '' or route == '/':
+        # Root endpoint
+        response_data = {
+            "message": "Azure Functions with FastAPI is working!",
+            "status": "success",
+            "method": method
+        }
+    elif route == 'health':
+        # Health check endpoint
+        response_data = {
+            "status": "healthy", 
+            "service": "sage-api-test",
+            "timestamp": "2025-01-22"
+        }
+    elif route.startswith('api/v1/'):
+        # API endpoints
+        response_data = {
+            "message": "API endpoint working",
+            "version": "1.0",
+            "route": route,
+            "method": method
+        }
+    else:
+        # Default response for any other route
+        response_data = {
+            "message": f"Route {route} processed successfully",
+            "method": method,
+            "status": "working"
+        }
 
-@test_app.get("/health")  
-async def health():
-    return {"status": "healthy", "service": "sage-api-test"}
-
-@test_app.get("/api/v1/test")
-async def api_test():
-    return {"message": "API endpoint working", "version": "1.0"}
-
-# Use this minimal app instead of the complex one
-app = func.AsgiFunctionApp(app=test_app, http_auth_level=func.AuthLevel.ANONYMOUS)
+    return func.HttpResponse(
+        json.dumps(response_data),
+        status_code=200,
+        headers={'Content-Type': 'application/json'}
+    )

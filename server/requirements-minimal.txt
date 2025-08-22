@@ -1,3 +1,2 @@
-# Minimal requirements for Azure Functions deployment test
-fastapi==0.104.1
+# Ultra-minimal requirements - just Azure Functions
 azure-functions==1.18.0
