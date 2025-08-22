@@ -23,4 +23,21 @@ export default defineConfig({
     ],
     extensions: ['.ts', '.tsx', '.js', '.jsx', '.json'],
   },
+  build: {
+    // Optimize for smaller builds
+    sourcemap: false,
+    minify: 'terser',
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ['react', 'react-dom'],
+          ui: ['@radix-ui/react-slot', '@radix-ui/react-dialog'],
+        },
+      },
+    },
+    // Increase chunk size warning limit
+    chunkSizeWarningLimit: 1000,
+    // Compress assets
+    assetsInlineLimit: 4096,
+  },
 });
