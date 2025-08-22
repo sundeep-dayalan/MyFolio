@@ -1,0 +1,23 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "FUNCTIONS_EXTENSION_VERSION": "~4",
+    "ENVIRONMENT": "development",
+    "SECRET_KEY": "development-secret-key-change-in-production",
+    "COSMOS_DB_ENDPOINT": "your-cosmos-db-endpoint-here",
+    "COSMOS_DB_KEY": "your-cosmos-db-key-here",
+    "COSMOS_DB_NAME": "sage-db",
+    "KEY_VAULT_URL": "your-key-vault-url-here",
+    "GOOGLE_CLIENT_ID": "your-google-client-id-here",
+    "GOOGLE_CLIENT_SECRET": "your-google-client-secret-here",
+    "PLAID_CLIENT_ID": "your-plaid-client-id-here",
+    "PLAID_SECRET": "your-plaid-secret-here",
+    "PLAID_ENV": "sandbox"
+  },
+  "Host": {
+    "CORS": "*",
+    "CORSCredentials": false
+  }
+}
