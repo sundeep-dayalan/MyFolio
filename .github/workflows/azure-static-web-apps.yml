@@ -1,4 +1,4 @@
-name: Deploy Azure Static Web Apps Frontend
+name: Deploy Az Static Web Apps Frontend
 
 on:
   push:
