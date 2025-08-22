@@ -49,7 +49,7 @@ jobs:
         run: |
           cd ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
           echo "Creating deployment package..."
-          zip -r ../backend-deployment.zip function_app.py host.json requirements.txt app/ --exclude="*.pyc" "__pycache__/*" ".pytest_cache/*" "*.log" ".env*" "local.settings.json"
+          zip -r ../backend-deployment.zip function_app.py host.json requirements.txt app/ HttpTrigger/ --exclude="*.pyc" "__pycache__/*" ".pytest_cache/*" "*.log" ".env*" "local.settings.json"
           echo "Deployment package created:"
           ls -lh ../backend-deployment.zip
 
