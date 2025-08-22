@@ -51,7 +51,7 @@ External Services
 
 ```
 personal-wealth-management/
-├── server-azure/                 # Azure Functions backend
+├── server/                       # FastAPI backend (deployable to Azure Functions)
 │   ├── app/                      # Main application package
 │   │   ├── config.py            # Azure configuration and Key Vault
 │   │   ├── database.py          # Azure Cosmos DB connection
@@ -168,7 +168,7 @@ For local development:
 ./scripts/local-dev-setup.sh
 
 # Start the backend (Azure Functions)
-cd server-azure
+cd server
 source venv/bin/activate
 func start
 
@@ -212,7 +212,7 @@ az group create --name sage-app-rg --location "East US"
 az deployment group create --resource-group sage-app-rg --template-file azure/main.bicep
 
 # 2. Deploy backend
-cd server-azure
+cd server
 func azure functionapp publish <function-app-name>
 
 # 3. Deploy frontend
@@ -331,7 +331,7 @@ headers: {
 Test the Azure Functions locally:
 
 ```bash
-cd server-azure
+cd server
 source venv/bin/activate
 func start
 ```
@@ -446,7 +446,7 @@ The application includes comprehensive testing for:
    func azure functionapp logstream <function-app-name>
    
    # Verify requirements.txt
-   cd server-azure && pip install -r requirements.txt
+   cd server && pip install -r requirements.txt
    ```
 
 2. **Cosmos DB Connection Issues**
