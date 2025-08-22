@@ -1,5 +1,23 @@
 import azure.functions as func
-from app.main import app as fastapi_app
+from fastapi import FastAPI
 
-# Create Azure Functions app using the modern v2 approach
-app = func.AsgiFunctionApp(app=fastapi_app, http_auth_level=func.AuthLevel.ANONYMOUS)
+# Create a minimal FastAPI app for testing
+test_app = FastAPI(
+    title="Sage API Test",
+    description="Minimal test version to verify Azure Functions deployment"
+)
+
+@test_app.get("/")
+async def root():
+    return {"message": "Azure Functions with FastAPI is working!", "status": "success"}
+
+@test_app.get("/health")  
+async def health():
+    return {"status": "healthy", "service": "sage-api-test"}
+
+@test_app.get("/api/v1/test")
+async def api_test():
+    return {"message": "API endpoint working", "version": "1.0"}
+
+# Use this minimal app instead of the complex one
+app = func.AsgiFunctionApp(app=test_app, http_auth_level=func.AuthLevel.ANONYMOUS)
