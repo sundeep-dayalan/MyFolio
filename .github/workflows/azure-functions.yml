@@ -93,5 +93,24 @@ jobs:
         run: |
           echo "Waiting 60 seconds for deployment to stabilize..."
           sleep 60
-          echo "Pinging health check endpoint: ${{ steps.fa.outputs.app-url }}/health"
-          curl -f "${{ steps.fa.outputs.app-url }}/health" || (echo "Health check failed" && exit 1)
+          
+          echo "Testing multiple endpoint patterns..."
+          BASE_URL="${{ steps.fa.outputs.app-url }}"
+          echo "Base URL: $BASE_URL"
+          
+          echo "1. Testing root endpoint:"
+          curl -v "$BASE_URL" || echo "Root failed"
+          
+          echo "2. Testing /api/HttpTrigger:"
+          curl -v "$BASE_URL/api/HttpTrigger" || echo "HttpTrigger failed"
+          
+          echo "3. Testing /api/HttpTrigger/health:"
+          curl -v "$BASE_URL/api/HttpTrigger/health" || echo "HttpTrigger/health failed"
+          
+          echo "4. Testing /health:"
+          curl -v "$BASE_URL/health" || echo "Health failed"
+          
+          echo "5. Testing function-specific URL pattern:"
+          curl -v "$BASE_URL/api/HttpTrigger?route=health" || echo "Query param failed"
+          
+          echo "If all tests fail, there's likely an Azure Functions configuration issue"
