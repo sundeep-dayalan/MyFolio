@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
 
 env:
-  NODE_VERSION: '18.x'
+  NODE_VERSION: '20.x'
   APP_LOCATION: './frontend'
   OUTPUT_LOCATION: 'dist'
 
@@ -35,18 +35,36 @@ jobs:
     - name: Install dependencies
       run: |
         cd ${{ env.APP_LOCATION }}
-        npm ci
+        # Update package-lock.json if needed
+        npm install
+        # Clean install for consistency
+        rm -rf node_modules package-lock.json
+        npm install
 
     - name: Build frontend
       run: |
         cd ${{ env.APP_LOCATION }}
+        echo "Building React app..."
         npm run build
+        
+        # Check if build was successful
+        if [ ! -d "dist" ]; then
+          echo "Build failed - dist directory not found"
+          exit 1
+        fi
         
         # Optimize build size by removing unnecessary files
         cd dist
         find . -name "*.map" -delete
         find . -name "*.LICENSE.txt" -delete
-        du -sh . && echo "Build size after cleanup"
+        
+        # Show build size
+        echo "Build size after cleanup:"
+        du -sh .
+        
+        # List top-level files
+        echo "Build contents:"
+        ls -la
       env:
         VITE_API_BASE_URL: https://sage-24293-api.azurewebsites.net/api
         VITE_APP_ENV: production
