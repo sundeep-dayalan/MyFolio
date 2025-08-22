@@ -12,7 +12,6 @@ from app.main import app
 azure_app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
 # Route all HTTP requests through FastAPI
-@azure_app.function_name(name="HttpTrigger")
 @azure_app.route(route="{*route}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
 async def main(req: func.HttpRequest) -> func.HttpResponse:
     """Route all HTTP requests to FastAPI application."""

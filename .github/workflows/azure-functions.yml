@@ -71,5 +71,5 @@ jobs:
         run: |
           echo "Waiting 60 seconds for deployment to stabilize..."
           sleep 60
-          echo "Pinging health check endpoint: ${{ steps.fa.outputs.app-url }}/api/health"
-          curl -f "${{ steps.fa.outputs.app-url }}/api/health" || (echo "Health check failed" && exit 1)
+          echo "Pinging health check endpoint: ${{ steps.fa.outputs.app-url }}/health"
+          curl -f "${{ steps.fa.outputs.app-url }}/health" || (echo "Health check failed" && exit 1)
