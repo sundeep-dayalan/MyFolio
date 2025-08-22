@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "build:deploy": "vite build --mode production && npm run optimize:deploy",
+    "optimize:deploy": "cd dist && find . -name '*.map' -delete && find . -name '*.LICENSE.txt' -delete",
     "lint": "eslint .",
     "preview": "vite preview"
   },
