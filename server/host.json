@@ -1,26 +1,6 @@
 {
   "version": "2.0",
-  "logging": {
-    "applicationInsights": {
-      "samplingSettings": {
-        "isEnabled": true,
-        "excludedTypes": "Request"
-      }
-    },
-    "logLevel": {
-      "default": "Information",
-      "Host.Results": "Error",
-      "Function": "Information",
-      "Host.Aggregator": "Warning"
-    }
-  },
   "functionTimeout": "00:05:00",
-  "http": {
-    "routePrefix": "",
-    "maxOutstandingRequests": 200,
-    "maxConcurrentRequests": 100,
-    "dynamicThrottlesEnabled": true
-  },
   "extensions": {
     "http": {
       "routePrefix": ""
@@ -29,5 +9,10 @@
   "extensionBundle": {
     "id": "Microsoft.Azure.Functions.ExtensionBundle",
     "version": "[3.*, 4.0.0)"
+  },
+  "logging": {
+    "logLevel": {
+      "default": "Information"
+    }
   }
 }

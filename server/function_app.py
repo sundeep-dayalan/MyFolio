@@ -1,18 +1,18 @@
-"""
-Azure Functions wrapper for FastAPI application.
-This file bridges Azure Functions runtime with the FastAPI application.
-"""
-
+import logging
 import azure.functions as func
 from azure.functions import AsgiMiddleware
 
 from app.main import app
 
-# Create the Azure Functions app
-azure_app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
-
-# Route all HTTP requests through FastAPI
-@azure_app.route(route="{*route}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
 async def main(req: func.HttpRequest) -> func.HttpResponse:
-    """Route all HTTP requests to FastAPI application."""
-    return await AsgiMiddleware(app).handle_async(req)
+    """Azure Functions entry point for FastAPI."""
+    logging.info(f'Python HTTP trigger function processed a request: {req.method} {req.url}')
+    
+    try:
+        return await AsgiMiddleware(app).handle_async(req)
+    except Exception as e:
+        logging.error(f'Error in function app: {str(e)}', exc_info=True)
+        return func.HttpResponse(
+            f"Internal server error: {str(e)}",
+            status_code=500
+        )
