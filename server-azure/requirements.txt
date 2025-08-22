@@ -1,0 +1,20 @@
+# Azure Functions and core dependencies
+azure-functions==1.18.0
+
+# Azure SDK packages - minimal set
+azure-cosmos==4.3.1
+azure-identity==1.12.0
+azure-keyvault-secrets==4.6.0
+
+# Authentication and security - minimal
+PyJWT==2.8.0
+requests==2.31.0
+
+# Data validation - minimal
+pydantic==1.10.12
+
+# Environment and configuration
+python-dotenv==1.0.0
+
+# Plaid SDK - stable version
+plaid-python==8.1.0

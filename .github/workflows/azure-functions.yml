@@ -1,0 +1,61 @@
+name: Deploy Azure Functions Backend
+
+on:
+  push:
+    branches: [ main ]
+    paths: 
+      - 'server-azure/**'
+  pull_request:
+    branches: [ main ]
+    paths: 
+      - 'server-azure/**'
+  workflow_dispatch:
+
+env:
+  AZURE_FUNCTIONAPP_NAME: sage-24293-api
+  AZURE_FUNCTIONAPP_PACKAGE_PATH: './server-azure'
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Python version
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Create and start virtual environment
+      run: |
+        cd ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
+        python -m venv .venv
+        source .venv/bin/activate
+
+    - name: Install dependencies
+      run: |
+        cd ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
+        source .venv/bin/activate
+        pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Zip artifact for deployment
+      run: |
+        cd ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
+        zip -r ../backend-deployment.zip . -x ".venv/*" "__pycache__/*" "*.pyc" ".git/*"
+
+    - name: Deploy to Azure Functions
+      uses: Azure/functions-action@v1
+      with:
+        app-name: ${{ env.AZURE_FUNCTIONAPP_NAME }}
+        package: './backend-deployment.zip'
+        publish-profile: ${{ secrets.AZURE_FUNCTIONAPP_PUBLISH_PROFILE }}
+
+    - name: Test deployment
+      run: |
+        sleep 30  # Wait for deployment to complete
+        curl -f https://${{ env.AZURE_FUNCTIONAPP_NAME }}.azurewebsites.net/api/health || echo "Health check failed"

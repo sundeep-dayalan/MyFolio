@@ -2,7 +2,19 @@
 
 ## 🌟 Overview
 
-Sage is a comprehensive financial management application that integrates with Plaid to provide real-time financial data analysis, transaction tracking, and portfolio management. The application features a modern React frontend with a robust FastAPI backend, all designed for production deployment on Google Cloud Platform.
+Sage is a comprehensive financial management application that integrates with Plaid to provide real-time financial data analysis, transaction tracking, and portfolio management. The application features a modern React frontend with an Azure Functions backend, all designed for production deployment on Microsoft Azure.
+
+## 🚀 One-Click Azure Deployment
+
+**Get started in minutes with our automated Azure deployment:**
+
+```bash
+git clone https://github.com/your-username/personal-wealth-management.git
+cd personal-wealth-management
+./deploy.sh
+```
+
+This will automatically provision all Azure resources and deploy your application!
 
 ## 🏗️ Architecture
 
@@ -13,50 +25,60 @@ Frontend (React + TypeScript)
 ├── Vite Build System
 ├── React Query for State Management
 ├── React Router for Navigation
-└── Tailwind CSS for Styling
+├── Tailwind CSS for Styling
+└── Azure Static Web Apps Hosting
 
-Backend (FastAPI + Python)
-├── Layered Architecture
+Backend (Azure Functions + Python)
+├── Serverless Architecture
 ├── JWT Authentication
-├── Firebase/Firestore Database
-├── Google Cloud Run Deployment
+├── Azure Cosmos DB Database
+├── Azure Functions Runtime
 └── Plaid Integration
+
+Azure Services
+├── Azure Functions (Serverless Backend)
+├── Azure Cosmos DB (NoSQL Database)
+├── Azure Static Web Apps (Frontend Hosting)
+├── Azure Key Vault (Secrets Management)
+└── Application Insights (Monitoring)
 
 External Services
 ├── Plaid API (Financial Data)
-├── Google OAuth (Authentication)
-├── Firebase (Database & Auth)
-└── Google Cloud Platform (Deployment)
+└── Google OAuth (Authentication)
 ```
 
 ### Project Structure
 
 ```
 personal-wealth-management/
-├── server/                       # Backend FastAPI application
+├── server-azure/                 # Azure Functions backend
 │   ├── app/                      # Main application package
-│   │   ├── main.py              # Application factory and startup
-│   │   ├── config.py            # Environment configuration
-│   │   ├── database.py          # Firebase/Firestore connection
-│   │   ├── dependencies.py      # Dependency injection
-│   │   ├── exceptions.py        # Custom exception classes
-│   │   ├── middleware/          # Custom middleware
-│   │   ├── models/              # Pydantic models
-│   │   ├── routers/             # API endpoint routes
+│   │   ├── config.py            # Azure configuration and Key Vault
+│   │   ├── database.py          # Azure Cosmos DB connection
 │   │   ├── services/            # Business logic layer
-│   │   └── utils/               # Utility functions
-│   ├── requirements.txt         # Production dependencies
-│   ├── requirements-dev.txt     # Development dependencies
-│   ├── Dockerfile              # Container definition
-│   └── run.py                  # Application entry point
-└── frontend/                    # Frontend React application
-    ├── components/             # Reusable React components
-    ├── pages/                  # Page components
-    ├── services/              # API service layer
-    ├── context/               # React context providers
-    ├── hooks/                 # Custom React hooks
-    ├── config/                # Configuration files
-    └── types.ts               # TypeScript type definitions
+│   │   │   ├── auth_service.py  # Authentication with Azure AD
+│   │   │   └── plaid_service.py # Plaid integration
+│   │   └── utils/               # Security and utility functions
+│   ├── function_app.py          # Azure Functions entry point
+│   ├── requirements.txt         # Python dependencies
+│   ├── host.json               # Function app configuration
+│   └── local.settings.json     # Local development settings
+├── frontend/                    # React frontend for Azure Static Web Apps
+│   ├── src/
+│   │   ├── components/         # Reusable React components
+│   │   ├── pages/              # Page components
+│   │   ├── services/           # Azure-compatible API services
+│   │   ├── hooks/              # Custom React hooks
+│   │   └── types/              # TypeScript definitions
+│   ├── staticwebapp.config.json # Azure Static Web Apps config
+│   └── package.json            # Dependencies and build scripts
+├── azure/                       # Infrastructure as Code
+│   ├── main.bicep              # Azure resource definitions
+│   └── parameters.json         # Deployment parameters
+├── scripts/                     # Deployment and setup scripts
+│   ├── local-dev-setup.sh      # Local development setup
+│   └── setup-azure.ps1         # PowerShell deployment script
+└── deploy.sh                   # One-click deployment script
 ```
 
 ## 🚀 Features
@@ -98,307 +120,413 @@ personal-wealth-management/
 
 ### Backend
 
-- **FastAPI**: Modern Python web framework
-- **Python 3.12+**: Latest Python features
+- **Azure Functions**: Serverless Python runtime
+- **Python 3.11**: Optimized for Azure Functions
 - **Pydantic**: Data validation and settings management
-- **Firebase Admin SDK**: Database and authentication
+- **Azure Cosmos DB SDK**: NoSQL document database
+- **Azure Key Vault SDK**: Secure secrets management
 - **Plaid Python SDK**: Financial data integration
 - **JWT**: Secure token-based authentication
 
-### Infrastructure
+### Azure Infrastructure
 
-- **Google Cloud Run**: Serverless container deployment
-- **Firebase Firestore**: NoSQL document database
-- **Google Cloud Build**: CI/CD pipeline
-- **Docker**: Containerization
+- **Azure Functions**: Serverless backend hosting
+- **Azure Cosmos DB**: Serverless NoSQL database
+- **Azure Static Web Apps**: Frontend hosting with CDN
+- **Azure Key Vault**: Centralized secrets management
+- **Application Insights**: Monitoring and analytics
+- **Azure Bicep**: Infrastructure as Code
 
-## 🔧 Installation & Setup
+## 🔧 Quick Start
+
+### One-Click Deployment
+
+Deploy to Azure in under 5 minutes:
+
+```bash
+# Clone the repository
+git clone <repository-url>
+cd personal-wealth-management
+
+# Run the deployment script
+./deploy.sh
+```
+
+The script will:
+- Create Azure resource group
+- Deploy all infrastructure (Functions, Cosmos DB, Static Web Apps, Key Vault)
+- Configure secrets management
+- Deploy both frontend and backend
+- Provide you with live URLs
+
+### Local Development Setup
+
+For local development:
+
+```bash
+# Setup local development environment
+./scripts/local-dev-setup.sh
+
+# Start the backend (Azure Functions)
+cd server-azure
+source venv/bin/activate
+func start
+
+# Start the frontend (in another terminal)
+cd frontend
+npm run dev
+```
 
 ### Prerequisites
 
-- Python 3.12+
-- Node.js 18+
-- Google Cloud Platform account
-- Firebase project
-- Plaid developer account
+- **Azure Account**: Free account works perfectly
+- **Python 3.11+**: For Azure Functions runtime
+- **Node.js 18+**: For React frontend
+- **Azure CLI**: For deployment and management
+- **Plaid Developer Account**: For financial data integration
+- **Google Cloud Console**: For OAuth credentials
 
-### Backend Setup
+## 🌐 Deployment Options
 
-1. **Navigate to API directory**
+### Option 1: Automated Deployment (Recommended)
 
-   ```bash
-   cd server
-   ```
+The fastest way to deploy:
 
-2. **Install dependencies**
+```bash
+./deploy.sh
+```
 
-   ```bash
-   pip install -r requirements.txt
-   ```
+This handles everything automatically including:
+- Azure resource provisioning
+- Infrastructure configuration
+- Secret management setup
+- Application deployment
 
-3. **Configure environment variables**
+### Option 2: Manual Azure Deployment
 
-   ```bash
-   cp .env.template .env
-   # Edit .env with your credentials
-   ```
+If you prefer manual control:
 
-4. **Run the application**
-   ```bash
-   python run.py
-   ```
+```bash
+# 1. Deploy infrastructure
+az group create --name sage-app-rg --location "East US"
+az deployment group create --resource-group sage-app-rg --template-file azure/main.bicep
 
-### Frontend Setup
+# 2. Deploy backend
+cd server-azure
+func azure functionapp publish <function-app-name>
 
-1. **Navigate to React app directory**
+# 3. Deploy frontend
+cd frontend
+npm run build
+# Deploy via Azure portal or Azure CLI
+```
 
-   ```bash
-   cd frontend
-   ```
+### Option 3: Infrastructure as Code Only
 
-2. **Install dependencies**
+Deploy just the infrastructure:
 
-   ```bash
-   npm install
-   ```
-
-3. **Configure environment**
-
-   ```bash
-   cp .env.template .env.development
-   # Edit environment files as needed
-   ```
-
-4. **Run development server**
-   ```bash
-   npm run dev
-   ```
-
-## 🌐 Deployment
-
-### Production Deployment
-
-The application is configured for deployment on Google Cloud Platform:
-
-1. **API Deployment** (Google Cloud Run)
-
-   ```bash
-   cd server
-   gcloud run deploy myfolio-api --source .
-   ```
-
-2. **Frontend Deployment** (Firebase Hosting)
-   ```bash
-   cd frontend
-   npm run build
-   firebase deploy
-   ```
+```bash
+az deployment group create \
+  --resource-group sage-app-rg \
+  --template-file azure/main.bicep \
+  --parameters azure/parameters.json
+```
 
 ### Environment Configuration
 
-#### Backend (.env)
+The application uses Azure Key Vault for secure configuration management:
+
+#### Required Secrets in Azure Key Vault:
+
+- `jwt-secret`: JWT token signing key
+- `google-client-id`: Google OAuth client ID
+- `google-client-secret`: Google OAuth client secret
+- `plaid-client-id`: Plaid API client ID
+- `plaid-secret`: Plaid API secret key
+
+#### Environment Variables:
 
 ```bash
-# Application Settings
-DEBUG=false
+# Azure Functions Configuration
+COSMOS_DB_ENDPOINT=<your-cosmos-db-endpoint>
+COSMOS_DB_KEY=<managed-by-azure>
+KEY_VAULT_URL=<your-key-vault-url>
 ENVIRONMENT=production
 
-# Security Configuration
-SECRET_KEY=your-production-secret-key
-ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=60
-
-# Firebase Configuration
-FIREBASE_PROJECT_ID=your-project-id
-FIREBASE_CREDENTIALS_PATH=service-account.json
-
-# Google OAuth Configuration
-GOOGLE_CLIENT_ID=your-client-id
-GOOGLE_CLIENT_SECRET=your-client-secret
-GOOGLE_REDIRECT_URI=your-redirect-uri
-
-# Plaid Configuration
-PLAID_CLIENT_ID=your-plaid-client-id
-PLAID_SECRET=your-plaid-secret
-PLAID_ENV=production
-```
-
-#### Frontend (.env.production)
-
-```bash
-VITE_API_BASE_URL=https://your-server-domain/api/v1
-VITE_APP_ENV=production
+# Frontend Configuration (Azure Static Web Apps)
+VITE_API_BASE_URL=<your-function-app-url>/api
+VITE_GOOGLE_CLIENT_ID=<your-google-client-id>
 ```
 
 ## 🔐 Security
 
+### Azure-Native Security
+
+- **Azure Key Vault**: Centralized secrets management with HSM-backed keys
+- **Azure Managed Identity**: Passwordless authentication between services
+- **Azure Cosmos DB**: Built-in encryption at rest and in transit
+- **Azure Functions**: Isolated execution environment with auto-scaling
+
 ### Authentication & Authorization
 
-- **Google OAuth 2.0**: Secure user authentication
+- **Google OAuth 2.0**: Secure user authentication flow
 - **JWT Tokens**: Stateless authentication with configurable expiration
-- **Token Encryption**: Access tokens encrypted using Fernet encryption
-- **Secure Storage**: Encrypted tokens stored in Firebase Firestore
+- **Token Encryption**: Plaid tokens encrypted using Azure Key Vault
+- **Secure Storage**: User data isolated by partition keys in Cosmos DB
 
 ### API Security
 
-- **CORS Configuration**: Proper cross-origin request handling
+- **CORS Configuration**: Properly configured for Azure Static Web Apps
 - **Input Validation**: Comprehensive request validation with Pydantic
 - **Error Handling**: Secure error responses without sensitive data exposure
-- **Rate Limiting**: Built-in protection against abuse
+- **Azure Functions Security**: Built-in DDoS protection and traffic filtering
 
 ### Data Protection
 
-- **Encryption at Rest**: Sensitive data encrypted in database
-- **HTTPS Only**: All communications over secure connections
-- **Environment Variables**: Secure configuration management
-- **Access Controls**: User-specific data isolation
+- **Encryption at Rest**: Azure Cosmos DB automatic encryption
+- **HTTPS Only**: TLS 1.2+ enforced across all Azure services
+- **Azure Key Vault**: Hardware-backed secret storage
+- **Network Security**: Private endpoints and service-to-service authentication
 
 ## 📊 API Documentation
 
+### Azure Functions Endpoints
+
+Base URL: `https://<your-function-app>.azurewebsites.net/api`
+
 ### Authentication Endpoints
 
-- `POST /auth/google/login` - Google OAuth login
+- `POST /auth/google/login` - Google OAuth login with authorization code
 - `POST /auth/refresh` - Refresh JWT token
-- `POST /auth/logout` - User logout
-
-### Plaid Integration Endpoints
-
-- `POST /plaid/create_link_token` - Create Plaid Link tokens
-- `POST /plaid/exchange_public_token` - Exchange and store access tokens
-- `GET /plaid/accounts` - Get account balances
-- `GET /plaid/transactions` - Retrieve transactions
+- `GET /health` - Application health check
 
 ### User Management
 
 - `GET /users/me` - Get current user profile
 - `PUT /users/me` - Update user profile
-- `DELETE /users/me` - Delete user account
+- `DELETE /users/me` - Delete user account and all data
 
-### Health & Monitoring
+### Plaid Integration
 
-- `GET /health` - Application health check
-- `GET /api/v1/docs` - Interactive API documentation
+- `POST /plaid/create_link_token` - Create Plaid Link token
+- `POST /plaid/exchange_public_token` - Exchange public token for access token
+- `GET /plaid/accounts` - Get user's financial accounts
+- `GET /plaid/transactions` - Retrieve transaction history
+
+### Request Authentication
+
+All protected endpoints require a Bearer token:
+
+```javascript
+headers: {
+  'Authorization': 'Bearer <jwt-token>',
+  'Content-Type': 'application/json'
+}
+```
 
 ## 🧪 Testing
 
-### Backend Testing
+### Local Testing
+
+Test the Azure Functions locally:
 
 ```bash
-cd server
-pytest tests/
+cd server-azure
+source venv/bin/activate
+func start
 ```
 
-### Frontend Testing
+Test the React frontend:
 
 ```bash
-cd react-app
-npm test
+cd frontend
+npm run dev
+```
+
+### Production Testing
+
+Test deployed Azure Functions:
+
+```bash
+# Health check
+curl https://<your-function-app>.azurewebsites.net/api/health
+
+# Test authentication (replace with actual Google auth code)
+curl -X POST https://<your-function-app>.azurewebsites.net/api/auth/google/login \
+  -H "Content-Type: application/json" \
+  -d '{"code": "your-google-auth-code", "redirect_uri": "your-redirect-uri"}'
 ```
 
 ### Integration Testing
 
 The application includes comprehensive testing for:
 
-- Plaid integration flows
-- Authentication mechanisms
-- API endpoints
-- Database operations
+- Azure Functions HTTP triggers
+- Azure Cosmos DB operations
+- Plaid API integration
+- Google OAuth authentication flow
+- Azure Key Vault secret management
 
 ## 📈 Monitoring & Logging
 
-### Application Monitoring
+### Azure Application Insights
 
-- **Structured Logging**: JSON-formatted logs for analysis
-- **Request Tracking**: Unique request IDs for tracing
-- **Error Monitoring**: Comprehensive error logging and alerting
-- **Performance Metrics**: Response times and throughput monitoring
+- **Real-time Monitoring**: Automatic performance tracking
+- **Custom Telemetry**: Business metrics and user analytics
+- **Error Tracking**: Automatic exception capture and alerting
+- **Performance Monitoring**: Response times and dependency tracking
 
-### Health Checks
+### Azure Monitor Integration
 
-- **API Health**: Built-in health check endpoints
-- **Database Connectivity**: Firebase connection monitoring
-- **External Service Status**: Plaid API availability checks
+- **Log Analytics**: Centralized log aggregation and querying
+- **Alerts**: Proactive monitoring with email/SMS notifications
+- **Dashboards**: Custom visualizations and KPI tracking
+- **Health Checks**: Built-in availability monitoring
+
+### Logging Strategy
+
+- **Structured Logging**: JSON-formatted logs for easy parsing
+- **Request Correlation**: Trace requests across Azure services
+- **Security Logging**: Authentication and authorization events
+- **Performance Logging**: Function execution times and costs
 
 ## 🔮 Production Optimization
 
-### Performance Features
+### Azure-Native Performance
 
-- **Query Optimization**: Efficient Firestore queries with fallback strategies
-- **Connection Pooling**: Optimized Firebase connection management
-- **Caching Strategy**: Client-side data storage with React Query
-- **Bundle Optimization**: Tree shaking and code splitting
+- **Serverless Auto-scaling**: Azure Functions automatically scale based on demand
+- **Global CDN**: Azure Static Web Apps with worldwide edge locations
+- **Cosmos DB Optimization**: Partition key design for optimal performance
+- **Connection Pooling**: Azure SDK automatic connection management
 
-### Scalability
+### Cost Optimization
 
-- **Horizontal Scaling**: Stateless API design for scaling
-- **Database Indexing**: Optimized Firestore indexes for performance
-- **CDN Integration**: Static asset delivery optimization
-- **Load Balancing**: Google Cloud Load Balancer support
+- **Consumption-based Pricing**: Pay only for actual usage
+- **Free Tier Eligible**: Most services fit within Azure free tier limits
+- **Automatic Scaling**: Scale to zero when not in use
+- **Resource Tagging**: Track and optimize costs by feature
+
+### Scalability Features
+
+- **Serverless Architecture**: Infinite horizontal scaling capability
+- **Database Partitioning**: Cosmos DB auto-scaling and partitioning
+- **Global Distribution**: Multi-region deployment ready
+- **Traffic Management**: Azure Front Door for global load balancing
 
 ## 📚 Development Guidelines
+
+### Azure-Specific Best Practices
+
+- **Managed Identity**: Use Azure Managed Identity for service-to-service auth
+- **Key Vault Integration**: Store all secrets in Azure Key Vault
+- **Partition Key Design**: Design Cosmos DB partition keys for optimal performance
+- **Function Bindings**: Use Azure Functions input/output bindings when possible
 
 ### Code Quality
 
 - **TypeScript**: Full type safety across the application
-- **Linting**: ESLint and Pylint for code consistency
-- **Formatting**: Prettier and Black for code formatting
-- **Testing**: Comprehensive test coverage
+- **Azure SDK Best Practices**: Follow official Azure SDK patterns
+- **Error Handling**: Comprehensive error management with Azure diagnostics
+- **Security**: Leverage Azure security features and best practices
 
-### Best Practices
+### Development Workflow
 
-- **Separation of Concerns**: Layered architecture
-- **Error Handling**: Comprehensive error management
-- **Security First**: Security considerations in all development
-- **Documentation**: Inline documentation and API specs
+- **Infrastructure as Code**: Use Azure Bicep for all infrastructure
+- **Environment Isolation**: Separate dev/staging/prod environments
+- **CI/CD Ready**: GitHub Actions workflows for Azure deployment
+- **Monitoring First**: Implement logging and monitoring from day one
 
 ## 🆘 Troubleshooting
 
-### Common Issues
+### Common Azure Issues
 
-1. **Firebase Connection Issues**
+1. **Function App Deployment Fails**
+   ```bash
+   # Check deployment logs
+   func azure functionapp logstream <function-app-name>
+   
+   # Verify requirements.txt
+   cd server-azure && pip install -r requirements.txt
+   ```
 
-   - Verify service account credentials
-   - Check Firestore rules and indexes
+2. **Cosmos DB Connection Issues**
+   ```bash
+   # Verify environment variables
+   echo $COSMOS_DB_ENDPOINT
+   echo $COSMOS_DB_KEY
+   
+   # Check firewall settings in Azure portal
+   ```
 
-2. **Plaid Integration Problems**
+3. **Key Vault Access Denied**
+   ```bash
+   # Verify managed identity has access
+   az keyvault set-policy --name <vault-name> --object-id <managed-identity-id> --secret-permissions get list
+   ```
 
-   - Confirm API keys and environment settings
-   - Review sandbox vs production configuration
+4. **Static Web App Deployment Issues**
+   ```bash
+   # Check build configuration
+   cd frontend && npm run build
+   
+   # Verify staticwebapp.config.json
+   ```
 
-3. **Authentication Failures**
-   - Validate Google OAuth configuration
-   - Check JWT secret and expiration settings
+### Debugging Tools
 
-### Support
+- **Azure Portal**: Monitor all services in one place
+- **Application Insights**: Real-time error tracking and performance monitoring
+- **Azure CLI**: Command-line troubleshooting and log access
+- **Function App Logs**: Live streaming logs for debugging
 
-For issues and questions:
+### Support Resources
 
-1. Check the logs for detailed error messages
-2. Review the API documentation at `/api/v1/docs`
-3. Verify environment configuration
-4. Check external service status (Plaid, Firebase)
+1. Check Azure Application Insights for detailed error logs
+2. Use `func azure functionapp logstream` for real-time debugging
+3. Review Azure service health status
+4. Verify all environment variables and secrets are configured
 
 ## 🔄 Version History
 
-### Latest Production Release
+### v2.0.0 - Azure Migration (Current)
 
-- ✅ Full Plaid integration with production-ready token management
+- ✅ **Azure Functions**: Serverless backend with auto-scaling
+- ✅ **Azure Cosmos DB**: NoSQL database with global distribution
+- ✅ **Azure Static Web Apps**: Frontend hosting with CDN
+- ✅ **Azure Key Vault**: Secure secrets management
+- ✅ **One-Click Deployment**: Automated infrastructure provisioning
+- ✅ **Free Tier Compatible**: Runs entirely on Azure free tier
+- ✅ **Enhanced Security**: Azure Managed Identity and encrypted storage
+- ✅ **Real-time Monitoring**: Application Insights integration
+
+### v1.0.0 - Google Cloud Platform
+
+- ✅ FastAPI backend on Google Cloud Run
+- ✅ Firebase Firestore database
+- ✅ Google Cloud Secret Manager
 - ✅ Google OAuth authentication
-- ✅ Firebase Firestore database integration
-- ✅ Encrypted token storage
-- ✅ Production-optimized error handling
-- ✅ Comprehensive logging and monitoring
-- ✅ Docker containerization
-- ✅ Google Cloud deployment ready
+- ✅ Plaid integration with encrypted token storage
+
+## 💰 Cost Optimization
+
+This application is designed to run on Azure's free tier:
+
+- **Azure Functions**: 1M requests/month free
+- **Azure Cosmos DB**: 1000 RU/s and 25GB free
+- **Azure Static Web Apps**: Free tier with custom domains
+- **Azure Key Vault**: 10,000 operations/month free
+- **Application Insights**: 1GB data/month free
+
+**Estimated monthly cost**: $0 - $5 for typical usage
 
 ## 📄 License
 
-This project is private and proprietary.
+This project is open source and available under the MIT License.
 
 ## 👥 Contributing
 
-This is a personal project. For internal development guidelines, please refer to the development documentation.
+Contributions are welcome! Please feel free to submit a Pull Request.
 
 ---
 
-**Sage** - Bringing clarity to your financial future through intelligent financial management.
+**Sage** - Bringing clarity to your financial future through intelligent financial management, now powered by Microsoft Azure.
