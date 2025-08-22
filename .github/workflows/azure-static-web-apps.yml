@@ -36,8 +36,6 @@ jobs:
         run: |
           cd ${{ env.APP_LOCATION }}
           npm install
-          rm -rf node_modules package-lock.json
-          npm install
 
       - name: Build frontend
         run: |
@@ -51,29 +49,36 @@ jobs:
             exit 1
           fi
 
-          # More thorough cleanup
+          # Cleanup unnecessary files
           cd dist
           find . -name "*.map" -delete
           find . -name "*.LICENSE.txt" -delete
-          find . -name "*.test.js" -delete
-          find . -name "*.spec.js" -delete
-          find . -name "__tests__" -type d -exec rm -rf {} + 2>/dev/null || true
-          find . -name "node_modules" -type d -exec rm -rf {} + 2>/dev/null || true
-          find . -name "*.development.*" -delete
 
-          # Show final build size and file count
+          # Show final build stats
           echo "Build size after cleanup:"
           du -sh .
           echo "File count:"
           find . -type f | wc -l
-
-          # List largest files
-          echo "Largest files:"
-          find . -type f -exec ls -lh {} + | sort -k5 -hr | head -10
+          echo "Files:"
+          find . -type f
         env:
           VITE_API_BASE_URL: https://sage-24293-api.azurewebsites.net/api
           VITE_APP_ENV: production
           NODE_ENV: production
+
+      - name: Create clean deployment directory
+        run: |
+          # Create a completely clean directory for deployment
+          mkdir -p ./deploy-clean
+
+          # Copy only the built files
+          cp -r ${{ env.APP_LOCATION }}/dist/* ./deploy-clean/
+
+          # Verify clean deployment directory
+          echo "Clean deployment directory contents:"
+          find ./deploy-clean -type f
+          echo "Clean deployment file count:"
+          find ./deploy-clean -type f | wc -l
 
       - name: Deploy to Azure Static Web Apps
         uses: Azure/static-web-apps-deploy@v1
@@ -81,6 +86,6 @@ jobs:
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           action: 'upload'
-          app_location: ${{ env.APP_LOCATION }}
-          output_location: ${{ env.OUTPUT_LOCATION }}
+          app_location: './deploy-clean'
+          output_location: '.'
           skip_app_build: true
