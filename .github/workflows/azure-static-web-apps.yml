@@ -2,12 +2,12 @@ name: Deploy Azure Static Web Apps Frontend
 
 on:
   push:
-    branches: [ main ]
-    paths: 
+    branches: [main]
+    paths:
       - 'frontend/**'
   pull_request:
-    branches: [ main ]
-    paths: 
+    branches: [main]
+    paths:
       - 'frontend/**'
   workflow_dispatch:
 
@@ -22,60 +22,94 @@ jobs:
     environment: production
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: ${{ env.NODE_VERSION }}
-        cache: 'npm'
-        cache-dependency-path: '${{ env.APP_LOCATION }}/package-lock.json'
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: '${{ env.APP_LOCATION }}/package-lock.json'
 
-    - name: Install dependencies
-      run: |
-        cd ${{ env.APP_LOCATION }}
-        # Update package-lock.json if needed
-        npm install
-        # Clean install for consistency
-        rm -rf node_modules package-lock.json
-        npm install
+      - name: Install dependencies
+        run: |
+          cd ${{ env.APP_LOCATION }}
+          # Update package-lock.json if needed
+          npm install
+          # Clean install for consistency
+          rm -rf node_modules package-lock.json
+          npm install
 
-    - name: Build frontend
-      run: |
-        cd ${{ env.APP_LOCATION }}
-        echo "Building React app..."
-        npm run build
-        
-        # Check if build was successful
-        if [ ! -d "dist" ]; then
-          echo "Build failed - dist directory not found"
-          exit 1
-        fi
-        
-        # Optimize build size by removing unnecessary files
-        cd dist
-        find . -name "*.map" -delete
-        find . -name "*.LICENSE.txt" -delete
-        
-        # Show build size
-        echo "Build size after cleanup:"
-        du -sh .
-        
-        # List top-level files
-        echo "Build contents:"
-        ls -la
-      env:
-        VITE_API_BASE_URL: https://sage-24293-api.azurewebsites.net/api
-        VITE_APP_ENV: production
-        NODE_ENV: production
+      - name: Build frontend
+        run: |
+          cd ${{ env.APP_LOCATION }}
+          echo "Building React app..."
+          npm run build:deploy
 
-    - name: Deploy to Azure Static Web Apps
-      uses: Azure/static-web-apps-deploy@v1
-      with:
-        azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
-        repo_token: ${{ secrets.GITHUB_TOKEN }}
-        action: 'upload'
-        app_location: ${{ env.APP_LOCATION }}
-        output_location: ${{ env.OUTPUT_LOCATION }}
-        skip_app_build: true
+          # Check if build was successful
+          if [ ! -d "dist" ]; then
+            echo "Build failed - dist directory not found"
+            exit 1
+          fi
+
+          # More thorough cleanup
+          cd dist
+          find . -name "*.map" -delete
+          find . -name "*.LICENSE.txt" -delete
+          find . -name "*.test.js" -delete
+          find . -name "*.spec.js" -delete
+          find . -name "__tests__" -type d -exec rm -rf {} +
+          find . -name "node_modules" -type d -exec rm -rf {} +
+
+          # Remove any development-only files
+          find . -name "*.development.*" -delete
+
+          # Show final build size and file count
+          echo "Build size after cleanup:"
+          du -sh .
+          echo "File count:"
+          find . -type f | wc -l
+
+          # List largest files (helpful for debugging)
+          echo "Largest files:"
+          find . -type f -exec ls -lh {} + | sort -k5 -hr | head -10
+            run: |
+              cd ${{ env.APP_LOCATION }}
+              echo "Building React app..."
+              npm run build
+              
+              # Check if build was successful
+              if [ ! -d "dist" ]; then
+                echo "Build failed - dist directory not found"
+                exit 1
+              fi
+              
+              # Optimize build size by removing unnecessary files
+              cd dist
+              find . -name "*.map" -delete
+              find . -name "*.LICENSE.txt" -delete
+              
+              # Show build size
+              echo "Build size after cleanup:"
+              du -sh .
+              
+              # List top-level files
+              echo "Build contents:"
+              ls -la
+            env:
+              VITE_API_BASE_URL: https://sage-24293-api.azurewebsites.net/api
+              VITE_APP_ENV: production
+              NODE_ENV: production
+
+      - name: Deploy to Azure Static Web Apps
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: 'upload'
+          app_location: ${{ env.APP_LOCATION }}
+          output_location: ${{ env.OUTPUT_LOCATION }}
+          skip_app_build: true
+          # Add these exclusions
+          skip_deploy_on_missing_secrets: true
