@@ -4,16 +4,16 @@ on:
   push:
     branches: [main]
     paths:
-      - 'server-azure/**'
+      - 'server/**'
   pull_request:
     branches: [main]
     paths:
-      - 'server-azure/**'
+      - 'server/**'
   workflow_dispatch:
 
 env:
   AZURE_FUNCTIONAPP_NAME: sage-24293-api
-  AZURE_FUNCTIONAPP_PACKAGE_PATH: './server-azure'
+  AZURE_FUNCTIONAPP_PACKAGE_PATH: './server'
   PYTHON_VERSION: '3.11'
 
 jobs:
@@ -49,7 +49,7 @@ jobs:
         run: |
           cd ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
           echo "Creating deployment package..."
-          zip -r ../backend-deployment.zip function_app.py host.json requirements.txt app/
+          zip -r ../backend-deployment.zip function_app.py host.json requirements.txt app/ --exclude="*.pyc" "__pycache__/*" ".pytest_cache/*" "*.log" ".env*" "local.settings.json"
           echo "Deployment package created:"
           ls -lh ../backend-deployment.zip
 
