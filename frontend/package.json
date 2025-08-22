@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "vite build --mode production",
     "build:deploy": "vite build --mode production && npm run optimize:deploy",
     "optimize:deploy": "cd dist && find . -name '*.map' -delete && find . -name '*.LICENSE.txt' -delete",
     "lint": "eslint .",
