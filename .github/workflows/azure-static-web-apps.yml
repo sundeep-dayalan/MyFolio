@@ -25,6 +25,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Clean dist folder
+        run: rm -rf dist
+        working-directory: ${{ env.APP_LOCATION }}
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
