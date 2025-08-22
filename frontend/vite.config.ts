@@ -26,12 +26,11 @@ export default defineConfig({
   build: {
     // Optimize for smaller builds
     sourcemap: false,
-    minify: 'terser',
+    minify: 'esbuild', // Use esbuild instead of terser for compatibility
     rollupOptions: {
       output: {
         manualChunks: {
           vendor: ['react', 'react-dom'],
-          ui: ['@radix-ui/react-slot', '@radix-ui/react-dialog'],
         },
       },
     },

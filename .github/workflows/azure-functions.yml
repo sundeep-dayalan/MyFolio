@@ -41,12 +41,17 @@ jobs:
         cd ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
         source .venv/bin/activate
         pip install --upgrade pip
-        pip install -r requirements.txt
+        echo "Installing Python dependencies..."
+        pip install -r requirements.txt --no-cache-dir
+        echo "Dependencies installed successfully"
 
     - name: Zip artifact for deployment
       run: |
         cd ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
-        zip -r ../backend-deployment.zip . -x ".venv/*" "__pycache__/*" "*.pyc" ".git/*"
+        echo "Creating deployment package..."
+        zip -r ../backend-deployment.zip . -x ".venv/*" "__pycache__/*" "*.pyc" ".git/*" "tests/*"
+        echo "Deployment package created:"
+        ls -lh ../backend-deployment.zip
 
     - name: Deploy to Azure Functions
       uses: Azure/functions-action@v1
