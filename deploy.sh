@@ -486,21 +486,37 @@ create_function_app() {
     print_success "Function App created!"
 }
 
-# Step 8: Create Static Web App
+# Step 8: Create Static Web App (only if none exists in resource group)
 create_static_web_app() {
     print_header "STEP 8: STATIC WEB APP"
     
-    print_status "Creating Static Web App: $STATIC_WEB_APP_NAME"
+    # Check if any Static Web App exists in the resource group
+    print_status "Checking for existing Static Web Apps in resource group..."
+    existing_staticwebapps=$(az staticwebapp list --resource-group "$RESOURCE_GROUP_NAME" --query "[].name" -o tsv 2>/dev/null || echo "")
     
-    az staticwebapp create \
-        --name "$STATIC_WEB_APP_NAME" \
-        --resource-group "$RESOURCE_GROUP_NAME" \
-        --location "Central US" \
-        --sku Free \
-        --tags "project=$PROJECT_NAME" \
-        --output none
-    
-    print_success "Static Web App created!"
+    if [ -z "$existing_staticwebapps" ]; then
+        print_status "No existing Static Web App found. Creating new Static Web App: $STATIC_WEB_APP_NAME"
+        
+        az staticwebapp create \
+            --name "$STATIC_WEB_APP_NAME" \
+            --resource-group "$RESOURCE_GROUP_NAME" \
+            --location "Central US" \
+            --sku Free \
+            --tags "project=$PROJECT_NAME" \
+            --output none
+        
+        print_success "Static Web App created: $STATIC_WEB_APP_NAME"
+    else
+        print_warning "Existing Static Web App(s) found in resource group:"
+        echo "$existing_staticwebapps" | while read -r app_name; do
+            echo "  • $app_name"
+        done
+        
+        # Use the first existing Static Web App
+        STATIC_WEB_APP_NAME=$(echo "$existing_staticwebapps" | head -n1)
+        print_warning "Using existing Static Web App: $STATIC_WEB_APP_NAME"
+        print_warning "Skipping creation of new Static Web App."
+    fi
 }
 
 # Step 9: Configure Function App settings
@@ -643,11 +659,11 @@ deploy_backend() {
     cd ..
 }
 
-# Step 12: Build frontend
-build_frontend() {
-    print_header "STEP 12: FRONTEND BUILD"
+# Step 12: Build and Deploy frontend to Static Web App (Production)
+deploy_frontend() {
+    print_header "STEP 12: FRONTEND BUILD & PRODUCTION DEPLOYMENT"
     
-    print_status "Building React frontend..."
+    print_status "Building and deploying React frontend to PRODUCTION..."
     
     cd frontend
     
@@ -666,7 +682,7 @@ build_frontend() {
     
     # Create production environment
     cat > .env.production << EOF
-VITE_API_BASE_URL=${function_app_url}/api
+VITE_API_BASE_URL=${function_app_url}/api/v1
 VITE_APP_ENV=production
 VITE_GOOGLE_CLIENT_ID=configure-me
 EOF
@@ -677,12 +693,65 @@ EOF
     
     print_success "Frontend built successfully!"
     
+    # Deploy to Azure Static Web App PRODUCTION using SWA CLI
+    print_status "Deploying to Azure Static Web App PRODUCTION environment..."
+    
+    # Get deployment token
+    local deployment_token=$(az staticwebapp secrets list \
+        --name "$STATIC_WEB_APP_NAME" \
+        --resource-group "$RESOURCE_GROUP_NAME" \
+        --query "properties.apiKey" \
+        --output tsv 2>/dev/null)
+    
+    if [ -z "$deployment_token" ]; then
+        print_error "Could not retrieve deployment token. Please deploy manually."
+        print_warning "Manual deployment steps:"
+        print_warning "1. Get deployment token from Azure Portal"
+        print_warning "2. Run: npx @azure/static-web-apps-cli deploy --deployment-token <token> --app-location ./dist --env production"
+    else
+        # Check if SWA CLI is installed, if not install it
+        if ! command_exists swa; then
+            print_status "Installing Azure Static Web Apps CLI..."
+            npm install -g @azure/static-web-apps-cli
+        fi
+        
+        # Deploy using SWA CLI with PRODUCTION environment
+        print_status "Deploying build files to Static Web App PRODUCTION..."
+        local retry_count=0
+        local max_retries=2
+        
+        while [ $retry_count -lt $max_retries ]; do
+            if npx @azure/static-web-apps-cli deploy \
+                --app-location ./dist \
+                --deployment-token "$deployment_token" \
+                --env production \
+                --verbose; then
+                print_success "Frontend deployed successfully to PRODUCTION environment!"
+                break
+            else
+                ((retry_count++))
+                if [ $retry_count -lt $max_retries ]; then
+                    print_warning "Deployment retry $retry_count/$max_retries"
+                    sleep 15
+                else
+                    print_error "Frontend deployment failed after $max_retries attempts"
+                    print_warning "You can deploy manually using:"
+                    print_warning "npx @azure/static-web-apps-cli deploy --app-location ./dist --deployment-token $deployment_token --env production"
+                fi
+            fi
+        done
+    fi
+    
     cd ..
     
     # Store URLs for final output
     FUNCTION_APP_URL="$function_app_url"
     STATIC_WEB_APP_URL="$static_web_app_url"
+    
+    print_success "Frontend production deployment completed!"
 }
+
+
 
 # Final summary
 display_summary() {
@@ -701,7 +770,7 @@ display_summary() {
     echo "🔗 APPLICATION URLS:"
     echo "   Frontend:  $STATIC_WEB_APP_URL"
     echo "   Backend:   $FUNCTION_APP_URL"
-    echo "   Health:    $FUNCTION_APP_URL/api/health"
+    echo "   Health:    $FUNCTION_APP_URL/health"
     echo ""
     echo "🎯 AZURE RESOURCES:"
     echo "   Storage:      $STORAGE_NAME"
@@ -725,7 +794,7 @@ display_summary() {
     echo "   • Or upload build files from frontend/dist/"
     echo ""
     echo "3️⃣  TEST YOUR APPLICATION:"
-    echo "   • Backend health: curl $FUNCTION_APP_URL/api/health"
+    echo "   • Backend health: curl $FUNCTION_APP_URL/health"
     echo "   • Frontend: Visit $STATIC_WEB_APP_URL"
     echo ""
     echo "4️⃣  MONITOR & MANAGE:"
@@ -817,7 +886,7 @@ main() {
     CURRENT_STEP="Function Configuration"; configure_function_app
     CURRENT_STEP="Key Vault Secrets"; setup_secrets
     CURRENT_STEP="Backend Deployment"; deploy_backend
-    CURRENT_STEP="Frontend Build"; build_frontend
+    CURRENT_STEP="Frontend Deployment"; deploy_frontend
     
     display_summary
 }

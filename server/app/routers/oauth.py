@@ -18,6 +18,13 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/auth/oauth", tags=["OAuth Authentication"])
 
 
+async def ensure_firebase_connected():
+    """Ensure Firebase is connected, initializing if necessary."""
+    if not firebase_client.is_connected:
+        logger.info("Firebase not connected, initializing...")
+        await firebase_client.connect()
+
+
 @router.get("/google")
 async def google_oauth_login(
     request: Request,
@@ -28,6 +35,9 @@ async def google_oauth_login(
     Redirects user to Google's authorization server.
     """
     try:
+        # Ensure Firebase is connected
+        await ensure_firebase_connected()
+        
         # Initialize services
         user_service = UserService(firebase_client.db)
         auth_service = AuthService(user_service)
@@ -76,6 +86,9 @@ async def google_oauth_callback(
         logger.info(f"Processing OAuth callback - code: {code[:10]}..., state: {state}")
         logger.info(f"Frontend URL for redirect: '{settings.frontend_url}'")
         
+        # Ensure Firebase is connected
+        await ensure_firebase_connected()
+        
         # Initialize services
         user_service = UserService(firebase_client.db)
         auth_service = AuthService(user_service)
@@ -117,6 +130,9 @@ async def revoke_google_token(
     Revoke Google OAuth token.
     """
     try:
+        # Ensure Firebase is connected
+        await ensure_firebase_connected()
+        
         # Initialize services
         user_service = UserService(firebase_client.db)
         auth_service = AuthService(user_service)
