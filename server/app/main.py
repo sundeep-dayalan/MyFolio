@@ -1,18 +1,17 @@
 """
 FastAPI application for Sage.
-Version: 2.0.0 - Production Ready
+Version: 2.0.3 - Production Ready with Microsoft Entra ID Only
 
 A streamlined financial management API focused on:
-- Google OAuth 2.0 authentication
+- Microsoft Entra ID OAuth 2.0 authentication
 - Plaid financial data integration
 - Real-time account balances and transactions
 - Secure token management
 
-Removed unused endpoints:
-- JWT-based authentication (replaced with OAuth)
-- User management APIs
-- Wealth/portfolio management APIs
-- Unused Plaid utility endpoints
+Recent changes in 2.0.3:
+- Removed Google OAuth completely
+- Clean Microsoft Entra ID only implementation
+- Supports both personal and organizational Microsoft accounts
 """
 
 from contextlib import asynccontextmanager
@@ -29,7 +28,7 @@ from .middleware import (
     RateLimitMiddleware,
 )
 from .routers import plaid_router
-from .routers.oauth import router as oauth_router
+from .routers.microsoft_oauth import router as microsoft_oauth_router
 from .utils.logger import setup_logging, get_logger
 
 # Setup logging
@@ -104,7 +103,7 @@ def create_app() -> FastAPI:
     )
 
     # Add routers
-    app.include_router(oauth_router, prefix=settings.api_v1_prefix)
+    app.include_router(microsoft_oauth_router, prefix=settings.api_v1_prefix)  # Microsoft OAuth
     # Plaid integration endpoints
     app.include_router(plaid_router, prefix=settings.api_v1_prefix)
 

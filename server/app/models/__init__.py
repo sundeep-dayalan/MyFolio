@@ -10,8 +10,7 @@ from .user import (
     UserInDB,
     TokenData,
     Token,
-    GoogleTokenData,
-    GoogleUserInfo,
+    MicrosoftUserInfo,
 )
 
 __all__ = [
@@ -23,6 +22,5 @@ __all__ = [
     "UserInDB",
     "TokenData",
     "Token",
-    "GoogleTokenData",
-    "GoogleUserInfo",
+    "MicrosoftUserInfo",
 ]

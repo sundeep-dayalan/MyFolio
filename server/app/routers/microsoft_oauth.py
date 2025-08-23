@@ -1,12 +1,12 @@
 """
-OAuth authentication routes for Google OAuth 2.0 flow.
+Microsoft Entra ID OAuth authentication routes.
 """
 import urllib.parse
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 
-from ..models.user import UserResponse, Token
+from ..models.user import UserResponse
 from ..services.auth_service import AuthService
 from ..services.user_service import UserService
 from ..exceptions import AuthenticationError, ValidationError
@@ -15,7 +15,7 @@ from ..database import cosmos_client
 from ..config import settings
 
 logger = get_logger(__name__)
-router = APIRouter(prefix="/auth/oauth", tags=["OAuth Authentication"])
+router = APIRouter(prefix="/auth/oauth/microsoft", tags=["Microsoft OAuth Authentication"])
 
 
 async def ensure_cosmos_connected():
@@ -25,16 +25,15 @@ async def ensure_cosmos_connected():
         await cosmos_client.connect()
 
 
-@router.get("/google")
-async def google_oauth_login(
-    request: Request,
+@router.get("")
+async def microsoft_oauth_login(
     state: Optional[str] = Query(
         None, description="Optional state parameter for security"
     ),
 ):
     """
-    Initiate Google OAuth 2.0 authentication flow.
-    Redirects user to Google's authorization server.
+    Initiate Microsoft Entra ID OAuth 2.0 authentication flow.
+    Redirects user to Microsoft's authorization server.
     """
     try:
         # Ensure CosmosDB is connected
@@ -45,35 +44,38 @@ async def google_oauth_login(
         auth_service = AuthService(user_service)
 
         # Generate authorization URL
-        auth_url, oauth_state = auth_service.generate_google_auth_url(state)
+        auth_url, oauth_state = auth_service.generate_microsoft_auth_url(state)
 
-        logger.info(f"Generated OAuth state: {oauth_state}")
-        logger.info(f"Redirecting to Google OAuth URL: {auth_url}")
+        logger.info(f"Generated Microsoft OAuth state: {oauth_state}")
+        logger.info(f"Redirecting to Microsoft OAuth URL: {auth_url}")
 
-        # Redirect to Google's authorization server
+        # Redirect to Microsoft's authorization server
         return RedirectResponse(url=auth_url, status_code=302)
 
     except Exception as e:
-        logger.error(f"Error initiating Google OAuth: {str(e)}")
+        logger.error(f"Error initiating Microsoft OAuth: {str(e)}")
         raise HTTPException(status_code=500, detail="OAuth initiation failed")
 
 
-@router.get("/google/callback")
-async def google_oauth_callback(
-    request: Request,
-    code: Optional[str] = Query(None, description="Authorization code from Google"),
+@router.get("/callback")
+async def microsoft_oauth_callback(
+    code: Optional[str] = Query(None, description="Authorization code from Microsoft"),
     state: Optional[str] = Query(None, description="State parameter for security"),
-    error: Optional[str] = Query(None, description="Error from Google OAuth"),
+    error: Optional[str] = Query(None, description="Error from Microsoft OAuth"),
+    error_description: Optional[str] = Query(None, description="Error description from Microsoft"),
 ):
     """
-    Handle Google OAuth 2.0 callback.
+    Handle Microsoft Entra ID OAuth 2.0 callback.
     Exchanges authorization code for tokens and authenticates user.
     """
     try:
         # Check for OAuth errors
         if error:
-            logger.warning(f"OAuth error received: {error}")
-            react_error_url = f"{settings.frontend_url}/auth/callback?success=false&error={urllib.parse.quote(f'OAuth error: {error}')}"
+            error_msg = f"OAuth error: {error}"
+            if error_description:
+                error_msg += f" - {error_description}"
+            logger.warning(f"Microsoft OAuth error received: {error_msg}")
+            react_error_url = f"{settings.frontend_url}/auth/callback?success=false&error={urllib.parse.quote(error_msg)}"
             return RedirectResponse(url=react_error_url, status_code=302)
 
         # Validate required parameters
@@ -85,7 +87,7 @@ async def google_oauth_callback(
         if not state:
             logger.warning("State parameter is missing - continuing anyway")
 
-        logger.info(f"Processing OAuth callback - code: {code[:10]}..., state: {state}")
+        logger.info(f"Processing Microsoft OAuth callback - code: {code[:10]}..., state: {state}")
         logger.info(f"Frontend URL for redirect: '{settings.frontend_url}'")
 
         # Ensure CosmosDB is connected
@@ -96,37 +98,37 @@ async def google_oauth_callback(
         auth_service = AuthService(user_service)
 
         # Process OAuth callback
-        user, token = await auth_service.process_google_oauth_callback(code, state)
+        user, token = await auth_service.process_microsoft_oauth_callback(code, state)
 
         # Redirect back to React app with success parameters
-        user_data = urllib.parse.quote(user.json())
+        user_data = urllib.parse.quote(user.model_dump_json())
         react_callback_url = f"{settings.frontend_url}/auth/callback?success=true&token={token.access_token}&user={user_data}"
 
-        logger.info(f"OAuth callback successful for user: {user.id}")
+        logger.info(f"Microsoft OAuth callback successful for user: {user.id}")
         logger.info(f"Redirecting to: {react_callback_url}")
         return RedirectResponse(url=react_callback_url, status_code=302)
 
     except AuthenticationError as e:
-        logger.error(f"Authentication error in OAuth callback: {str(e)}")
+        logger.error(f"Authentication error in Microsoft OAuth callback: {str(e)}")
         # Redirect to React app with error
         react_error_url = f"{settings.frontend_url}/auth/callback?success=false&error={urllib.parse.quote(str(e))}"
         return RedirectResponse(url=react_error_url, status_code=302)
     except ValidationError as e:
-        logger.error(f"Validation error in OAuth callback: {str(e)}")
+        logger.error(f"Validation error in Microsoft OAuth callback: {str(e)}")
         # Redirect to React app with error
         react_error_url = f"{settings.frontend_url}/auth/callback?success=false&error={urllib.parse.quote(str(e))}"
         return RedirectResponse(url=react_error_url, status_code=302)
     except Exception as e:
-        logger.error(f"Unexpected error in OAuth callback: {str(e)}")
+        logger.error(f"Unexpected error in Microsoft OAuth callback: {str(e)}")
         # Redirect to React app with error
         react_error_url = f"{settings.frontend_url}/auth/callback?success=false&error={urllib.parse.quote('OAuth callback failed')}"
         return RedirectResponse(url=react_error_url, status_code=302)
 
 
-@router.post("/google/revoke")
-async def revoke_google_token(request: Request, token: str):
+@router.post("/revoke")
+async def revoke_microsoft_token(token: str):
     """
-    Revoke Google OAuth token.
+    Revoke Microsoft OAuth token.
     """
     try:
         # Ensure CosmosDB is connected
@@ -137,7 +139,7 @@ async def revoke_google_token(request: Request, token: str):
         auth_service = AuthService(user_service)
 
         # Revoke the token
-        success = await auth_service.google_oauth.revoke_token(token)
+        success = await auth_service.microsoft_oauth.revoke_token(token)
 
         if success:
             return {"message": "Token revoked successfully"}
@@ -150,15 +152,18 @@ async def revoke_google_token(request: Request, token: str):
 
 
 @router.get("/status")
-async def oauth_status():
+async def microsoft_oauth_status():
     """
-    Get OAuth configuration status.
+    Get Microsoft OAuth configuration status.
     """
     return {
-        "google_oauth_enabled": bool(
-            settings.google_client_id and settings.google_client_secret
+        "microsoft_oauth_enabled": bool(
+            settings.azure_client_id and 
+            settings.azure_client_secret and
+            settings.azure_tenant_id
         ),
-        "redirect_uri": settings.google_redirect_uri,
+        "redirect_uri": settings.azure_redirect_uri,
         "frontend_url": settings.frontend_url,
+        "tenant_id": settings.azure_tenant_id,
         "available_flows": ["authorization_code"],
     }

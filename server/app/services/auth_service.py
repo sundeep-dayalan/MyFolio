@@ -1,19 +1,16 @@
 """
-Authentication service for handling Google OAuth and JWT tokens.
+Authentication service for handling Microsoft Entra ID OAuth and JWT tokens.
 """
-import json
-import base64
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any, Tuple
-from jose import jwt, JWTError
+from typing import Optional, Tuple
 
-from ..models.user import GoogleUserInfo, Token, UserResponse, UserCreate
-from ..exceptions import AuthenticationError, ValidationError
+from ..models.user import MicrosoftUserInfo, Token, UserResponse, UserCreate
+from ..exceptions import AuthenticationError
 from ..utils.logger import get_logger
 from ..utils.security import create_access_token, verify_token
 from ..config import settings
 from .user_service import UserService
-from .google_oauth_service import GoogleOAuthService
+from .microsoft_entra_oauth_service import MicrosoftEntraOAuthService
 
 logger = get_logger(__name__)
 
@@ -23,45 +20,60 @@ class AuthService:
 
     def __init__(self, user_service: UserService):
         self.user_service = user_service
-        self.google_oauth = GoogleOAuthService()
+        self.microsoft_oauth = MicrosoftEntraOAuthService()
 
-    def generate_google_auth_url(self, state: Optional[str] = None) -> Tuple[str, str]:
-        """Generate Google OAuth authorization URL."""
-        return self.google_oauth.generate_auth_url(state)
+    def generate_microsoft_auth_url(self, state: Optional[str] = None) -> Tuple[str, str]:
+        """Generate Microsoft Entra ID OAuth authorization URL."""
+        return self.microsoft_oauth.generate_auth_url(state)
 
-    async def process_google_oauth_callback(
+    async def process_microsoft_oauth_callback(
         self, code: str, state: str
     ) -> Tuple[UserResponse, Token]:
-        """Process Google OAuth callback and authenticate user."""
+        """Process Microsoft Entra ID OAuth callback and authenticate user."""
         try:
             # Exchange code for tokens
-            tokens = await self.google_oauth.exchange_code_for_tokens(code, state)
+            tokens = await self.microsoft_oauth.exchange_code_for_tokens(code, state)
 
             # Verify ID token and get user info
             id_token = tokens.get("id_token")
             if not id_token:
-                raise AuthenticationError("No ID token received from Google")
-
-            google_user_info = await self.google_oauth.verify_and_get_user_info(
-                id_token
-            )
+                # Fallback to access token to get user info from Graph API
+                access_token = tokens.get("access_token")
+                if not access_token:
+                    raise AuthenticationError("No valid token received from Microsoft")
+                
+                # Get user info from Microsoft Graph API
+                graph_user_data = await self.microsoft_oauth.get_user_info_from_access_token(access_token)
+                
+                # Create MicrosoftUserInfo from Graph API response
+                microsoft_user_info = MicrosoftUserInfo(
+                    sub=graph_user_data.get("id", ""),
+                    oid=graph_user_data.get("id"),
+                    email=graph_user_data.get("mail") or graph_user_data.get("userPrincipalName", ""),
+                    name=graph_user_data.get("displayName", ""),
+                    given_name=graph_user_data.get("givenName"),
+                    family_name=graph_user_data.get("surname"),
+                )
+            else:
+                # Use ID token for user info
+                microsoft_user_info = await self.microsoft_oauth.verify_and_get_user_info(id_token)
 
             # Try to get user from database, fallback to mock user if CosmosDB is disabled
             try:
-                user = await self.user_service.get_user_by_email(google_user_info.email)
+                user = await self.user_service.get_user_by_email(microsoft_user_info.email)
 
                 if not user:
-                    # Create new user from Google info
+                    # Create new user from Microsoft info
+                    user_id = microsoft_user_info.oid or microsoft_user_info.sub
                     user_data = UserCreate(
-                        id=google_user_info.sub,  # Use Google's user ID
-                        email=google_user_info.email,
-                        name=google_user_info.name,
-                        given_name=google_user_info.given_name,
-                        family_name=google_user_info.family_name,
-                        picture=google_user_info.picture,
+                        id=user_id,  # Use Microsoft's user ID (oid preferred, sub as fallback)
+                        email=microsoft_user_info.email,
+                        name=microsoft_user_info.name,
+                        given_name=microsoft_user_info.given_name,
+                        family_name=microsoft_user_info.family_name,
                     )
                     user = await self.user_service.create_user(user_data)
-                    logger.info(f"New user created from Google OAuth: {user.id}")
+                    logger.info(f"New user created from Microsoft OAuth: {user.id}")
 
             except Exception as db_error:
                 # If CosmosDB is disabled, create a mock user for testing
@@ -69,13 +81,13 @@ class AuthService:
                     logger.warning(
                         "CosmosDB is disabled, creating mock user for testing"
                     )
+                    user_id = microsoft_user_info.oid or microsoft_user_info.sub
                     user = UserResponse(
-                        id=google_user_info.sub,
-                        email=google_user_info.email,
-                        name=google_user_info.name,
-                        given_name=google_user_info.given_name,
-                        family_name=google_user_info.family_name,
-                        picture=google_user_info.picture,
+                        id=user_id,
+                        email=microsoft_user_info.email,
+                        name=microsoft_user_info.name,
+                        given_name=microsoft_user_info.given_name,
+                        family_name=microsoft_user_info.family_name,
                         is_active=True,
                         created_at=datetime.utcnow(),
                         updated_at=datetime.utcnow(),
@@ -88,85 +100,17 @@ class AuthService:
                 raise AuthenticationError("User account is deactivated")
 
             # Create application token
-            token = self.google_oauth.create_app_token(user)
+            token = self.microsoft_oauth.create_app_token(user)
 
-            logger.info(f"User authenticated successfully via OAuth: {user.id}")
+            logger.info(f"User authenticated successfully via Microsoft OAuth: {user.id}")
             return user, token
 
         except AuthenticationError:
             raise
         except Exception as e:
-            logger.error(f"Error during Google OAuth callback: {str(e)}")
-            raise AuthenticationError("OAuth authentication failed")
+            logger.error(f"Error during Microsoft OAuth callback: {str(e)}")
+            raise AuthenticationError("Microsoft OAuth authentication failed")
 
-    async def authenticate_google_user(
-        self, google_credential: str
-    ) -> Tuple[UserResponse, Token]:
-        """Authenticate user with Google credential and return user data with access token."""
-        try:
-            # For backward compatibility with client-side tokens
-            # In the future, this method can be deprecated in favor of OAuth flow
-            google_user_info = self._decode_google_jwt(google_credential)
-
-            # Check if user exists, create if not
-            user = await self.user_service.get_user_by_email(google_user_info.email)
-
-            if not user:
-                # Create new user from Google info
-                user_data = UserCreate(
-                    id=google_user_info.sub,  # Use Google's user ID
-                    email=google_user_info.email,
-                    name=google_user_info.name,
-                    given_name=google_user_info.given_name,
-                    family_name=google_user_info.family_name,
-                    picture=google_user_info.picture,
-                )
-                user = await self.user_service.create_user(user_data)
-                logger.info(f"New user created from Google auth: {user.id}")
-
-            # Check if user is active
-            if not user.is_active:
-                raise AuthenticationError("User account is deactivated")
-
-            # Create access token
-            access_token = self._create_user_token(user)
-
-            # Create token response
-            token = Token(
-                access_token=access_token,
-                token_type="bearer",
-                expires_in=settings.access_token_expire_minutes * 60,
-            )
-
-            logger.info(f"User authenticated successfully: {user.id}")
-            return user, token
-
-        except AuthenticationError:
-            raise
-        except Exception as e:
-            logger.error(f"Error during Google authentication: {str(e)}")
-            raise AuthenticationError("Authentication failed")
-            if not user.is_active:
-                raise AuthenticationError("User account is deactivated")
-
-            # Create access token
-            access_token = self._create_user_token(user)
-
-            # Create token response
-            token = Token(
-                access_token=access_token,
-                token_type="bearer",
-                expires_in=settings.access_token_expire_minutes * 60,
-            )
-
-            logger.info(f"User authenticated successfully: {user.id}")
-            return user, token
-
-        except AuthenticationError:
-            raise
-        except Exception as e:
-            logger.error(f"Error during Google authentication: {str(e)}")
-            raise AuthenticationError("Authentication failed")
 
     async def verify_access_token(self, token: str) -> Optional[UserResponse]:
         """Verify access token and return user if valid."""
@@ -190,36 +134,6 @@ class AuthService:
             logger.warning(f"Token verification failed: {str(e)}")
             return None
 
-    def _decode_google_jwt(self, token: str) -> GoogleUserInfo:
-        """Decode Google JWT token without verification (for demo purposes)."""
-        try:
-            # In production, you should verify the token with Google's public keys
-            # For now, we'll just decode it to get the user info
-
-            # Split the token
-            parts = token.split(".")
-            if len(parts) != 3:
-                raise ValidationError("Invalid JWT format")
-
-            # Decode the payload
-            payload = parts[1]
-
-            # Add padding if needed
-            padding = 4 - len(payload) % 4
-            if padding != 4:
-                payload += "=" * padding
-
-            # Decode base64
-            decoded_bytes = base64.urlsafe_b64decode(payload)
-            decoded_str = decoded_bytes.decode("utf-8")
-            payload_data = json.loads(decoded_str)
-
-            # Create GoogleUserInfo from payload
-            return GoogleUserInfo(**payload_data)
-
-        except (ValueError, json.JSONDecodeError, KeyError) as e:
-            logger.error(f"Error decoding Google JWT: {str(e)}")
-            raise AuthenticationError("Invalid Google credential")
 
     def _create_user_token(self, user: UserResponse) -> str:
         """Create JWT access token for user."""
