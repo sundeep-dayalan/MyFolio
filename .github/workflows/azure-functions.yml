@@ -30,13 +30,13 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Extract AZURE_FUNCTIONAPP_NAME from publish profile
-          run: |
-            echo "${{ secrets.AZURE_FUNCTIONAPP_PUBLISH_PROFILE }}" > publishProfile.xml
-            sudo apt-get update && sudo apt-get install -y libxml2-utils
-            AZURE_FUNCTIONAPP_NAME=$(xmllint --xpath "string(//publishProfile[@publishMethod='MSDeploy']/@msdeploySite)" publishProfile.xml)
-            echo "Extracted AZURE_FUNCTIONAPP_NAME: $AZURE_FUNCTIONAPP_NAME"
-            echo "AZURE_FUNCTIONAPP_NAME=$AZURE_FUNCTIONAPP_NAME" >> $GITHUB_ENV
-          shell: bash
+        run: |
+          echo "${{ secrets.AZURE_FUNCTIONAPP_PUBLISH_PROFILE }}" > publishProfile.xml
+          sudo apt-get update && sudo apt-get install -y libxml2-utils
+          AZURE_FUNCTIONAPP_NAME=$(xmllint --xpath "string(//publishProfile[@publishMethod='MSDeploy']/@msdeploySite)" publishProfile.xml)
+          echo "Extracted AZURE_FUNCTIONAPP_NAME: $AZURE_FUNCTIONAPP_NAME"
+          echo "AZURE_FUNCTIONAPP_NAME=$AZURE_FUNCTIONAPP_NAME" >> $GITHUB_ENV
+        shell: bash
 
       - name: Install dependencies
         run: |
