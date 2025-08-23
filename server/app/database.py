@@ -84,6 +84,11 @@ class CosmosDBClient:
     def is_connected(self) -> bool:
         """Check if CosmosDB is connected."""
         return self._database is not None
+    
+    async def ensure_connected(self) -> None:
+        """Ensure CosmosDB connection is established, connecting if needed."""
+        if not self.is_connected:
+            await self.connect()
 
     def get_container(self, container_name: str) -> ContainerProxy:
         """Get a specific container client."""

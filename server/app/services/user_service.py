@@ -23,6 +23,9 @@ class UserService:
     async def create_user(self, user_data: UserCreate) -> UserResponse:
         """Create a new user."""
         try:
+            # Ensure CosmosDB connection is established
+            await cosmos_client.ensure_connected()
+            
             # Check if user already exists
             if await self.get_user_by_id(user_data.id):
                 raise UserAlreadyExistsError(user_data.id)
@@ -62,6 +65,9 @@ class UserService:
     async def get_user_by_id(self, user_id: str) -> Optional[UserResponse]:
         """Get user by ID."""
         try:
+            # Ensure CosmosDB connection is established
+            await cosmos_client.ensure_connected()
+            
             user_doc = cosmos_client.get_item(self.container_name, user_id, user_id)
 
             if user_doc:
@@ -89,6 +95,9 @@ class UserService:
     async def get_user_by_email(self, email: str) -> Optional[UserResponse]:
         """Get user by email."""
         try:
+            # Ensure CosmosDB connection is established
+            await cosmos_client.ensure_connected()
+            
             query = "SELECT * FROM c WHERE c.email = @email"
             parameters = [{"name": "@email", "value": email}]
 
