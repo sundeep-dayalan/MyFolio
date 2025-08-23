@@ -30,51 +30,22 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Create and start virtual environment
-        run: |
-          cd ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
-          python -m venv .venv
-          source .venv/bin/activate
-
       - name: Install dependencies
         run: |
           cd ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
-          source .venv/bin/activate
-          pip install --upgrade pip
-          echo "Installing Python dependencies..."
-          pip install -r requirements-functions.txt --no-cache-dir
-          echo "Dependencies installed successfully"
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt --no-cache-dir
 
       - name: Zip artifact for deployment
         run: |
           cd ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
-          echo "Creating deployment package..."
-          zip -r ../backend-deployment.zip . --exclude="*.pyc" "__pycache__/*" ".pytest_cache/*" "*.log" ".env*" "local.settings.json" ".venv/*" "venv/*" "*.git*" "requirements.txt"
-          echo "Deployment package created:"
-          ls -lh ../backend-deployment.zip
+          zip -r ../backend-deployment.zip . \
+            --exclude="*.pyc" "__pycache__/*" ".pytest_cache/*" "*.log" ".env*" "local.settings.json" ".venv/*" "venv/*" "*.git*"
 
       - name: List contents of deployment zip
         run: unzip -l backend-deployment.zip
 
-      - name: Stop Function App before deployment
-        run: |
-          echo "Stopping function app to prevent conflicts..."
-          APP_NAME="${{ env.AZURE_FUNCTIONAPP_NAME }}"
-          echo "Function app will be automatically restarted after deployment"
-          sleep 5
-
       - name: Deploy to Azure Functions
-        id: functionapp
-        uses: Azure/functions-action@v1
-        with:
-          app-name: ${{ env.AZURE_FUNCTIONAPP_NAME }}
-          package: './backend-deployment.zip'
-          publish-profile: ${{ secrets.AZURE_FUNCTIONAPP_PUBLISH_PROFILE }}
-        continue-on-error: true
-
-      - name: Retry deployment if failed
-        if: failure() && steps.functionapp.outcome == 'failure'
-        id: functionapp_retry
         uses: Azure/functions-action@v1
         with:
           app-name: ${{ env.AZURE_FUNCTIONAPP_NAME }}
@@ -85,21 +56,8 @@ jobs:
         run: |
           echo "Waiting 60 seconds for deployment to stabilize..."
           sleep 60
-          
-          echo "Testing FastAPI endpoints through Azure Functions..."
           BASE_URL="https://${{ env.AZURE_FUNCTIONAPP_NAME }}.azurewebsites.net"
-          echo "Base URL: $BASE_URL"
-          
-          echo "1. Testing root endpoint:"
-          curl -v "$BASE_URL" || echo "Root failed"
-          
-          echo "2. Testing /health:"
+          echo "Testing endpoints..."
           curl -v "$BASE_URL/health" || echo "Health endpoint failed"
-          
-          echo "3. Testing /docs (FastAPI docs):"
           curl -v "$BASE_URL/docs" || echo "Docs endpoint failed"
-          
-          echo "4. Testing /api/v1/health:"
           curl -v "$BASE_URL/api/v1/health" || echo "API v1 health failed"
-          
-          echo "If health endpoint fails, check Function App logs in Azure Portal"
