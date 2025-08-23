@@ -1,5 +1,6 @@
+
 """
-CosmosDB-based transaction routes for direct database access.
+Plaid-based transaction routes for direct database access.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -11,10 +12,8 @@ from ..utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-router = APIRouter(prefix="/cosmosdb", tags=["cosmosdb"])
+router = APIRouter(prefix="/plaid", tags=["plaid"])
 
-# Create a compatibility router for old firestore endpoints
-firestore_router = APIRouter(prefix="/firestore", tags=["firestore-compatibility"])
 
 
 class PaginatedTransactionsResponse(BaseModel):
@@ -129,46 +128,3 @@ def get_transactions_count(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# Firestore compatibility endpoints - redirect to CosmosDB endpoints
-@firestore_router.get("/transactions/paginated", response_model=PaginatedTransactionsResponse)
-def get_transactions_paginated_firestore_compat(
-    page: int = Query(1, ge=1, description="Page number (1-indexed)"),
-    pageSize: int = Query(
-        20, ge=1, le=100, description="Number of transactions per page"
-    ),
-    sortBy: str = Query("date", description="Field to sort by"),
-    sortOrder: str = Query("desc", regex="^(asc|desc)$", description="Sort order"),
-    transactionType: str = Query(
-        "added",
-        regex="^(added|modified|removed|all)$",
-        description="Type of transactions to fetch",
-    ),
-    accountId: Optional[str] = Query(None, description="Filter by account ID"),
-    itemId: Optional[str] = Query(None, description="Filter by item ID (bank)"),
-    institutionName: Optional[str] = Query(
-        None, description="Filter by institution name"
-    ),
-    category: Optional[str] = Query(None, description="Filter by category"),
-    dateFrom: Optional[str] = Query(None, description="Start date filter (YYYY-MM-DD)"),
-    dateTo: Optional[str] = Query(None, description="End date filter (YYYY-MM-DD)"),
-    searchTerm: Optional[str] = Query(
-        None, description="Search term for name/merchant"
-    ),
-    user_id: str = Depends(get_current_user_id),
-):
-    """Firestore compatibility endpoint - redirects to CosmosDB."""
-    # Call the same logic as the CosmosDB endpoint
-    return get_transactions_paginated(
-        page=page, pageSize=pageSize, sortBy=sortBy, sortOrder=sortOrder,
-        transactionType=transactionType, accountId=accountId, itemId=itemId,
-        institutionName=institutionName, category=category, dateFrom=dateFrom,
-        dateTo=dateTo, searchTerm=searchTerm, user_id=user_id
-    )
-
-
-@firestore_router.get("/transactions/count")
-def get_transactions_count_firestore_compat(
-    user_id: str = Depends(get_current_user_id),
-):
-    """Firestore compatibility endpoint - redirects to CosmosDB."""
-    return get_transactions_count(user_id=user_id)

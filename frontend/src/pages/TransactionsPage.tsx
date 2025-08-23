@@ -12,7 +12,7 @@ import { TransactionsEmptyState } from '@/components/custom/transactions/transac
 import { toast } from 'sonner';
 import { TransactionsDataTable } from '@/components/custom/transactions/transactions-data-table';
 import { columns } from '@/components/custom/transactions/transactions-columns';
-import type { PaginatedTransactionsRequest } from '@/services/FirestoreService';
+import type { PaginatedTransactionsRequest } from '@/services/CosmosDBService';
 
 const TransactionsPage: React.FC = () => {
   const auth = useContext(AuthContext) as AuthContextType;

@@ -8,7 +8,7 @@ import {
 } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarImage } from '@/components/ui/avatar';
-import type { Transaction } from '@/services/FirestoreService';
+import type { Transaction } from '@/services/CosmosDBService';
 
 interface TransactionDetailsModalProps {
   transaction: Transaction | null;

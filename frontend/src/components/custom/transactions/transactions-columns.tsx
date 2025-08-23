@@ -12,7 +12,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import type { Transaction } from '@/services/FirestoreService';
+import type { Transaction } from '@/services/CosmosDBService';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { TransactionDetailsModal } from './transaction-details-modal';
