@@ -91,7 +91,7 @@ def create_app() -> FastAPI:
     add_cors_middleware(app)
     add_logging_middleware(app)
     add_exception_handlers(app)
-    
+
     # Add rate limiting middleware
     rate_limiter = RateLimitMiddleware()
     app.middleware("http")(rate_limiter)
@@ -154,3 +154,18 @@ def create_app() -> FastAPI:
 
 # Create the app instance
 app = create_app()
+
+# --- Azure Functions support ---
+try:
+    import azure.functions as func
+
+    async def main(req: func.HttpRequest, context: func.Context) -> func.HttpResponse:
+        """
+        Azure Functions entry point for HTTP requests.
+        Wraps the FastAPI app with ASGI middleware.
+        """
+        return await func.AsgiMiddleware(app).handle_async(req, context)
+
+except ImportError:
+    # Not running in Azure Functions, ignore
+    pass

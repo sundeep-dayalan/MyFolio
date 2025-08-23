@@ -3,9 +3,6 @@ fastapi==0.104.1
 uvicorn[standard]==0.24.0
 python-multipart==0.0.6
 
-# Azure Functions
-azure-functions==1.18.0
-
 # Authentication and security
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
@@ -43,3 +40,5 @@ plaid-python==35.0.0
 
 # Cryptography for token encryption
 cryptography>=41.0.0,<42.0.0
+
+azure-functions
