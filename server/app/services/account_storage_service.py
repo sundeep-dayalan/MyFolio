@@ -12,10 +12,10 @@ class AccountStorageService:
             # Query Cosmos DB for the account data document
             # Assuming collection name is 'account_data' and partition key is user_id
             query = "SELECT * FROM c WHERE c.userId = @userId"
-            parameters = [
-                {"name": "@userId", "value": user_id}
-            ]
-            results = cosmos_client.query_items("account_data", query, parameters, user_id)
+            parameters = [{"name": "@userId", "value": user_id}]
+            results = cosmos_client.query_items(
+                "account_data", query, parameters, user_id
+            )
             if results:
                 # Return the first result (should be only one per user)
                 return results[0]
@@ -23,6 +23,8 @@ class AccountStorageService:
         except Exception as e:
             logger.error(f"Failed to get account data for user {user_id}: {e}")
             return None
+
+
 """
 Account Storage Service for managing stored account data in CosmosDB.
 This service helps reduce Plaid API costs by storing account balances and information locally.
@@ -102,7 +104,7 @@ class AccountStorageService:
                         )
                     except:
                         pass  # Keep new created_at if can't get existing
-                    
+
                     # Update existing document
                     cosmos_client.update_item(
                         self.container_name, user_id, user_id, stored_data

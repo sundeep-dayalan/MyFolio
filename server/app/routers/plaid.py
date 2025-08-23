@@ -108,7 +108,9 @@ def get_accounts(
 ):
     """Fetch all account balances for the current user from Cosmos DB only (never hits Plaid API)."""
     try:
-        result = plaid_service.get_accounts_with_balances(user_id, use_cached_balance=True)
+        result = plaid_service.get_accounts_with_balances(
+            user_id, use_cached_balance=True
+        )
         return result
     except Exception as e:
         return {
@@ -125,7 +127,9 @@ def refresh_accounts(
 ):
     """Force refresh account balances from Plaid API, update Cosmos DB, and return latest."""
     try:
-        result = plaid_service.get_accounts_with_balances(user_id, use_cached_balance=False)
+        result = plaid_service.get_accounts_with_balances(
+            user_id, use_cached_balance=False
+        )
         return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))

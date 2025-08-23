@@ -306,14 +306,16 @@ class PlaidService:
             # Create PlaidAccessToken model
             now = datetime.now(timezone.utc)
             institution_info = institution_info or {}
-            
+
             # Clean metadata - convert any enum objects to strings
             clean_metadata = {}
             for key, value in institution_info.items():
-                if hasattr(value, 'value'):  # Enum object
+                if hasattr(value, "value"):  # Enum object
                     clean_metadata[key] = value.value
                 elif isinstance(value, list):
-                    clean_metadata[key] = [item.value if hasattr(item, 'value') else item for item in value]
+                    clean_metadata[key] = [
+                        item.value if hasattr(item, "value") else item for item in value
+                    ]
                 else:
                     clean_metadata[key] = value
 
@@ -333,8 +335,8 @@ class PlaidService:
 
             # Store the plaid token as individual document in CosmosDB
             # Use model_dump with mode='json' to properly serialize all types including enums and datetime
-            token_data = plaid_token.model_dump(mode='json')
-                
+            token_data = plaid_token.model_dump(mode="json")
+
             token_data.update(
                 {
                     "id": f"{user_id}_{item_id}",  # Unique document ID
@@ -421,7 +423,9 @@ class PlaidService:
         If use_cached_balance is False, fetch from Plaid API, update Cosmos DB, and return latest.
         """
         try:
-            logger.info(f"Getting accounts with balances for user {user_id}, use_cached_balance={use_cached_balance}")
+            logger.info(
+                f"Getting accounts with balances for user {user_id}, use_cached_balance={use_cached_balance}"
+            )
 
             if use_cached_balance:
                 # Only fetch from Cosmos DB
@@ -436,7 +440,7 @@ class PlaidService:
                         "total_balance": 0.0,
                         "account_count": 0,
                         "last_updated": datetime.now(timezone.utc).isoformat(),
-                        "message": "No cached account data found. Please refresh."
+                        "message": "No cached account data found. Please refresh.",
                     }
 
             # If not using cached balance, fetch from Plaid and update Cosmos DB
@@ -457,10 +461,16 @@ class PlaidService:
                 try:
                     decrypted_token = TokenEncryption.decrypt_token(token.access_token)
                     if account_ids:
-                        options = AccountsBalanceGetRequestOptions(account_ids=account_ids)
-                        request = AccountsBalanceGetRequest(access_token=decrypted_token, options=options)
+                        options = AccountsBalanceGetRequestOptions(
+                            account_ids=account_ids
+                        )
+                        request = AccountsBalanceGetRequest(
+                            access_token=decrypted_token, options=options
+                        )
                     else:
-                        request = AccountsBalanceGetRequest(access_token=decrypted_token)
+                        request = AccountsBalanceGetRequest(
+                            access_token=decrypted_token
+                        )
                     response = self.client.accounts_balance_get(request)
                     accounts_data = response["accounts"]
                     for account in accounts_data:
@@ -469,12 +479,20 @@ class PlaidService:
                             available=balance_info.get("available"),
                             current=balance_info.get("current", 0),
                             limit=balance_info.get("limit"),
-                            iso_currency_code=balance_info.get("iso_currency_code", "USD"),
-                            unofficial_currency_code=balance_info.get("unofficial_currency_code"),
+                            iso_currency_code=balance_info.get(
+                                "iso_currency_code", "USD"
+                            ),
+                            unofficial_currency_code=balance_info.get(
+                                "unofficial_currency_code"
+                            ),
                         )
-                        account_type = account["type"].value if hasattr(account["type"], 'value') else account["type"]
+                        account_type = (
+                            account["type"].value
+                            if hasattr(account["type"], "value")
+                            else account["type"]
+                        )
                         account_subtype = account.get("subtype")
-                        if account_subtype and hasattr(account_subtype, 'value'):
+                        if account_subtype and hasattr(account_subtype, "value"):
                             account_subtype = account_subtype.value
                         account_with_balance = PlaidAccountWithBalance(
                             account_id=account["account_id"],
@@ -493,7 +511,9 @@ class PlaidService:
                             total_balance += float(balance.current)
                     self._update_token_last_used(user_id, token.item_id)
                 except Exception as e:
-                    logger.error(f"Failed to get balances for token {token.item_id}: {e}")
+                    logger.error(
+                        f"Failed to get balances for token {token.item_id}: {e}"
+                    )
                     continue
             all_accounts.sort(key=lambda x: x["balances"]["current"] or 0, reverse=True)
             result = {
@@ -504,10 +524,14 @@ class PlaidService:
             }
             # Store the result in Cosmos DB
             account_storage_service.store_account_data(user_id, result)
-            logger.info(f"Retrieved {len(all_accounts)} accounts with total balance ${total_balance:.2f} for user {user_id}")
+            logger.info(
+                f"Retrieved {len(all_accounts)} accounts with total balance ${total_balance:.2f} for user {user_id}"
+            )
             return result
         except Exception as e:
-            logger.error(f"Failed to get accounts with balances for user {user_id}: {e}")
+            logger.error(
+                f"Failed to get accounts with balances for user {user_id}: {e}"
+            )
             raise Exception(f"Failed to get account balances: {e}")
 
     def _update_token_last_used(self, user_id: str, item_id: str) -> bool:
@@ -630,7 +654,7 @@ class PlaidService:
         """Initial full sync of transactions for a newly connected item."""
         try:
             logger.info(f"Starting initial transaction sync for item {item_id}")
-            
+
             # Update status to in progress
             self.update_transaction_sync_status(user_id, item_id, "syncing")
 
@@ -639,68 +663,65 @@ class PlaidService:
             added_count = 0
             modified_count = 0
             removed_count = 0
-            
+
             while True:
                 # Create request - omit cursor for initial sync when None
                 if cursor is not None:
                     request = TransactionsSyncRequest(
-                        access_token=access_token,
-                        cursor=cursor
+                        access_token=access_token, cursor=cursor
                     )
                 else:
-                    request = TransactionsSyncRequest(
-                        access_token=access_token
-                    )
-                
+                    request = TransactionsSyncRequest(access_token=access_token)
+
                 response = self.client.transactions_sync(request)
-                
+
                 # Process transactions
-                added = response.get('added', [])
-                modified = response.get('modified', [])
-                removed = response.get('removed', [])
-                
+                added = response.get("added", [])
+                modified = response.get("modified", [])
+                removed = response.get("removed", [])
+
                 if added:
                     # Store added transactions
                     transaction_storage_service.store_transactions(
                         user_id, item_id, added, "added"
                     )
                     added_count += len(added)
-                
+
                 if modified:
                     # Store modified transactions
                     transaction_storage_service.store_transactions(
                         user_id, item_id, modified, "modified"
                     )
                     modified_count += len(modified)
-                
+
                 if removed:
                     # Handle removed transactions
                     transaction_storage_service.handle_removed_transactions(
                         user_id, item_id, removed
                     )
                     removed_count += len(removed)
-                
-                cursor = response.get('next_cursor')
-                has_more = response.get('has_more', False)
-                
+
+                cursor = response.get("next_cursor")
+                has_more = response.get("has_more", False)
+
                 if not has_more:
                     break
-            
+
             # Update sync status to complete
             self.update_transaction_sync_status(user_id, item_id, "completed")
-            
+
             result = {
                 "success": True,
                 "item_id": item_id,
                 "added": added_count,
                 "modified": modified_count,
                 "removed": removed_count,
-                "total": added_count + modified_count + removed_count
+                "total": added_count + modified_count + removed_count,
             }
-            
+
             logger.info(f"Completed initial sync for {item_id}: {result}")
             return result
-            
+
         except Exception as e:
             logger.error(f"Failed to sync transactions for {item_id}: {e}")
             self.update_transaction_sync_status(user_id, item_id, "error")
@@ -710,70 +731,69 @@ class PlaidService:
         """Refresh transactions for a specific item using sync API."""
         try:
             logger.info(f"Refreshing transactions for item {item_id}")
-            
+
             # Get token for this item
             tokens = self.get_user_access_tokens(user_id)
             target_token = None
-            
+
             for token in tokens:
                 if token.item_id == item_id:
                     target_token = token
                     break
-            
+
             if not target_token:
                 raise Exception(f"No token found for item {item_id}")
-            
+
             # Decrypt token
             access_token = TokenEncryption.decrypt_token(target_token.access_token)
-            
+
             # Get cursor from last sync
             cursor = transaction_storage_service.get_last_sync_cursor(user_id, item_id)
-            
+
             # Create request - omit cursor if None
             if cursor is not None:
                 request = TransactionsSyncRequest(
-                    access_token=access_token,
-                    cursor=cursor
+                    access_token=access_token, cursor=cursor
                 )
             else:
-                request = TransactionsSyncRequest(
-                    access_token=access_token
-                )
-            
+                request = TransactionsSyncRequest(access_token=access_token)
+
             response = self.client.transactions_sync(request)
-            
+
             # Process new transactions
-            added = response.get('added', [])
-            modified = response.get('modified', [])
-            removed = response.get('removed', [])
-            
+            added = response.get("added", [])
+            modified = response.get("modified", [])
+            removed = response.get("removed", [])
+
             added_count = 0
             modified_count = 0
             removed_count = 0
-            
+
             if added:
                 transaction_storage_service.store_transactions(
                     user_id, item_id, added, "added"
                 )
                 added_count = len(added)
-            
+
             if modified:
                 transaction_storage_service.store_transactions(
                     user_id, item_id, modified, "modified"
                 )
                 modified_count = len(modified)
-            
+
             if removed:
                 transaction_storage_service.handle_removed_transactions(
                     user_id, item_id, removed
                 )
                 removed_count = len(removed)
-            
+
             # Update cursor for next sync
-            new_cursor = response.get('next_cursor')
+            new_cursor = response.get("next_cursor")
             if new_cursor:
-                transaction_storage_service.update_sync_cursor(user_id, item_id, new_cursor)
-            
+                transaction_storage_service.update_sync_cursor(
+                    user_id, item_id, new_cursor
+                )
+
             result = {
                 "success": True,
                 "transactions_added": added_count,
@@ -782,12 +802,12 @@ class PlaidService:
                 "total_processed": added_count + modified_count + removed_count,
                 "item_id": item_id,
                 "institution_name": target_token.institution_name or "Unknown",
-                "message": f"Refreshed {added_count + modified_count + removed_count} transactions"
+                "message": f"Refreshed {added_count + modified_count + removed_count} transactions",
             }
-            
+
             logger.info(f"Transaction refresh completed for {item_id}: {result}")
             return result
-            
+
         except Exception as e:
             logger.error(f"Failed to refresh transactions for {item_id}: {e}")
             raise Exception(f"Transaction refresh failed: {e}")
@@ -796,40 +816,42 @@ class PlaidService:
         """Force refresh by clearing all data and performing complete resync."""
         try:
             logger.info(f"Force refreshing transactions for item {item_id}")
-            
+
             # Get token for this item
             tokens = self.get_user_access_tokens(user_id)
             target_token = None
-            
+
             for token in tokens:
                 if token.item_id == item_id:
                     target_token = token
                     break
-            
+
             if not target_token:
                 raise Exception(f"No token found for item {item_id}")
-            
+
             # Clear existing transaction data
             transaction_storage_service.clear_item_transactions(user_id, item_id)
-            
+
             # Decrypt token
             access_token = TokenEncryption.decrypt_token(target_token.access_token)
-            
+
             # Perform complete resync
-            sync_result = self.sync_all_transactions_for_item(user_id, item_id, access_token)
-            
+            sync_result = self.sync_all_transactions_for_item(
+                user_id, item_id, access_token
+            )
+
             result = {
                 "success": True,
                 "message": f"Force refresh completed - synced {sync_result['total']} transactions",
                 "item_id": item_id,
                 "institution_name": target_token.institution_name or "Unknown",
                 "status": "completed",
-                "async_operation": False
+                "async_operation": False,
             }
-            
+
             logger.info(f"Force refresh completed for {item_id}: {result}")
             return result
-            
+
         except Exception as e:
             logger.error(f"Failed to force refresh transactions for {item_id}: {e}")
             raise Exception(f"Force refresh failed: {e}")
@@ -838,21 +860,23 @@ class PlaidService:
         """Get transactions for user across all accounts."""
         try:
             logger.info(f"Getting transactions for user {user_id} - last {days} days")
-            
+
             # Get transactions from storage
             transactions = transaction_storage_service.get_user_transactions(
                 user_id, days=days
             )
-            
+
             result = {
                 "transactions": transactions,
                 "total_count": len(transactions),
-                "days_requested": days
+                "days_requested": days,
             }
-            
-            logger.info(f"Retrieved {len(transactions)} transactions for user {user_id}")
+
+            logger.info(
+                f"Retrieved {len(transactions)} transactions for user {user_id}"
+            )
             return result
-            
+
         except Exception as e:
             logger.error(f"Failed to get transactions for user {user_id}: {e}")
             raise Exception(f"Failed to get transactions: {e}")
@@ -862,23 +886,27 @@ class PlaidService:
     ) -> Dict[str, Any]:
         """Get transactions for a specific account."""
         try:
-            logger.info(f"Getting transactions for account {account_id} - last {days} days")
-            
+            logger.info(
+                f"Getting transactions for account {account_id} - last {days} days"
+            )
+
             # Get transactions from storage for specific account
             transactions = transaction_storage_service.get_account_transactions(
                 user_id, account_id, days=days
             )
-            
+
             result = {
                 "transactions": transactions,
                 "account_id": account_id,
                 "total_count": len(transactions),
-                "days_requested": days
+                "days_requested": days,
             }
-            
-            logger.info(f"Retrieved {len(transactions)} transactions for account {account_id}")
+
+            logger.info(
+                f"Retrieved {len(transactions)} transactions for account {account_id}"
+            )
             return result
-            
+
         except Exception as e:
             logger.error(f"Failed to get transactions for account {account_id}: {e}")
             raise Exception(f"Failed to get account transactions: {e}")
@@ -888,25 +916,29 @@ class PlaidService:
         try:
             tokens = self.get_user_access_tokens(user_id)
             items = []
-            
+
             for token in tokens:
                 # Get account count for this item
                 accounts = account_storage_service.get_user_accounts(user_id)
-                item_accounts = [acc for acc in accounts if acc.get('item_id') == token.item_id]
-                
-                items.append({
-                    "item_id": token.item_id,
-                    "institution_id": token.institution_id,
-                    "institution_name": token.institution_name or "Unknown",
-                    "status": token.status,
-                    "accounts_count": len(item_accounts),
-                    "created_at": token.created_at,
-                    "last_used_at": token.last_used_at
-                })
-            
+                item_accounts = [
+                    acc for acc in accounts if acc.get("item_id") == token.item_id
+                ]
+
+                items.append(
+                    {
+                        "item_id": token.item_id,
+                        "institution_id": token.institution_id,
+                        "institution_name": token.institution_name or "Unknown",
+                        "status": token.status,
+                        "accounts_count": len(item_accounts),
+                        "created_at": token.created_at,
+                        "last_used_at": token.last_used_at,
+                    }
+                )
+
             logger.info(f"Retrieved {len(items)} Plaid items for user {user_id}")
             return items
-            
+
         except Exception as e:
             logger.error(f"Failed to get Plaid items for user {user_id}: {e}")
             raise Exception(f"Failed to get Plaid items: {e}")
@@ -914,32 +946,39 @@ class PlaidService:
     def _sync_transactions_for_stored_item(self, user_id: str, item_id: str) -> None:
         """Background task to sync transactions for a newly stored item."""
         try:
-            logger.info(f"🚀 BACKGROUND TASK STARTED: Transaction sync for user {user_id}, item {item_id}")
-            
+            logger.info(
+                f"🚀 BACKGROUND TASK STARTED: Transaction sync for user {user_id}, item {item_id}"
+            )
+
             # Get the token from storage
             tokens = self.get_user_access_tokens(user_id)
             logger.info(f"Retrieved {len(tokens)} tokens for user {user_id}")
-            
+
             target_token = None
             for token in tokens:
                 if token.item_id == item_id:
                     target_token = token
                     break
-            
+
             if not target_token:
                 logger.error(f"❌ No stored token found for item {item_id}")
                 return
-            
+
             logger.info(f"✅ Found target token for item {item_id}")
-            
+
             # Decrypt the access token
             access_token = TokenEncryption.decrypt_token(target_token.access_token)
             logger.info(f"✅ Successfully decrypted access token for item {item_id}")
-            
+
             # Perform the sync
             result = self.sync_all_transactions_for_item(user_id, item_id, access_token)
-            logger.info(f"🎉 Background transaction sync completed for item {item_id}: {result}")
-            
+            logger.info(
+                f"🎉 Background transaction sync completed for item {item_id}: {result}"
+            )
+
         except Exception as e:
-            logger.error(f"❌ Background transaction sync failed for item {item_id}: {e}", exc_info=True)
+            logger.error(
+                f"❌ Background transaction sync failed for item {item_id}: {e}",
+                exc_info=True,
+            )
             self.update_transaction_sync_status(user_id, item_id, "error")
