@@ -416,11 +416,30 @@ class PlaidService:
         use_cached_balance: bool = True,
         max_cache_age_hours: int = 4,
     ) -> Dict[str, Any]:
-        """Get accounts with real-time balances from Plaid API."""
+        """
+        If use_cached_balance is True, fetch account data from Cosmos DB only.
+        If use_cached_balance is False, fetch from Plaid API, update Cosmos DB, and return latest.
+        """
         try:
-            logger.info(f"Getting accounts with balances for user {user_id}")
+            logger.info(f"Getting accounts with balances for user {user_id}, use_cached_balance={use_cached_balance}")
 
-            # Get user's access tokens
+            if use_cached_balance:
+                # Only fetch from Cosmos DB
+                cached_data = account_storage_service.get_stored_account_data(user_id)
+                if cached_data:
+                    logger.info(f"Returning cached account data for user {user_id}")
+                    return cached_data
+                else:
+                    logger.warning(f"No cached account data found for user {user_id}")
+                    return {
+                        "accounts": [],
+                        "total_balance": 0.0,
+                        "account_count": 0,
+                        "last_updated": datetime.now(timezone.utc).isoformat(),
+                        "message": "No cached account data found. Please refresh."
+                    }
+
+            # If not using cached balance, fetch from Plaid and update Cosmos DB
             tokens = self.get_user_access_tokens(user_id)
             if not tokens:
                 logger.warning(f"No active tokens found for user {user_id}")
@@ -434,55 +453,29 @@ class PlaidService:
             all_accounts = []
             total_balance = 0.0
 
-            # Process each token/bank connection
             for token in tokens:
                 try:
-                    # Decrypt the access token
                     decrypted_token = TokenEncryption.decrypt_token(token.access_token)
-
-                    # Create Plaid request
                     if account_ids:
-                        # Filter by specific account IDs if provided
-                        options = AccountsBalanceGetRequestOptions(
-                            account_ids=account_ids
-                        )
-                        request = AccountsBalanceGetRequest(
-                            access_token=decrypted_token, options=options
-                        )
+                        options = AccountsBalanceGetRequestOptions(account_ids=account_ids)
+                        request = AccountsBalanceGetRequest(access_token=decrypted_token, options=options)
                     else:
-                        # No filtering - get all accounts
-                        request = AccountsBalanceGetRequest(
-                            access_token=decrypted_token
-                        )
-
-                    # Get account balances from Plaid
+                        request = AccountsBalanceGetRequest(access_token=decrypted_token)
                     response = self.client.accounts_balance_get(request)
                     accounts_data = response["accounts"]
-
-                    # Process accounts for this bank
                     for account in accounts_data:
                         balance_info = account["balances"]
-
-                        # Convert to our PlaidBalance model
                         balance = PlaidBalance(
                             available=balance_info.get("available"),
                             current=balance_info.get("current", 0),
                             limit=balance_info.get("limit"),
-                            iso_currency_code=balance_info.get(
-                                "iso_currency_code", "USD"
-                            ),
-                            unofficial_currency_code=balance_info.get(
-                                "unofficial_currency_code"
-                            ),
+                            iso_currency_code=balance_info.get("iso_currency_code", "USD"),
+                            unofficial_currency_code=balance_info.get("unofficial_currency_code"),
                         )
-
-                        # Convert to our PlaidAccountWithBalance model
-                        # Convert enum values to strings
                         account_type = account["type"].value if hasattr(account["type"], 'value') else account["type"]
                         account_subtype = account.get("subtype")
                         if account_subtype and hasattr(account_subtype, 'value'):
                             account_subtype = account_subtype.value
-                        
                         account_with_balance = PlaidAccountWithBalance(
                             account_id=account["account_id"],
                             name=account["name"],
@@ -495,45 +488,26 @@ class PlaidService:
                             institution_name=token.institution_name,
                             institution_id=token.institution_id,
                         )
-
                         all_accounts.append(account_with_balance.model_dump())
-
-                        # Add to total balance (use current balance)
                         if balance.current:
                             total_balance += float(balance.current)
-
-                    # Update token last used timestamp
                     self._update_token_last_used(user_id, token.item_id)
-
                 except Exception as e:
-                    logger.error(
-                        f"Failed to get balances for token {token.item_id}: {e}"
-                    )
+                    logger.error(f"Failed to get balances for token {token.item_id}: {e}")
                     continue
-
-            # Sort accounts by balance (highest first)
             all_accounts.sort(key=lambda x: x["balances"]["current"] or 0, reverse=True)
-
             result = {
                 "accounts": all_accounts,
                 "total_balance": round(total_balance, 2),
                 "account_count": len(all_accounts),
                 "last_updated": datetime.now(timezone.utc).isoformat(),
             }
-
-            # Store the result in cache service
-            if use_cached_balance:
-                account_storage_service.store_account_data(user_id, result)
-
-            logger.info(
-                f"Retrieved {len(all_accounts)} accounts with total balance ${total_balance:.2f} for user {user_id}"
-            )
+            # Store the result in Cosmos DB
+            account_storage_service.store_account_data(user_id, result)
+            logger.info(f"Retrieved {len(all_accounts)} accounts with total balance ${total_balance:.2f} for user {user_id}")
             return result
-
         except Exception as e:
-            logger.error(
-                f"Failed to get accounts with balances for user {user_id}: {e}"
-            )
+            logger.error(f"Failed to get accounts with balances for user {user_id}: {e}")
             raise Exception(f"Failed to get account balances: {e}")
 
     def _update_token_last_used(self, user_id: str, item_id: str) -> bool:

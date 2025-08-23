@@ -30,7 +30,6 @@ from .middleware import (
 )
 from .routers import plaid_router
 from .routers.oauth import router as oauth_router
-from .routers.firestore import router as plaid_data_router
 from .utils.logger import setup_logging, get_logger
 
 # Setup logging
@@ -108,8 +107,6 @@ def create_app() -> FastAPI:
     app.include_router(oauth_router, prefix=settings.api_v1_prefix)
     # Plaid integration endpoints
     app.include_router(plaid_router, prefix=settings.api_v1_prefix)
-    # Plaid transaction endpoints
-    app.include_router(plaid_data_router, prefix=settings.api_v1_prefix)
 
     # Health check endpoint
     @app.get("/health")
