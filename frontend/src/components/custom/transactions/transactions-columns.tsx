@@ -12,7 +12,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import type { Transaction } from '@/services/FirestoreService';
+import type { Transaction } from '@/services/CosmosDBService';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { TransactionDetailsModal } from './transaction-details-modal';
@@ -39,15 +39,13 @@ function ActionsCell({ transaction }: { transaction: Transaction }) {
             Copy transaction ID
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => setShowDetails(true)}>
-            View details
-          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => setShowDetails(true)}>View details</DropdownMenuItem>
           <DropdownMenuItem>Categorize</DropdownMenuItem>
           <DropdownMenuItem>Add note</DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      
-      <TransactionDetailsModal 
+
+      <TransactionDetailsModal
         transaction={transaction}
         open={showDetails}
         onOpenChange={setShowDetails}
@@ -72,7 +70,7 @@ const formatDate = (dateString: string | null | undefined) => {
   if (!dateString) {
     return 'No date';
   }
-  
+
   try {
     const date = new Date(dateString);
     if (isNaN(date.getTime())) {
@@ -149,7 +147,7 @@ export const columns: ColumnDef<Transaction>[] = [
       const transaction = row.original;
       const institutionName = transaction.institution_name || 'Unknown Bank';
       const logoUrl = transaction.logo_url;
-      
+
       return (
         <div className="flex items-center space-x-3">
           <Avatar className="h-8 w-8">
@@ -173,12 +171,7 @@ export const columns: ColumnDef<Transaction>[] = [
               </div>
             )}
             <AvatarFallback className="text-xs bg-slate-100 text-slate-600">
-              <svg
-                className="h-4 w-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -206,11 +199,14 @@ export const columns: ColumnDef<Transaction>[] = [
       const personalFinanceCategory = transaction.personal_finance_category?.primary;
       const categoryIconUrl = transaction.personal_finance_category_icon_url;
       const categories = row.getValue('category') as string[] | null | undefined;
-      
+
       // Use personal finance category if available, otherwise fall back to legacy category
-      const primaryCategory = personalFinanceCategory || 
-        (categories && Array.isArray(categories) && categories.length > 0 ? categories[0] : 'Other');
-      
+      const primaryCategory =
+        personalFinanceCategory ||
+        (categories && Array.isArray(categories) && categories.length > 0
+          ? categories[0]
+          : 'Other');
+
       return (
         <div className="flex items-center space-x-2">
           <Avatar className="h-6 w-6">
@@ -234,12 +230,7 @@ export const columns: ColumnDef<Transaction>[] = [
               </div>
             )}
             <AvatarFallback className="text-xs bg-slate-100 text-slate-600">
-              <svg
-                className="h-3 w-3"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
+              <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -273,7 +264,7 @@ export const columns: ColumnDef<Transaction>[] = [
       const transaction = row.original;
       const institutionName = transaction.institution_name || 'Unknown Bank';
       const accountName = transaction.account_name || 'Unknown Account';
-      
+
       return (
         <div>
           <div className="font-medium">{accountName}</div>

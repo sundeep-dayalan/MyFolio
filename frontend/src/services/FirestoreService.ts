@@ -89,7 +89,7 @@ export interface Transaction {
   personal_finance_category_icon_url?: string;
 }
 
-class FirestoreServiceClass {
+class CosmosDBServiceClass {
   private async makeRequest<T>(endpoint: string, options?: RequestInit): Promise<T> {
     const response = await fetch(`${API_BASE}${endpoint}`, {
       headers: {
@@ -149,9 +149,9 @@ class FirestoreServiceClass {
     }
 
     return this.makeRequest<PaginatedTransactionsResponse>(
-      `/firestore/transactions/paginated?${queryParams}`,
+      `/plaid/transactions/paginated?${queryParams}`,
     );
   }
 }
 
-export const FirestoreService = new FirestoreServiceClass();
+export const CosmosDBService = new CosmosDBServiceClass();

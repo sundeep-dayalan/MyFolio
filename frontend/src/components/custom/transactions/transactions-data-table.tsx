@@ -31,8 +31,8 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import type { Transaction, PaginatedTransactionsRequest } from '@/services/FirestoreService';
-import { useTransactionsPaginatedQuery } from '@/hooks/useFirestoreApi';
+import type { Transaction, PaginatedTransactionsRequest } from '@/services/CosmosDBService';
+import { useTransactionsPaginatedQuery } from '@/hooks/useCosmosApi';
 
 interface DataTableProps {
   columns: ColumnDef<Transaction>[];

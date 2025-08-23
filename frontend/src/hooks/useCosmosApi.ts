@@ -5,11 +5,11 @@ import {
   type PaginatedTransactionsResponse,
 } from '@/services/FirestoreService';
 
-// Query Keys
 export const COSMOSDB_QUERY_KEYS = {
   transactions: 'cosmosdb-transactions',
 } as const;
 
+export const useTransactionsPaginatedQuery = (request: PaginatedTransactionsRequest) => {
   return useQuery<PaginatedTransactionsResponse>({
     queryKey: [COSMOSDB_QUERY_KEYS.transactions, request],
     queryFn: () => CosmosDBService.getTransactionsPaginated(request),

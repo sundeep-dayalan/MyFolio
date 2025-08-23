@@ -1,14 +1,9 @@
 'use client';
 
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarImage } from '@/components/ui/avatar';
-import type { Transaction } from '@/services/FirestoreService';
+import type { Transaction } from '@/services/CosmosDBService';
 
 interface TransactionDetailsModalProps {
   transaction: Transaction | null;
@@ -31,7 +26,7 @@ const formatDate = (dateString: string | null | undefined) => {
   if (!dateString) {
     return 'No date available';
   }
-  
+
   try {
     const date = new Date(dateString);
     if (isNaN(date.getTime())) {
@@ -55,10 +50,10 @@ const getTransactionTypeColor = (amount: number | null | undefined) => {
   return Number(amount) > 0 ? 'text-red-600' : 'text-green-600';
 };
 
-export function TransactionDetailsModal({ 
-  transaction, 
-  open, 
-  onOpenChange 
+export function TransactionDetailsModal({
+  transaction,
+  open,
+  onOpenChange,
 }: TransactionDetailsModalProps) {
   if (!transaction) return null;
 
@@ -67,9 +62,10 @@ export function TransactionDetailsModal({
   const logoUrl = transaction.logo_url;
   const categoryIconUrl = transaction.personal_finance_category_icon_url;
   const personalFinanceCategory = transaction.personal_finance_category?.primary;
-  const categoryName = personalFinanceCategory || 
-    (transaction.category && Array.isArray(transaction.category) && transaction.category.length > 0 
-      ? transaction.category[0] 
+  const categoryName =
+    personalFinanceCategory ||
+    (transaction.category && Array.isArray(transaction.category) && transaction.category.length > 0
+      ? transaction.category[0]
       : 'Other');
 
   return (
@@ -99,7 +95,9 @@ export function TransactionDetailsModal({
               )}
             </Avatar>
             <div>
-              <div className="font-semibold text-lg">{transaction.name || 'Unknown Transaction'}</div>
+              <div className="font-semibold text-lg">
+                {transaction.name || 'Unknown Transaction'}
+              </div>
               <div className="text-sm text-muted-foreground">{institutionName}</div>
             </div>
           </DialogTitle>
@@ -136,26 +134,35 @@ export function TransactionDetailsModal({
                     <p className="text-sm text-gray-800">{formatDate(transaction.date)}</p>
                   </div>
 
-                  {transaction.authorized_date && transaction.authorized_date !== transaction.date && (
-                    <div className="space-y-1">
-                      <label className="text-sm font-medium text-gray-600">Authorized Date</label>
-                      <p className="text-sm text-gray-800">{formatDate(transaction.authorized_date)}</p>
-                    </div>
-                  )}
+                  {transaction.authorized_date &&
+                    transaction.authorized_date !== transaction.date && (
+                      <div className="space-y-1">
+                        <label className="text-sm font-medium text-gray-600">Authorized Date</label>
+                        <p className="text-sm text-gray-800">
+                          {formatDate(transaction.authorized_date)}
+                        </p>
+                      </div>
+                    )}
 
                   <div className="space-y-1">
                     <label className="text-sm font-medium text-gray-600">Merchant</label>
-                    <p className="text-sm text-gray-800">{transaction.merchant_name || 'Unknown Merchant'}</p>
+                    <p className="text-sm text-gray-800">
+                      {transaction.merchant_name || 'Unknown Merchant'}
+                    </p>
                   </div>
 
                   <div className="space-y-1">
                     <label className="text-sm font-medium text-gray-600">Payment Channel</label>
-                    <p className="text-sm text-gray-800 capitalize">{transaction.payment_channel || 'Unknown'}</p>
+                    <p className="text-sm text-gray-800 capitalize">
+                      {transaction.payment_channel || 'Unknown'}
+                    </p>
                   </div>
 
                   <div className="space-y-1">
                     <label className="text-sm font-medium text-gray-600">Transaction Type</label>
-                    <p className="text-sm text-gray-800 capitalize">{transaction.transaction_type || 'Unknown'}</p>
+                    <p className="text-sm text-gray-800 capitalize">
+                      {transaction.transaction_type || 'Unknown'}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -168,14 +175,20 @@ export function TransactionDetailsModal({
                 <div className="space-y-4">
                   <div className="space-y-1">
                     <label className="text-sm font-medium text-gray-600">Account</label>
-                    <p className="text-sm text-gray-800">{transaction.account_name || 'Unknown Account'}</p>
-                    <p className="text-xs text-gray-500 font-mono">{transaction.account_id || 'Unknown ID'}</p>
+                    <p className="text-sm text-gray-800">
+                      {transaction.account_name || 'Unknown Account'}
+                    </p>
+                    <p className="text-xs text-gray-500 font-mono">
+                      {transaction.account_id || 'Unknown ID'}
+                    </p>
                   </div>
 
                   <div className="space-y-1">
                     <label className="text-sm font-medium text-gray-600">Institution</label>
                     <p className="text-sm text-gray-800">{institutionName}</p>
-                    <p className="text-xs text-gray-500">{transaction.institution_id || 'Unknown ID'}</p>
+                    <p className="text-xs text-gray-500">
+                      {transaction.institution_id || 'Unknown ID'}
+                    </p>
                   </div>
 
                   <div className="space-y-2">
@@ -208,19 +221,29 @@ export function TransactionDetailsModal({
                     </div>
                     {transaction.personal_finance_category?.detailed && (
                       <p className="text-xs text-gray-500 mt-1">
-                        Detailed: {transaction.personal_finance_category.detailed.replace(/_/g, ' ').toLowerCase()}
+                        Detailed:{' '}
+                        {transaction.personal_finance_category.detailed
+                          .replace(/_/g, ' ')
+                          .toLowerCase()}
                       </p>
                     )}
                     {transaction.personal_finance_category?.confidence_level && (
                       <p className="text-xs text-gray-500">
-                        Confidence: {transaction.personal_finance_category.confidence_level.replace(/_/g, ' ').toLowerCase()}
+                        Confidence:{' '}
+                        {transaction.personal_finance_category.confidence_level
+                          .replace(/_/g, ' ')
+                          .toLowerCase()}
                       </p>
                     )}
                   </div>
 
                   <div className="space-y-1">
                     <label className="text-sm font-medium text-gray-600">Currency</label>
-                    <p className="text-sm text-gray-800">{transaction.iso_currency_code || transaction.unofficial_currency_code || 'USD'}</p>
+                    <p className="text-sm text-gray-800">
+                      {transaction.iso_currency_code ||
+                        transaction.unofficial_currency_code ||
+                        'USD'}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -228,79 +251,87 @@ export function TransactionDetailsModal({
           </div>
 
           {/* Location Information */}
-          {transaction.location && (Object.values(transaction.location).some(val => val !== null)) && (
-            <div className="bg-gray-50 p-4 rounded-lg">
-              <h3 className="font-semibold text-lg mb-3 text-gray-900">Location Information</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-                {transaction.location.address && (
-                  <div className="space-y-1">
-                    <label className="font-medium text-gray-600">Address</label>
-                    <p className="text-gray-800">{transaction.location.address}</p>
-                  </div>
-                )}
-                {transaction.location.city && (
-                  <div className="space-y-1">
-                    <label className="font-medium text-gray-600">City</label>
-                    <p className="text-gray-800">{transaction.location.city}</p>
-                  </div>
-                )}
-                {transaction.location.region && (
-                  <div className="space-y-1">
-                    <label className="font-medium text-gray-600">Region</label>
-                    <p className="text-gray-800">{transaction.location.region}</p>
-                  </div>
-                )}
-                {transaction.location.postal_code && (
-                  <div className="space-y-1">
-                    <label className="font-medium text-gray-600">Postal Code</label>
-                    <p className="text-gray-800">{transaction.location.postal_code}</p>
-                  </div>
-                )}
-                {transaction.location.country && (
-                  <div className="space-y-1">
-                    <label className="font-medium text-gray-600">Country</label>
-                    <p className="text-gray-800">{transaction.location.country}</p>
-                  </div>
-                )}
-                {transaction.location.store_number && (
-                  <div className="space-y-1">
-                    <label className="font-medium text-gray-600">Store Number</label>
-                    <p className="text-gray-800">{transaction.location.store_number}</p>
-                  </div>
-                )}
+          {transaction.location &&
+            Object.values(transaction.location).some((val) => val !== null) && (
+              <div className="bg-gray-50 p-4 rounded-lg">
+                <h3 className="font-semibold text-lg mb-3 text-gray-900">Location Information</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+                  {transaction.location.address && (
+                    <div className="space-y-1">
+                      <label className="font-medium text-gray-600">Address</label>
+                      <p className="text-gray-800">{transaction.location.address}</p>
+                    </div>
+                  )}
+                  {transaction.location.city && (
+                    <div className="space-y-1">
+                      <label className="font-medium text-gray-600">City</label>
+                      <p className="text-gray-800">{transaction.location.city}</p>
+                    </div>
+                  )}
+                  {transaction.location.region && (
+                    <div className="space-y-1">
+                      <label className="font-medium text-gray-600">Region</label>
+                      <p className="text-gray-800">{transaction.location.region}</p>
+                    </div>
+                  )}
+                  {transaction.location.postal_code && (
+                    <div className="space-y-1">
+                      <label className="font-medium text-gray-600">Postal Code</label>
+                      <p className="text-gray-800">{transaction.location.postal_code}</p>
+                    </div>
+                  )}
+                  {transaction.location.country && (
+                    <div className="space-y-1">
+                      <label className="font-medium text-gray-600">Country</label>
+                      <p className="text-gray-800">{transaction.location.country}</p>
+                    </div>
+                  )}
+                  {transaction.location.store_number && (
+                    <div className="space-y-1">
+                      <label className="font-medium text-gray-600">Store Number</label>
+                      <p className="text-gray-800">{transaction.location.store_number}</p>
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
           {/* Payment Metadata */}
-          {transaction.payment_meta && (Object.values(transaction.payment_meta).some(val => val !== null)) && (
-            <div className="bg-gray-50 p-4 rounded-lg">
-              <h3 className="font-semibold text-lg mb-3 text-gray-900">Payment Details</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-                {transaction.payment_meta.reference_number && (
-                  <div className="space-y-1">
-                    <label className="font-medium text-gray-600">Reference Number</label>
-                    <p className="font-mono text-gray-800 bg-white p-2 rounded border">{transaction.payment_meta.reference_number}</p>
-                  </div>
-                )}
-                {transaction.payment_meta.ppd_id && (
-                  <div className="space-y-1">
-                    <label className="font-medium text-gray-600">PPD ID</label>
-                    <p className="font-mono text-gray-800 bg-white p-2 rounded border">{transaction.payment_meta.ppd_id}</p>
-                  </div>
-                )}
-                {transaction.payment_meta.payee && (
-                  <div className="space-y-1">
-                    <label className="font-medium text-gray-600">Payee</label>
-                    <p className="text-gray-800">{transaction.payment_meta.payee}</p>
-                  </div>
-                )}
+          {transaction.payment_meta &&
+            Object.values(transaction.payment_meta).some((val) => val !== null) && (
+              <div className="bg-gray-50 p-4 rounded-lg">
+                <h3 className="font-semibold text-lg mb-3 text-gray-900">Payment Details</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+                  {transaction.payment_meta.reference_number && (
+                    <div className="space-y-1">
+                      <label className="font-medium text-gray-600">Reference Number</label>
+                      <p className="font-mono text-gray-800 bg-white p-2 rounded border">
+                        {transaction.payment_meta.reference_number}
+                      </p>
+                    </div>
+                  )}
+                  {transaction.payment_meta.ppd_id && (
+                    <div className="space-y-1">
+                      <label className="font-medium text-gray-600">PPD ID</label>
+                      <p className="font-mono text-gray-800 bg-white p-2 rounded border">
+                        {transaction.payment_meta.ppd_id}
+                      </p>
+                    </div>
+                  )}
+                  {transaction.payment_meta.payee && (
+                    <div className="space-y-1">
+                      <label className="font-medium text-gray-600">Payee</label>
+                      <p className="text-gray-800">{transaction.payment_meta.payee}</p>
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
           {/* Additional Information */}
-          {(transaction.account_owner || transaction.check_number || transaction.merchant_entity_id) && (
+          {(transaction.account_owner ||
+            transaction.check_number ||
+            transaction.merchant_entity_id) && (
             <div className="bg-gray-50 p-4 rounded-lg">
               <h3 className="font-semibold text-lg mb-3 text-gray-900">Additional Information</h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
@@ -313,13 +344,17 @@ export function TransactionDetailsModal({
                 {transaction.check_number && (
                   <div className="space-y-1">
                     <label className="font-medium text-gray-600">Check Number</label>
-                    <p className="font-mono text-gray-800 bg-white p-2 rounded border">{transaction.check_number}</p>
+                    <p className="font-mono text-gray-800 bg-white p-2 rounded border">
+                      {transaction.check_number}
+                    </p>
                   </div>
                 )}
                 {transaction.merchant_entity_id && (
                   <div className="space-y-1">
                     <label className="font-medium text-gray-600">Merchant Entity ID</label>
-                    <p className="font-mono text-xs text-gray-800 bg-white p-2 rounded border break-all">{transaction.merchant_entity_id}</p>
+                    <p className="font-mono text-xs text-gray-800 bg-white p-2 rounded border break-all">
+                      {transaction.merchant_entity_id}
+                    </p>
                   </div>
                 )}
               </div>

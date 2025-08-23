@@ -30,7 +30,6 @@ from .middleware import (
 )
 from .routers import plaid_router
 from .routers.oauth import router as oauth_router
-from .routers.firestore import router as cosmosdb_router, firestore_router
 from .utils.logger import setup_logging, get_logger
 
 # Setup logging
@@ -108,10 +107,6 @@ def create_app() -> FastAPI:
     app.include_router(oauth_router, prefix=settings.api_v1_prefix)
     # Plaid integration endpoints
     app.include_router(plaid_router, prefix=settings.api_v1_prefix)
-    # CosmosDB direct access endpoints
-    app.include_router(cosmosdb_router, prefix=settings.api_v1_prefix)
-    # Firestore compatibility endpoints (redirect to CosmosDB)
-    app.include_router(firestore_router, prefix=settings.api_v1_prefix)
 
     # Health check endpoint
     @app.get("/health")
@@ -168,22 +163,26 @@ try:
         # Ensure CosmosDB connection is established for Azure Functions
         logger.info(f"Azure Function called - Environment: {settings.environment}")
         logger.info(f"CosmosDB is_connected: {cosmos_client.is_connected}")
-        
+
         if not cosmos_client.is_connected and settings.environment != "test":
             try:
-                logger.info("Attempting to establish CosmosDB connection in Azure Function")
+                logger.info(
+                    "Attempting to establish CosmosDB connection in Azure Function"
+                )
                 await cosmos_client.connect()
                 logger.info("CosmosDB connection established in Azure Function")
             except Exception as e:
                 logger.error(f"CosmosDB connection failed in Azure Function: {e}")
-                logger.error(f"CosmosDB settings - Endpoint: {settings.cosmos_db_endpoint}")
+                logger.error(
+                    f"CosmosDB settings - Endpoint: {settings.cosmos_db_endpoint}"
+                )
                 logger.error(f"CosmosDB settings - DB Name: {settings.cosmos_db_name}")
         else:
             if cosmos_client.is_connected:
                 logger.info("CosmosDB already connected")
             elif settings.environment == "test":
                 logger.info("Skipping CosmosDB connection in test environment")
-        
+
         return await func.AsgiMiddleware(app).handle_async(req, context)
 
 except ImportError:
