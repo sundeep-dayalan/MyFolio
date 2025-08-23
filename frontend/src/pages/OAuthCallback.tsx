@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { AuthService } from '../services/AuthService';
+import { MicrosoftAuthService } from '../services/MicrosoftAuthService';
 import { Spinner } from '@/components/ui/spinner';
 
 export const OAuthCallback: React.FC = () => {
@@ -61,8 +61,8 @@ export const OAuthCallback: React.FC = () => {
           return;
         }
 
-        // Try the standard OAuth flow (code and state)
-        const result = await AuthService.handleOAuthCallback(searchParams);
+        // Process Microsoft OAuth callback
+        const result = await MicrosoftAuthService.handleOAuthCallback(searchParams);
 
         if (result.success) {
           // Authentication successful, redirect to home

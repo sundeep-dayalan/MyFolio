@@ -12,8 +12,8 @@ export const config = {
   // App Environment
   environment: import.meta.env.VITE_APP_ENV || 'development',
   
-  // Google OAuth Configuration
-  googleClientId: import.meta.env.VITE_GOOGLE_CLIENT_ID || '',
+  // Microsoft OAuth Configuration
+  microsoftClientId: import.meta.env.VITE_MICROSOFT_CLIENT_ID || '',
   
   // Environment checks
   isDevelopment: import.meta.env.VITE_APP_ENV === 'development' || import.meta.env.DEV,
@@ -25,11 +25,18 @@ export const config = {
 
 // Validation function to ensure required environment variables are set
 export const validateConfig = () => {
-  const requiredVars = ['VITE_API_BASE_URL', 'VITE_GOOGLE_CLIENT_ID'];
+  const requiredVars = ['VITE_API_BASE_URL'];
+  const optionalVars = ['VITE_MICROSOFT_CLIENT_ID'];
+  
   const missing = requiredVars.filter(varName => !import.meta.env[varName]);
+  const missingOptional = optionalVars.filter(varName => !import.meta.env[varName]);
   
   if (missing.length > 0) {
-    console.warn('Missing environment variables:', missing);
+    console.error('Missing required environment variables:', missing);
+  }
+  
+  if (missingOptional.length > 0) {
+    console.warn('Missing optional environment variables (OAuth may not work):', missingOptional);
   }
   
   return missing.length === 0;

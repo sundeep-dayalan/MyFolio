@@ -4,14 +4,14 @@ import { cn } from '@/lib/utils';
 import { GalleryVerticalEnd, Loader2Icon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { AuthContext } from '@/context/AuthContext';
-import type { AuthContextType, OAuthStatusResponse } from '@/types/types';
+import { MicrosoftAuthService } from '@/services/MicrosoftAuthService';
+import type { AuthContextType, MicrosoftOAuthStatusResponse } from '@/types/types';
 
 import { useNavigate } from 'react-router-dom';
 import config from '@/config/env';
 import {
   AlertDialog,
   AlertDialogAction,
-  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
@@ -25,9 +25,7 @@ const LoginPage: React.FC = () => {
   const navigate = useNavigate();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [oauthStatus, setOauthStatus] = useState<OAuthStatusResponse | null>(null);
-
-  const API_BASE_URL = config.apiBaseUrl;
+  const [oauthStatus, setOauthStatus] = useState<MicrosoftOAuthStatusResponse | null>(null);
 
   useEffect(() => {
     // Check if user is already authenticated
@@ -36,14 +34,13 @@ const LoginPage: React.FC = () => {
       return;
     }
 
-    // Get OAuth configuration status
+    // Get Microsoft OAuth configuration status
     const checkOAuthStatus = async () => {
       try {
-        const response = await fetch(`${API_BASE_URL}/auth/oauth/status`);
-        const status: OAuthStatusResponse = await response.json();
+        const status = await MicrosoftAuthService.getOAuthStatus();
         setOauthStatus(status);
       } catch (error) {
-        console.error('Failed to get OAuth status:', error);
+        console.error('Failed to get Microsoft OAuth status:', error);
         setError('Server unavailable! Please try again later.');
       }
     };
@@ -51,9 +48,9 @@ const LoginPage: React.FC = () => {
     checkOAuthStatus();
   }, [auth.user, navigate]);
 
-  const handleGoogleLogin = async () => {
-    if (!oauthStatus?.google_oauth_enabled) {
-      setError('Google OAuth is not configured');
+  const handleMicrosoftLogin = async () => {
+    if (!oauthStatus?.microsoft_oauth_enabled) {
+      setError('Microsoft OAuth is not configured');
       return;
     }
 
@@ -61,10 +58,10 @@ const LoginPage: React.FC = () => {
     setError(null);
 
     try {
-      // Redirect to the secure server-side OAuth endpoint
-      window.location.href = `${API_BASE_URL}/auth/oauth/google`;
+      // Use Microsoft Auth Service to initiate login
+      MicrosoftAuthService.initiateLogin();
     } catch (error) {
-      console.error('Failed to initiate Google login:', error);
+      console.error('Failed to initiate Microsoft login:', error);
       setError('Failed to start authentication');
       setIsLoading(false);
     }
@@ -73,7 +70,6 @@ const LoginPage: React.FC = () => {
   function mailTo(email: string): void {
     window.location.href = `mailto:${email}`;
   }
-  function handleAppleLogin() {}
   return (
     <div className="bg-background flex min-h-svh flex-col items-center justify-center gap-6 p-6 md:p-10">
       <div className="w-full max-w-sm">
@@ -136,8 +132,8 @@ const LoginPage: React.FC = () => {
 
                 <div className="space-y-6">
                   <Button
-                    onClick={handleGoogleLogin}
-                    disabled={!oauthStatus?.google_oauth_enabled || isLoading}
+                    onClick={handleMicrosoftLogin}
+                    disabled={!oauthStatus?.microsoft_oauth_enabled || isLoading}
                     variant="outline"
                     type="button"
                     className="w-full"
@@ -147,12 +143,12 @@ const LoginPage: React.FC = () => {
                     ) : (
                       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
                         <path
-                          d="M12.48 10.92v3.28h7.84c-.24 1.84-.853 3.187-1.787 4.133-1.147 1.147-2.933 2.4-6.053 2.4-4.827 0-8.6-3.893-8.6-8.72s3.773-8.72 8.6-8.72c2.6 0 4.507 1.027 5.907 2.347l2.307-2.307C18.747 1.44 16.133 0 12.48 0 5.867 0 .307 5.387.307 12s5.56 12 12.173 12c3.573 0 6.267-1.173 8.373-3.36 2.16-2.16 2.84-5.213 2.84-7.667 0-.76-.053-1.467-.173-2.053H12.48z"
+                          d="M11.4 24H0V12.6h11.4V24zM24 24H12.6V12.6H24V24zM11.4 11.4H0V0h11.4v11.4zM24 11.4H12.6V0H24v11.4z"
                           fill="currentColor"
                         />
                       </svg>
                     )}
-                    Continue with Google
+                    Continue with Microsoft
                   </Button>
                 </div>
               </div>

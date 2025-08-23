@@ -53,15 +53,17 @@ class Settings(BaseSettings):
     cosmos_db_key: str = Field(..., env="COSMOS_DB_KEY")
     cosmos_db_name: str = Field(default="sage-db", env="COSMOS_DB_NAME")
 
-    # Google OAuth Configuration
-    google_client_id: str = Field(default="test-client-id", env="GOOGLE_CLIENT_ID")
-    google_client_secret: str = Field(
-        default="test-client-secret", env="GOOGLE_CLIENT_SECRET"
+    # Microsoft Entra ID OAuth Configuration
+    azure_client_id: str = Field(default="test-client-id", env="AZURE_CLIENT_ID")
+    azure_client_secret: str = Field(
+        default="test-client-secret", env="AZURE_CLIENT_SECRET"
     )
-    google_redirect_uri: str = Field(
-        default="http://localhost:8000/api/v1/auth/oauth/google/callback",
-        env="GOOGLE_REDIRECT_URI",
+    azure_tenant_id: str = Field(default="common", env="AZURE_TENANT_ID")
+    azure_redirect_uri: str = Field(
+        default="http://localhost:8000/api/v1/auth/oauth/microsoft/callback",
+        env="AZURE_REDIRECT_URI",
     )
+
 
     # Plaid Configuration
     plaid_client_id: str = Field(..., env="PLAID_CLIENT_ID")
@@ -92,11 +94,10 @@ class Settings(BaseSettings):
                 "COSMOS_DB_ENDPOINT": secret_manager.get_secret("COSMOS_DB_ENDPOINT"),
                 "COSMOS_DB_KEY": secret_manager.get_secret("COSMOS_DB_KEY"),
                 "COSMOS_DB_NAME": secret_manager.get_secret("COSMOS_DB_NAME"),
-                "GOOGLE_CLIENT_ID": secret_manager.get_secret("GOOGLE_CLIENT_ID"),
-                "GOOGLE_CLIENT_SECRET": secret_manager.get_secret(
-                    "GOOGLE_CLIENT_SECRET"
-                ),
-                "GOOGLE_REDIRECT_URI": secret_manager.get_secret("GOOGLE_REDIRECT_URI"),
+                "AZURE_CLIENT_ID": secret_manager.get_secret("AZURE_CLIENT_ID"),
+                "AZURE_CLIENT_SECRET": secret_manager.get_secret("AZURE_CLIENT_SECRET"),
+                "AZURE_TENANT_ID": secret_manager.get_secret("AZURE_TENANT_ID"),
+                "AZURE_REDIRECT_URI": secret_manager.get_secret("AZURE_REDIRECT_URI"),
                 "ALLOWED_ORIGINS": secret_manager.get_secret("ALLOWED_ORIGINS"),
                 "FRONTEND_URL": secret_manager.get_secret("FRONTEND_URL"),
             }

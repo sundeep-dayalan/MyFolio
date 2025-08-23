@@ -1,6 +1,7 @@
 import React, { createContext, useState, useCallback, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { config } from '../config/env';
+import { MicrosoftAuthService } from '../services/MicrosoftAuthService';
 import type { AuthContextType, UserResponse } from '@/types/types';
 
 export const AuthContext = createContext<AuthContextType | null>(null);
@@ -37,8 +38,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const login = useCallback(() => {
-    // Redirect to server-side OAuth endpoint
-    window.location.href = `${config.apiBaseUrl}/auth/oauth/google`;
+    // Initiate Microsoft Entra ID OAuth login
+    MicrosoftAuthService.initiateLogin();
   }, []);
 
   const setUserAndToken = useCallback((userData: UserResponse, authToken: string) => {
@@ -48,11 +49,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.setItem('user', JSON.stringify(userData));
   }, []);
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
+    // Use Microsoft Auth Service logout
+    await MicrosoftAuthService.logout();
     setUser(null);
     setAuthToken(null);
-    localStorage.removeItem('authToken');
-    localStorage.removeItem('user');
     navigate('/login');
   }, [navigate]);
 

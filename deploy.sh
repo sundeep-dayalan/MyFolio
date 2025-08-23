@@ -458,6 +458,99 @@ create_key_vault() {
     print_success "Key Vault permissions configured!"
 }
 
+# Step 6.5: Create Azure AD App Registration
+create_azure_ad_app() {
+    print_header "STEP 6.5: AZURE AD APP REGISTRATION"
+    
+    # Variables for Azure AD app
+    local app_name="sage-${UNIQUE_SUFFIX}-app"
+    local frontend_url="https://$(echo $STATIC_WEB_APP_NAME | tr '[:upper:]' '[:lower:]').azurestaticapps.net"
+    local backend_url="https://${FUNCTION_APP_NAME}.azurewebsites.net"
+    
+    # Check if app registration already exists
+    local existing_app_id=$(az ad app list --display-name "$app_name" --query "[0].appId" -o tsv 2>/dev/null)
+    
+    if [ -n "$existing_app_id" ] && [ "$existing_app_id" != "null" ]; then
+        print_warning "Azure AD app registration '$app_name' already exists with ID: $existing_app_id"
+        AZURE_AD_CLIENT_ID="$existing_app_id"
+        
+        # Update existing app to support personal Microsoft accounts
+        print_status "Updating existing app to support personal Microsoft accounts..."
+        az ad app update --id "$existing_app_id" --sign-in-audience "AzureADandPersonalMicrosoftAccount" 2>/dev/null || true
+        
+        # Get the existing client secret ID to update it
+        local existing_secret_id=$(az ad app credential list --id "$existing_app_id" --query "[0].keyId" -o tsv 2>/dev/null)
+        if [ -n "$existing_secret_id" ] && [ "$existing_secret_id" != "null" ]; then
+            print_status "Removing existing client secret..."
+            az ad app credential delete --id "$existing_app_id" --key-id "$existing_secret_id" 2>/dev/null || true
+        fi
+    else
+        print_status "Creating Azure AD app registration: $app_name"
+        
+        # Create the app registration with required permissions and redirect URIs
+        # Using "AzureADandPersonalMicrosoftAccount" to support both org and personal accounts
+        AZURE_AD_CLIENT_ID=$(az ad app create \
+            --display-name "$app_name" \
+            --sign-in-audience "AzureADandPersonalMicrosoftAccount" \
+            --web-redirect-uris "${backend_url}/api/v1/auth/oauth/microsoft/callback" "${frontend_url}/auth/callback" "http://localhost:5173/auth/callback" "http://localhost:8000/api/v1/auth/oauth/microsoft/callback" \
+            --enable-access-token-issuance true \
+            --enable-id-token-issuance true \
+            --required-resource-accesses '[
+                {
+                    "resourceAppId": "00000003-0000-0000-c000-000000000000",
+                    "resourceAccess": [
+                        {
+                            "id": "e1fe6dd8-ba31-4d61-89e7-88639da4683d",
+                            "type": "Scope"
+                        },
+                        {
+                            "id": "64a6cdd6-aab1-4aaf-94b8-3cc8405e90d0",
+                            "type": "Scope"
+                        },
+                        {
+                            "id": "14dad69e-099b-42c9-810b-d002981feec1",
+                            "type": "Scope"
+                        }
+                    ]
+                }
+            ]' \
+            --query appId \
+            --output tsv)
+            
+        print_success "Azure AD app created with ID: $AZURE_AD_CLIENT_ID"
+    fi
+    
+    # Create a new client secret
+    print_status "Creating client secret..."
+    local secret_name="sage-client-secret-$(date +%s)"
+    AZURE_AD_CLIENT_SECRET=$(az ad app credential reset \
+        --id "$AZURE_AD_CLIENT_ID" \
+        --display-name "$secret_name" \
+        --years 2 \
+        --query password \
+        --output tsv)
+    
+    print_success "Client secret created successfully"
+    
+    # Get tenant ID
+    AZURE_AD_TENANT_ID=$(az account show --query tenantId --output tsv)
+    
+    print_status "Azure AD Configuration:"
+    print_status "  App ID (Client ID): $AZURE_AD_CLIENT_ID"
+    print_status "  Tenant ID: $AZURE_AD_TENANT_ID"
+    print_status "  Sign-in Audience: AzureADandPersonalMicrosoftAccount (supports personal & org accounts)"
+    print_status "  Redirect URIs configured for:"
+    print_status "    - Production: ${backend_url}/api/v1/auth/oauth/microsoft/callback"
+    print_status "    - Frontend: ${frontend_url}/auth/callback"
+    print_status "    - Development: http://localhost:8000/api/v1/auth/oauth/microsoft/callback"
+    print_status "    - Local Frontend: http://localhost:5173/auth/callback"
+    print_status ""
+    print_status "Azure Portal Link:"
+    print_status "  https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/Overview/appId/$AZURE_AD_CLIENT_ID"
+    
+    print_success "Azure AD app registration completed!"
+}
+
 # Step 7: Create Azure Function App
 create_function_app() {
     print_header "STEP 7: AZURE FUNCTIONS"
@@ -542,7 +635,7 @@ configure_function_app() {
     
     local key_vault_url="https://${KEY_VAULT_NAME}.vault.azure.net/"
     
-    # Configure function app settings
+    # Configure function app settings with Microsoft Entra ID
     az functionapp config appsettings set \
         --name "$FUNCTION_APP_NAME" \
         --resource-group "$RESOURCE_GROUP_NAME" \
@@ -555,6 +648,10 @@ configure_function_app() {
             "APPLICATIONINSIGHTS_CONNECTION_STRING=$insights_connection" \
             "FUNCTIONS_WORKER_RUNTIME=python" \
             "PYTHON_ENABLE_GUNICORN_MULTIPROCESSING=1" \
+            "AZURE_CLIENT_ID=$AZURE_AD_CLIENT_ID" \
+            "AZURE_CLIENT_SECRET=$AZURE_AD_CLIENT_SECRET" \
+            "AZURE_TENANT_ID=$AZURE_AD_TENANT_ID" \
+            "AZURE_REDIRECT_URI=https://${FUNCTION_APP_NAME}.azurewebsites.net/api/v1/auth/oauth/microsoft/callback" \
         --output none
     
     print_success "Function App configured!"
@@ -571,8 +668,8 @@ setup_secrets() {
     # Generate secure JWT secret
     local jwt_secret=$(openssl rand -hex 32)
     
-    # Set secrets with retry logic
-    local secrets=("jwt-secret:$jwt_secret" "google-client-id:configure-me" "google-client-secret:configure-me" "plaid-client-id:configure-me" "plaid-secret:configure-me")
+    # Set secrets with retry logic - Replace Google OAuth with Microsoft Entra ID
+    local secrets=("jwt-secret:$jwt_secret" "azure-client-id:$AZURE_AD_CLIENT_ID" "azure-client-secret:$AZURE_AD_CLIENT_SECRET" "azure-tenant-id:$AZURE_AD_TENANT_ID" "plaid-client-id:configure-me" "plaid-secret:configure-me")
     
     for secret_pair in "${secrets[@]}"; do
         local secret_name=$(echo "$secret_pair" | cut -d: -f1)
@@ -784,20 +881,26 @@ display_summary() {
     echo "                           NEXT STEPS"
     echo "════════════════════════════════════════════════════════════════"
     echo ""
-    echo "1️⃣  UPDATE CREDENTIALS in Azure Key Vault:"
+    echo "1️⃣  MICROSOFT ENTRA ID LOGIN:"
+    echo "   • Microsoft Entra ID is configured to support BOTH:"
+    echo "     - Personal Microsoft accounts (outlook.com, hotmail.com, live.com)"
+    echo "     - Organizational Azure AD accounts"
+    echo "   • Login at: $STATIC_WEB_APP_URL"
+    echo ""
+    echo "2️⃣  UPDATE CREDENTIALS in Azure Key Vault:"
     echo "   • Go to: https://portal.azure.com/#@/resource/subscriptions/$(az account show --query id --output tsv)/resourceGroups/$RESOURCE_GROUP_NAME/providers/Microsoft.KeyVault/vaults/$KEY_VAULT_NAME"
-    echo "   • Update: google-client-id, google-client-secret"
+    echo "   • Microsoft Entra ID credentials are automatically configured!"
     echo "   • Update: plaid-client-id, plaid-secret"
     echo ""
-    echo "2️⃣  DEPLOY FRONTEND to Static Web App:"
+    echo "3️⃣  DEPLOY FRONTEND to Static Web App:"
     echo "   • Connect GitHub repository in Azure portal"
     echo "   • Or upload build files from frontend/dist/"
     echo ""
-    echo "3️⃣  TEST YOUR APPLICATION:"
+    echo "4️⃣  TEST YOUR APPLICATION:"
     echo "   • Backend health: curl $FUNCTION_APP_URL/health"
     echo "   • Frontend: Visit $STATIC_WEB_APP_URL"
     echo ""
-    echo "4️⃣  MONITOR & MANAGE:"
+    echo "5️⃣  MONITOR & MANAGE:"
     echo "   • Azure portal: https://portal.azure.com"
     echo "   • Application Insights: Monitor performance and errors"
     echo "   • Key Vault: Manage secrets securely"
@@ -881,6 +984,7 @@ main() {
     CURRENT_STEP="Cosmos DB"; create_cosmos_db
     CURRENT_STEP="Application Insights"; create_app_insights
     CURRENT_STEP="Key Vault"; create_key_vault
+    CURRENT_STEP="Azure AD App Registration"; create_azure_ad_app
     CURRENT_STEP="Function App"; create_function_app
     CURRENT_STEP="Static Web App"; create_static_web_app
     CURRENT_STEP="Function Configuration"; configure_function_app

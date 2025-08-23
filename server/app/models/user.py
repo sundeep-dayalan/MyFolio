@@ -71,20 +71,16 @@ class Token(BaseModel):
     expires_in: int
 
 
-class GoogleTokenData(BaseModel):
-    """Google OAuth token data."""
 
-    credential: str
+class MicrosoftUserInfo(BaseModel):
+    """Microsoft Entra ID user information from JWT."""
 
-
-class GoogleUserInfo(BaseModel):
-    """Google user information from JWT."""
-
-    sub: str  # Google user ID
+    oid: Optional[str] = None  # Object ID (unique user identifier)
+    sub: str  # Subject (unique user identifier, alternative to oid)
+    tid: Optional[str] = None  # Tenant ID
     email: EmailStr
     name: str
     given_name: Optional[str] = None
     family_name: Optional[str] = None
-    picture: Optional[str] = None
-    exp: int  # Expiration time
-    iat: int  # Issued at time
+    exp: Optional[int] = None  # Expiration time
+    iat: Optional[int] = None  # Issued at time

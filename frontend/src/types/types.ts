@@ -51,3 +51,24 @@ export interface OAuthStatusResponse {
   redirect_uri: string;
   available_flows: string[];
 }
+
+// Microsoft OAuth types
+export interface MicrosoftUser {
+  oid?: string;
+  sub: string;
+  tid?: string;
+  email: string;
+  name: string;
+  given_name?: string;
+  family_name?: string;
+  exp?: number;
+  iat?: number;
+}
+
+export interface MicrosoftOAuthStatusResponse {
+  microsoft_oauth_enabled: boolean;
+  redirect_uri: string;
+  frontend_url: string;
+  tenant_id: string;
+  available_flows: string[];
+}
