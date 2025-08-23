@@ -4,9 +4,8 @@ Application dependencies.
 
 from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from firebase_admin import firestore
 
-from .database import firebase_client
+from .database import cosmos_client
 from .exceptions import DatabaseConnectionError, AuthenticationError
 from .services.user_service import UserService
 from .services.auth_service import AuthService
@@ -14,18 +13,16 @@ from .services.auth_service import AuthService
 security = HTTPBearer(auto_error=False)
 
 
-async def get_firestore_client() -> firestore.Client:
-    """Get Firestore client dependency."""
-    if not firebase_client.is_connected:
-        raise DatabaseConnectionError("Firestore client not initialized")
-    return firebase_client.db
+async def get_cosmos_client():
+    """Get CosmosDB client dependency."""
+    if not cosmos_client.is_connected:
+        raise DatabaseConnectionError("CosmosDB client not initialized")
+    return cosmos_client
 
 
-def get_user_service(
-    db: firestore.Client = Depends(get_firestore_client),
-) -> UserService:
+def get_user_service() -> UserService:
     """Get user service dependency."""
-    return UserService(db)
+    return UserService()
 
 
 def get_auth_service(
@@ -85,3 +82,11 @@ async def get_current_user(
         )
 
     return user
+
+
+# Convenience functions for getting services
+def get_plaid_service():
+    """Get Plaid service instance."""
+    from .services.plaid_service import PlaidService
+
+    return PlaidService()

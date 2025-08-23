@@ -15,7 +15,7 @@ __all__ = [
     "get_logger",
     "setup_logging",
     "verify_password",
-    "get_password_hash", 
+    "get_password_hash",
     "create_access_token",
     "verify_token",
     "sanitize_input",

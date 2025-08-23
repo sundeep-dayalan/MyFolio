@@ -16,7 +16,8 @@ NC='\033[0m' # No Color
 
 # Configuration
 PROJECT_NAME="sage-financial-app"
-LOCATION="East US"
+LOCATION="Central US"
+CONSUMPTION_LOCATION="centralus"
 ENVIRONMENT="prod"
 UNIQUE_SUFFIX=$(date +%s | tail -c 6)
 RESOURCE_GROUP_NAME="${PROJECT_NAME}-rg-${UNIQUE_SUFFIX}"
@@ -214,16 +215,14 @@ discover_existing_resources() {
                     echo "  ✅ Found Cosmos DB: $COSMOS_NAME"
                 fi
                 ;;
-            "Microsoft.Web/serverfarms")
-                if [[ "$name" == *"sage"* ]] || [[ "$name" == *"plan"* ]]; then
-                    APP_SERVICE_PLAN="$name"
-                    echo "  ✅ Found App Service Plan: $APP_SERVICE_PLAN"
-                fi
-                ;;
             "Microsoft.Web/sites")
                 if [[ "$name" == *"sage"* ]] && [[ "$name" == *"api"* ]]; then
-                    FUNCTION_APP_NAME="$name"
-                    echo "  ✅ Found Function App: $FUNCTION_APP_NAME"
+                    # Check if it's a function app or regular web app
+                    local site_kind=$(az resource show --resource-group "$RESOURCE_GROUP_NAME" --name "$name" --resource-type "Microsoft.Web/sites" --query "kind" -o tsv 2>/dev/null)
+                    if [[ "$site_kind" == *"functionapp"* ]]; then
+                        FUNCTION_APP_NAME="$name"
+                        echo "  ✅ Found Function App: $FUNCTION_APP_NAME"
+                    fi
                 elif [[ "$name" == *"sage"* ]] && [[ "$name" == *"web"* ]]; then
                     STATIC_WEB_APP_NAME="$name"
                     echo "  ✅ Found Static Web App: $STATIC_WEB_APP_NAME"
@@ -248,7 +247,6 @@ discover_existing_resources() {
     echo "📋 Resource Discovery Summary:"
     echo "  Storage Account: ${STORAGE_NAME:-❌ Not found}"
     echo "  Cosmos DB: ${COSMOS_NAME:-❌ Not found}"
-    echo "  App Service Plan: ${APP_SERVICE_PLAN:-❌ Not found}"
     echo "  Function App: ${FUNCTION_APP_NAME:-❌ Not found}"
     echo "  Static Web App: ${STATIC_WEB_APP_NAME:-❌ Not found}"
     echo "  Key Vault: ${KEY_VAULT_NAME:-❌ Not found}"
@@ -262,7 +260,6 @@ discover_existing_resources() {
         
         [ -z "$STORAGE_NAME" ] && STORAGE_NAME="sage${UNIQUE_SUFFIX}storage"
         [ -z "$COSMOS_NAME" ] && COSMOS_NAME="sage-${UNIQUE_SUFFIX}-cosmos"
-        [ -z "$APP_SERVICE_PLAN" ] && APP_SERVICE_PLAN="sage-${UNIQUE_SUFFIX}-plan"
         [ -z "$FUNCTION_APP_NAME" ] && FUNCTION_APP_NAME="sage-${UNIQUE_SUFFIX}-api"
         [ -z "$KEY_VAULT_NAME" ] && KEY_VAULT_NAME="sage-${UNIQUE_SUFFIX}-kv"
         [ -z "$STATIC_WEB_APP_NAME" ] && STATIC_WEB_APP_NAME="sage-${UNIQUE_SUFFIX}-web"
@@ -461,9 +458,9 @@ create_key_vault() {
     print_success "Key Vault permissions configured!"
 }
 
-# Step 7: Create Function App
+# Step 7: Create Azure Function App
 create_function_app() {
-    print_header "STEP 7: FUNCTION APP"
+    print_header "STEP 7: AZURE FUNCTIONS"
     
     # Check if Function App already exists
     if az functionapp show --name "$FUNCTION_APP_NAME" --resource-group "$RESOURCE_GROUP_NAME" >/dev/null 2>&1; then
@@ -472,40 +469,54 @@ create_function_app() {
     fi
     
     print_status "Creating Function App: $FUNCTION_APP_NAME"
-    print_warning "Using consumption plan (serverless, pay-per-execution)"
+    print_warning "Using Consumption plan (serverless, pay-per-execution)"
     
-    # Create function app with consumption plan (no separate plan creation needed)
+    # Create Function App with consumption plan (free tier)
     az functionapp create \
-        --name "$FUNCTION_APP_NAME" \
         --resource-group "$RESOURCE_GROUP_NAME" \
-        --consumption-plan-location "$LOCATION" \
-        --storage-account "$STORAGE_NAME" \
+        --consumption-plan-location "$CONSUMPTION_LOCATION" \
         --runtime python \
         --runtime-version 3.11 \
         --functions-version 4 \
+        --name "$FUNCTION_APP_NAME" \
+        --storage-account "$STORAGE_NAME" \
         --os-type Linux \
-        --assign-identity \
-        --tags "project=$PROJECT_NAME" \
-        --output none
+        --tags "project=$PROJECT_NAME"
     
     print_success "Function App created!"
 }
 
-# Step 8: Create Static Web App
+# Step 8: Create Static Web App (only if none exists in resource group)
 create_static_web_app() {
     print_header "STEP 8: STATIC WEB APP"
     
-    print_status "Creating Static Web App: $STATIC_WEB_APP_NAME"
+    # Check if any Static Web App exists in the resource group
+    print_status "Checking for existing Static Web Apps in resource group..."
+    existing_staticwebapps=$(az staticwebapp list --resource-group "$RESOURCE_GROUP_NAME" --query "[].name" -o tsv 2>/dev/null || echo "")
     
-    az staticwebapp create \
-        --name "$STATIC_WEB_APP_NAME" \
-        --resource-group "$RESOURCE_GROUP_NAME" \
-        --location "Central US" \
-        --sku Free \
-        --tags "project=$PROJECT_NAME" \
-        --output none
-    
-    print_success "Static Web App created!"
+    if [ -z "$existing_staticwebapps" ]; then
+        print_status "No existing Static Web App found. Creating new Static Web App: $STATIC_WEB_APP_NAME"
+        
+        az staticwebapp create \
+            --name "$STATIC_WEB_APP_NAME" \
+            --resource-group "$RESOURCE_GROUP_NAME" \
+            --location "Central US" \
+            --sku Free \
+            --tags "project=$PROJECT_NAME" \
+            --output none
+        
+        print_success "Static Web App created: $STATIC_WEB_APP_NAME"
+    else
+        print_warning "Existing Static Web App(s) found in resource group:"
+        echo "$existing_staticwebapps" | while read -r app_name; do
+            echo "  • $app_name"
+        done
+        
+        # Use the first existing Static Web App
+        STATIC_WEB_APP_NAME=$(echo "$existing_staticwebapps" | head -n1)
+        print_warning "Using existing Static Web App: $STATIC_WEB_APP_NAME"
+        print_warning "Skipping creation of new Static Web App."
+    fi
 }
 
 # Step 9: Configure Function App settings
@@ -531,7 +542,7 @@ configure_function_app() {
     
     local key_vault_url="https://${KEY_VAULT_NAME}.vault.azure.net/"
     
-    # Configure app settings
+    # Configure function app settings
     az functionapp config appsettings set \
         --name "$FUNCTION_APP_NAME" \
         --resource-group "$RESOURCE_GROUP_NAME" \
@@ -543,7 +554,7 @@ configure_function_app() {
             "ENVIRONMENT=$ENVIRONMENT" \
             "APPLICATIONINSIGHTS_CONNECTION_STRING=$insights_connection" \
             "FUNCTIONS_WORKER_RUNTIME=python" \
-            "FUNCTIONS_EXTENSION_VERSION=~4" \
+            "PYTHON_ENABLE_GUNICORN_MULTIPROCESSING=1" \
         --output none
     
     print_success "Function App configured!"
@@ -599,31 +610,25 @@ deploy_backend() {
     
     print_status "Deploying Azure Functions backend..."
     
-    cd server-azure
+    cd server
     
-    # Install Azure Functions Core Tools if needed
-    if ! command_exists func; then
-        print_status "Installing Azure Functions Core Tools..."
-        npm install -g azure-functions-core-tools@4 --unsafe-perm true
-    fi
-    
-    # Use zip deployment to avoid compilation issues entirely
+    # Create deployment package
     print_status "Creating deployment package..."
     
     # Create a temporary directory for deployment
-    mkdir -p .deployment
+    # mkdir -p .deployment
     
-    # Copy function files
-    cp -r * .deployment/ 2>/dev/null || true
-    cd .deployment
+    # Copy all server files
+    # cp -r * .deployment/ 2>/dev/null || true
+    # cd .deployment
     
-    # Remove any existing virtual environments
-    rm -rf .venv venv __pycache__ .pytest_cache .git
+    # Remove any existing virtual environments and cache
+    # rm -rf .venv venv __pycache__ .pytest_cache .git *.log
     
     # Create deployment zip
-    print_status "Creating deployment zip..."
-    zip -r ../deployment.zip . -x "*.git*" "*.DS_Store*" "*.pyc" "__pycache__/*" ".venv/*" "venv/*"
-    cd ..
+    # print_status "Creating deployment zip..."
+    # zip -r ../deployment.zip . -x "*.git*" "*.DS_Store*" "*.pyc" "__pycache__/*" ".venv/*" "venv/*" "*.log"
+    # cd ..
     
     # Deploy using zip deployment
     print_status "Deploying via ZIP upload..."
@@ -631,10 +636,7 @@ deploy_backend() {
     local max_retries=2
     
     while [ $retry_count -lt $max_retries ]; do
-        if az functionapp deployment source config-zip \
-            --resource-group "$RESOURCE_GROUP_NAME" \
-            --name "$FUNCTION_APP_NAME" \
-            --src deployment.zip; then
+        if func azure functionapp publish "$FUNCTION_APP_NAME"; then
             print_success "Backend deployed successfully!"
             break
         else
@@ -650,16 +652,18 @@ deploy_backend() {
         fi
     done
     
+    
+
     # Cleanup
-    rm -rf .deployment deployment.zip
+    # rm -rf .deployment deployment.zip
     cd ..
 }
 
-# Step 12: Build frontend
-build_frontend() {
-    print_header "STEP 12: FRONTEND BUILD"
+# Step 12: Build and Deploy frontend to Static Web App (Production)
+deploy_frontend() {
+    print_header "STEP 12: FRONTEND BUILD & PRODUCTION DEPLOYMENT"
     
-    print_status "Building React frontend..."
+    print_status "Building and deploying React frontend to PRODUCTION..."
     
     cd frontend
     
@@ -678,7 +682,7 @@ build_frontend() {
     
     # Create production environment
     cat > .env.production << EOF
-VITE_API_BASE_URL=${function_app_url}/api
+VITE_API_BASE_URL=${function_app_url}/api/v1
 VITE_APP_ENV=production
 VITE_GOOGLE_CLIENT_ID=configure-me
 EOF
@@ -689,12 +693,65 @@ EOF
     
     print_success "Frontend built successfully!"
     
+    # Deploy to Azure Static Web App PRODUCTION using SWA CLI
+    print_status "Deploying to Azure Static Web App PRODUCTION environment..."
+    
+    # Get deployment token
+    local deployment_token=$(az staticwebapp secrets list \
+        --name "$STATIC_WEB_APP_NAME" \
+        --resource-group "$RESOURCE_GROUP_NAME" \
+        --query "properties.apiKey" \
+        --output tsv 2>/dev/null)
+    
+    if [ -z "$deployment_token" ]; then
+        print_error "Could not retrieve deployment token. Please deploy manually."
+        print_warning "Manual deployment steps:"
+        print_warning "1. Get deployment token from Azure Portal"
+        print_warning "2. Run: npx @azure/static-web-apps-cli deploy --deployment-token <token> --app-location ./dist --env production"
+    else
+        # Check if SWA CLI is installed, if not install it
+        if ! command_exists swa; then
+            print_status "Installing Azure Static Web Apps CLI..."
+            npm install -g @azure/static-web-apps-cli
+        fi
+        
+        # Deploy using SWA CLI with PRODUCTION environment
+        print_status "Deploying build files to Static Web App PRODUCTION..."
+        local retry_count=0
+        local max_retries=2
+        
+        while [ $retry_count -lt $max_retries ]; do
+            if npx @azure/static-web-apps-cli deploy \
+                --app-location ./dist \
+                --deployment-token "$deployment_token" \
+                --env production \
+                --verbose; then
+                print_success "Frontend deployed successfully to PRODUCTION environment!"
+                break
+            else
+                ((retry_count++))
+                if [ $retry_count -lt $max_retries ]; then
+                    print_warning "Deployment retry $retry_count/$max_retries"
+                    sleep 15
+                else
+                    print_error "Frontend deployment failed after $max_retries attempts"
+                    print_warning "You can deploy manually using:"
+                    print_warning "npx @azure/static-web-apps-cli deploy --app-location ./dist --deployment-token $deployment_token --env production"
+                fi
+            fi
+        done
+    fi
+    
     cd ..
     
     # Store URLs for final output
     FUNCTION_APP_URL="$function_app_url"
     STATIC_WEB_APP_URL="$static_web_app_url"
+    
+    print_success "Frontend production deployment completed!"
 }
+
+
 
 # Final summary
 display_summary() {
@@ -713,7 +770,7 @@ display_summary() {
     echo "🔗 APPLICATION URLS:"
     echo "   Frontend:  $STATIC_WEB_APP_URL"
     echo "   Backend:   $FUNCTION_APP_URL"
-    echo "   Health:    $FUNCTION_APP_URL/api/health"
+    echo "   Health:    $FUNCTION_APP_URL/health"
     echo ""
     echo "🎯 AZURE RESOURCES:"
     echo "   Storage:      $STORAGE_NAME"
@@ -737,7 +794,7 @@ display_summary() {
     echo "   • Or upload build files from frontend/dist/"
     echo ""
     echo "3️⃣  TEST YOUR APPLICATION:"
-    echo "   • Backend health: curl $FUNCTION_APP_URL/api/health"
+    echo "   • Backend health: curl $FUNCTION_APP_URL/health"
     echo "   • Frontend: Visit $STATIC_WEB_APP_URL"
     echo ""
     echo "4️⃣  MONITOR & MANAGE:"
@@ -746,6 +803,49 @@ display_summary() {
     echo "   • Key Vault: Manage secrets securely"
     echo ""
     print_warning "⏱️  Services may take 2-3 minutes to be fully available"
+    
+    # Get deployment secrets for GitHub Actions
+    print_header "🔐 GITHUB ACTIONS SECRETS"
+    echo ""
+    echo "Add these secrets to your GitHub repository for automated deployment:"
+    echo ""
+    
+    # Get Static Web App deployment token
+    echo "📋 STATIC WEB APP DEPLOYMENT TOKEN:"
+    echo "   Secret Name: AZURE_STATIC_WEB_APPS_API_TOKEN"
+    echo "   Secret Value:"
+    local swa_token=$(az staticwebapp secrets list --name "$STATIC_WEB_APP_NAME" --resource-group "$RESOURCE_GROUP_NAME" --query "properties.apiKey" --output tsv 2>/dev/null || echo "")
+    if [ -n "$swa_token" ]; then
+        echo "   $swa_token"
+    else
+        print_warning "   Unable to retrieve automatically. Get from Azure Portal:"
+        echo "   https://portal.azure.com/#@/resource/subscriptions/$(az account show --query id --output tsv)/resourceGroups/$RESOURCE_GROUP_NAME/providers/Microsoft.Web/staticSites/$STATIC_WEB_APP_NAME"
+    fi
+    echo ""
+    
+    # Get Function App publish profile
+    echo "📋 FUNCTION APP PUBLISH PROFILE:"
+    echo "   Secret Name: AZURE_FUNCTIONAPP_PUBLISH_PROFILE"
+    echo "   Secret Value (XML content):"
+    local publish_profile=$(az functionapp deployment list-publishing-profiles --name "$FUNCTION_APP_NAME" --resource-group "$RESOURCE_GROUP_NAME" --xml 2>/dev/null || echo "")
+    if [ -n "$publish_profile" ]; then
+        echo "   $publish_profile"
+    else
+        print_warning "   Unable to retrieve automatically. Get from Azure Portal:"
+        echo "   https://portal.azure.com/#@/resource/subscriptions/$(az account show --query id --output tsv)/resourceGroups/$RESOURCE_GROUP_NAME/providers/Microsoft.Web/sites/$FUNCTION_APP_NAME"
+        echo "   Go to 'Get publish profile' button in the overview section"
+    fi
+    echo ""
+    
+    echo "════════════════════════════════════════════════════════════════"
+    echo "📝 TO ADD SECRETS TO GITHUB:"
+    echo "1. Go to your GitHub repository"
+    echo "2. Settings → Secrets and variables → Actions"
+    echo "3. Click 'New repository secret'"
+    echo "4. Add both secrets above"
+    echo "════════════════════════════════════════════════════════════════"
+    echo ""
+    
     print_success "🎉 Your Sage Financial Management App is ready!"
     echo ""
 }
@@ -786,7 +886,7 @@ main() {
     CURRENT_STEP="Function Configuration"; configure_function_app
     CURRENT_STEP="Key Vault Secrets"; setup_secrets
     CURRENT_STEP="Backend Deployment"; deploy_backend
-    CURRENT_STEP="Frontend Build"; build_frontend
+    CURRENT_STEP="Frontend Deployment"; deploy_frontend
     
     display_summary
 }
