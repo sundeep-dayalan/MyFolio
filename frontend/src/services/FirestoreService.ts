@@ -89,7 +89,6 @@ export interface Transaction {
   personal_finance_category_icon_url?: string;
 }
 
-
 class CosmosDBServiceClass {
   private async makeRequest<T>(endpoint: string, options?: RequestInit): Promise<T> {
     const response = await fetch(`${API_BASE}${endpoint}`, {

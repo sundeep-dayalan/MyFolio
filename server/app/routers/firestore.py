@@ -1,4 +1,3 @@
-
 """
 Plaid-based transaction routes for direct database access.
 """
@@ -13,7 +12,6 @@ from ..utils.logger import get_logger
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/plaid", tags=["plaid"])
-
 
 
 class PaginatedTransactionsResponse(BaseModel):
@@ -126,5 +124,3 @@ def get_transactions_count(
             f"Failed to get transaction count for user {user_id}: {e}", exc_info=True
         )
         raise HTTPException(status_code=500, detail=str(e))
-
-
