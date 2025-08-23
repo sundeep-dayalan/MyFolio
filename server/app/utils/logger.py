@@ -46,12 +46,12 @@ def get_logging_config() -> Dict[str, Any]:
             },
         },
     }
-    
+
     # Add file handler if log file is specified
     if settings.log_file:
         log_file_path = Path(settings.log_file)
         log_file_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         config["handlers"]["file"] = {
             "class": "logging.handlers.RotatingFileHandler",
             "level": settings.log_level,
@@ -60,11 +60,11 @@ def get_logging_config() -> Dict[str, Any]:
             "maxBytes": 10485760,  # 10MB
             "backupCount": 5,
         }
-        
+
         # Add file handler to all loggers
         for logger_config in config["loggers"].values():
             logger_config["handlers"].append("file")
-    
+
     return config
 
 
@@ -72,10 +72,9 @@ def setup_logging() -> None:
     """Setup application logging."""
     logging_config = get_logging_config()
     logging.config.dictConfig(logging_config)
-    
+
     # Set third-party loggers to WARNING to reduce noise
     logging.getLogger("google").setLevel(logging.WARNING)
-    logging.getLogger("firebase_admin").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
 
 

@@ -16,9 +16,6 @@ google-cloud-secret-manager>=2.16.0,<3.0.0
 # HTTP client
 httpx==0.25.2
 
-# Firebase
-firebase-admin==6.2.0
-google-cloud-firestore>=2.13.0,<3.0.0
 
 # Data validation
 pydantic==2.5.0
@@ -40,5 +37,8 @@ plaid-python==35.0.0
 
 # Cryptography for token encryption
 cryptography>=41.0.0,<42.0.0
+
+# Azure Cosmos DB
+azure-cosmos>=4.5.1,<5.0.0
 
 azure-functions

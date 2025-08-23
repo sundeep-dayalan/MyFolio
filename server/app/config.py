@@ -15,9 +15,7 @@ class Settings(BaseSettings):
     """Application settings."""
 
     # API Settings
-    project_name: str = Field(
-        default="Sage API", env="PROJECT_NAME"
-    )
+    project_name: str = Field(default="Sage API", env="PROJECT_NAME")
     version: str = Field(default="2.0.0", env="VERSION")
     api_v1_prefix: str = Field(default="/api/v1", env="API_V1_PREFIX")
     debug: bool = Field(default=False, env="DEBUG")
@@ -50,14 +48,10 @@ class Settings(BaseSettings):
             if origin.strip()
         ]
 
-    # Firebase Configuration
-    firebase_project_id: str = Field(default="test-project", env="FIREBASE_PROJECT_ID")
-    firebase_credentials_path: Optional[str] = Field(
-        default=None, env="FIREBASE_CREDENTIALS_PATH"
-    )
-    firebase_database_id: str = Field(
-        default="sage", env="FIREBASE_DATABASE_ID"
-    )
+    # CosmosDB Configuration
+    cosmos_db_endpoint: str = Field(..., env="COSMOS_DB_ENDPOINT")
+    cosmos_db_key: str = Field(..., env="COSMOS_DB_KEY")
+    cosmos_db_name: str = Field(default="sage-db", env="COSMOS_DB_NAME")
 
     # Google OAuth Configuration
     google_client_id: str = Field(default="test-client-id", env="GOOGLE_CLIENT_ID")
@@ -95,7 +89,9 @@ class Settings(BaseSettings):
             # Override with secrets from Secret Manager if available
             secret_overrides = {
                 "SECRET_KEY": secret_manager.get_secret("SECRET_KEY"),
-                "FIREBASE_PROJECT_ID": secret_manager.get_secret("FIREBASE_PROJECT_ID"),
+                "COSMOS_DB_ENDPOINT": secret_manager.get_secret("COSMOS_DB_ENDPOINT"),
+                "COSMOS_DB_KEY": secret_manager.get_secret("COSMOS_DB_KEY"),
+                "COSMOS_DB_NAME": secret_manager.get_secret("COSMOS_DB_NAME"),
                 "GOOGLE_CLIENT_ID": secret_manager.get_secret("GOOGLE_CLIENT_ID"),
                 "GOOGLE_CLIENT_SECRET": secret_manager.get_secret(
                     "GOOGLE_CLIENT_SECRET"
@@ -104,11 +100,6 @@ class Settings(BaseSettings):
                 "ALLOWED_ORIGINS": secret_manager.get_secret("ALLOWED_ORIGINS"),
                 "FRONTEND_URL": secret_manager.get_secret("FRONTEND_URL"),
             }
-
-            # Set up Firebase credentials path for Cloud Run
-            firebase_creds_path = secret_manager.setup_firebase_credentials()
-            if firebase_creds_path:
-                secret_overrides["FIREBASE_CREDENTIALS_PATH"] = firebase_creds_path
 
             # Update environment with secrets
             for key, value in secret_overrides.items():

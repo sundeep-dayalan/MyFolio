@@ -21,7 +21,7 @@ from fastapi import FastAPI
 from starlette.middleware.sessions import SessionMiddleware
 
 from .config import settings
-from .database import firebase_client
+from .database import cosmos_client
 from .middleware import (
     add_cors_middleware,
     add_exception_handlers,
@@ -30,7 +30,7 @@ from .middleware import (
 )
 from .routers import plaid_router
 from .routers.oauth import router as oauth_router
-from .routers.firestore import router as firestore_router
+from .routers.firestore import router as cosmosdb_router, firestore_router
 from .utils.logger import setup_logging, get_logger
 
 # Setup logging
@@ -44,19 +44,19 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting Sage API...")
 
-    # Skip Firebase connection in test environment
+    # Skip CosmosDB connection in test environment
     if settings.environment != "test":
         try:
-            await firebase_client.connect()
+            await cosmos_client.connect()
             logger.info("Application startup complete")
 
         except Exception as e:
-            logger.warning(f"Firebase connection failed: {e}")
+            logger.warning(f"CosmosDB connection failed: {e}")
             logger.info(
                 "Starting application in offline mode - some features may not work"
             )
     else:
-        logger.info("Skipping Firebase connection in test environment")
+        logger.info("Skipping CosmosDB connection in test environment")
 
     yield
 
@@ -65,11 +65,10 @@ async def lifespan(app: FastAPI):
 
     if settings.environment != "test":
         try:
-            await firebase_client.disconnect()
-
-        except Exception as e:
-            logger.warning(f"Error during Firebase disconnection: {e}")
+            await cosmos_client.disconnect()
             logger.info("Application shutdown complete")
+        except Exception as e:
+            logger.warning(f"Error during CosmosDB disconnection: {e}")
         except Exception as e:
             logger.error(f"Error during shutdown: {e}")
 
@@ -109,7 +108,9 @@ def create_app() -> FastAPI:
     app.include_router(oauth_router, prefix=settings.api_v1_prefix)
     # Plaid integration endpoints
     app.include_router(plaid_router, prefix=settings.api_v1_prefix)
-    # Firestore direct access endpoints
+    # CosmosDB direct access endpoints
+    app.include_router(cosmosdb_router, prefix=settings.api_v1_prefix)
+    # Firestore compatibility endpoints (redirect to CosmosDB)
     app.include_router(firestore_router, prefix=settings.api_v1_prefix)
 
     # Health check endpoint
@@ -117,9 +118,9 @@ def create_app() -> FastAPI:
     async def health_check():
         """Health check endpoint for Cloud Run."""
         try:
-            # Test Firebase connection
-            firebase_status = (
-                "connected" if firebase_client.is_connected else "disconnected"
+            # Test CosmosDB connection
+            cosmos_status = (
+                "connected" if cosmos_client.is_connected else "disconnected"
             )
 
             return {
@@ -127,8 +128,8 @@ def create_app() -> FastAPI:
                 "service": settings.project_name,
                 "version": settings.version,
                 "environment": settings.environment,
-                "firebase": firebase_status,
-                "firebase_connected": firebase_client.is_connected,
+                "cosmos_db": cosmos_status,
+                "cosmos_connected": cosmos_client.is_connected,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
         except Exception as e:

@@ -64,24 +64,27 @@ def exchange_public_token(
 ):
     """Exchange public token for an access token and store securely."""
     try:
-        result = plaid_service.exchange_public_token(request.public_token, user_id)
+        result = plaid_service.exchange_public_token(user_id, request.public_token)
+
+        # Convert to dict for response
+        result_dict = result.dict() if hasattr(result, 'dict') else result
 
         # Add the long-running sync as a background task
-        # This will run after the response has been sent to the user.
-        if result.get("success") and result.get("access_token"):
+        # The sync method will get the encrypted token from CosmosDB storage
+        if result_dict.get("item_id"):
             logger.info(
-                f"Scheduling background task for initial transaction sync for item {result['item_id']}"
+                f"Scheduling background task for initial transaction sync for item {result_dict['item_id']}"
             )
             background_tasks.add_task(
-                plaid_service.sync_all_transactions_for_item,
+                plaid_service._sync_transactions_for_stored_item,
                 user_id=user_id,
-                item_id=result["item_id"],
-                access_token=result["access_token"],
+                item_id=result_dict["item_id"]
             )
 
-        # We don't want to return the sensitive access token to the client
-        del result["access_token"]
-        return result
+        # Remove sensitive data from response
+        if "access_token" in result_dict:
+            del result_dict["access_token"]
+        return result_dict
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -93,10 +96,11 @@ def get_accounts(
 ):
     """Fetch all account balances for the current user from stored data (fast, no API cost)."""
     try:
-        result = plaid_service.get_stored_accounts_balance(user_id)
+        result = plaid_service.get_accounts_with_balances(user_id)
         return result
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        # Return empty accounts if no tokens found
+        return {"accounts": [], "total_balance": 0, "message": f"No connected accounts: {str(e)}"}
 
 
 @router.post("/accounts/refresh")
@@ -106,7 +110,7 @@ def refresh_accounts(
 ):
     """Force refresh account balances from Plaid API and update stored data."""
     try:
-        result = plaid_service.refresh_accounts_balance(user_id)
+        result = plaid_service.get_accounts_with_balances(user_id, use_cached_balance=False)
         return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -119,8 +123,9 @@ def get_accounts_data_info(
 ):
     """Get information about stored account data (last updated, age, etc.)."""
     try:
-        result = plaid_service.get_data_info(user_id)
-        return result
+        # Return basic info about user's tokens
+        tokens = plaid_service.get_user_access_tokens(user_id)
+        return {"tokens_count": len(tokens), "user_id": user_id}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -132,8 +137,8 @@ def get_balance_legacy(
 ):
     """Legacy endpoint - redirects to /accounts for backward compatibility."""
     try:
-        result = plaid_service.get_accounts_balance(user_id)
-        return {"accounts": result["accounts"]}
+        result = plaid_service.get_accounts_with_balances(user_id)
+        return {"accounts": result.get("accounts", [])}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -145,8 +150,8 @@ def get_plaid_items(
 ):
     """Get summary of user's connected Plaid items (institutions)."""
     try:
-        result = plaid_service.get_user_plaid_items(user_id)
-        return {"items": result}
+        items = plaid_service.get_user_plaid_items(user_id)
+        return {"items": items}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -159,7 +164,7 @@ def revoke_plaid_item(
 ):
     """Revoke access to a specific Plaid item."""
     try:
-        success = plaid_service.revoke_user_token(user_id, item_id)
+        success = plaid_service.revoke_item_access(user_id, item_id)
         if success:
             return {"message": "Item revoked successfully"}
         else:
@@ -175,10 +180,10 @@ def revoke_all_tokens(
 ):
     """Revoke all tokens for the current user."""
     try:
-        count = plaid_service.revoke_all_user_tokens(user_id)
+        success = plaid_service.remove_all_user_data(user_id)
         return {
-            "message": f"Revoked {count} tokens successfully",
-            "revoked_count": count,
+            "message": "All user data removed successfully" if success else "Failed to remove user data",
+            "success": success,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -229,7 +234,7 @@ def refresh_transactions(
     """
     try:
         result = plaid_service.refresh_transactions(user_id, item_id)
-        return result
+        return RefreshTransactionsResponse(**result)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -249,6 +254,6 @@ def force_refresh_transactions(
     """
     try:
         result = plaid_service.force_refresh_transactions(user_id, item_id)
-        return result
+        return ForceRefreshTransactionsResponse(**result)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))

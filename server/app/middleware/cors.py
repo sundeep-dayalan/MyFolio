@@ -8,7 +8,7 @@ from ..config import settings
 
 def add_cors_middleware(app: FastAPI) -> None:
     """Add CORS middleware to the application."""
-    
+
     # Development CORS settings
     if settings.environment == "development":
         origins = [
@@ -21,7 +21,7 @@ def add_cors_middleware(app: FastAPI) -> None:
     else:
         # Production CORS settings - use allowed_origins from settings
         origins = settings.allowed_origins_list
-    
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=origins,

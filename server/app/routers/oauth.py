@@ -11,46 +11,48 @@ from ..services.auth_service import AuthService
 from ..services.user_service import UserService
 from ..exceptions import AuthenticationError, ValidationError
 from ..utils.logger import get_logger
-from ..database import firebase_client
+from ..database import cosmos_client
 from ..config import settings
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/auth/oauth", tags=["OAuth Authentication"])
 
 
-async def ensure_firebase_connected():
-    """Ensure Firebase is connected, initializing if necessary."""
-    if not firebase_client.is_connected:
-        logger.info("Firebase not connected, initializing...")
-        await firebase_client.connect()
+async def ensure_cosmos_connected():
+    """Ensure CosmosDB is connected, initializing if necessary."""
+    if not cosmos_client.is_connected:
+        logger.info("CosmosDB not connected, initializing...")
+        await cosmos_client.connect()
 
 
 @router.get("/google")
 async def google_oauth_login(
     request: Request,
-    state: Optional[str] = Query(None, description="Optional state parameter for security")
+    state: Optional[str] = Query(
+        None, description="Optional state parameter for security"
+    ),
 ):
     """
     Initiate Google OAuth 2.0 authentication flow.
     Redirects user to Google's authorization server.
     """
     try:
-        # Ensure Firebase is connected
-        await ensure_firebase_connected()
-        
+        # Ensure CosmosDB is connected
+        await ensure_cosmos_connected()
+
         # Initialize services
-        user_service = UserService(firebase_client.db)
+        user_service = UserService()
         auth_service = AuthService(user_service)
-        
+
         # Generate authorization URL
         auth_url, oauth_state = auth_service.generate_google_auth_url(state)
-        
+
         logger.info(f"Generated OAuth state: {oauth_state}")
         logger.info(f"Redirecting to Google OAuth URL: {auth_url}")
-        
+
         # Redirect to Google's authorization server
         return RedirectResponse(url=auth_url, status_code=302)
-        
+
     except Exception as e:
         logger.error(f"Error initiating Google OAuth: {str(e)}")
         raise HTTPException(status_code=500, detail="OAuth initiation failed")
@@ -61,7 +63,7 @@ async def google_oauth_callback(
     request: Request,
     code: Optional[str] = Query(None, description="Authorization code from Google"),
     state: Optional[str] = Query(None, description="State parameter for security"),
-    error: Optional[str] = Query(None, description="Error from Google OAuth")
+    error: Optional[str] = Query(None, description="Error from Google OAuth"),
 ):
     """
     Handle Google OAuth 2.0 callback.
@@ -73,37 +75,37 @@ async def google_oauth_callback(
             logger.warning(f"OAuth error received: {error}")
             react_error_url = f"{settings.frontend_url}/auth/callback?success=false&error={urllib.parse.quote(f'OAuth error: {error}')}"
             return RedirectResponse(url=react_error_url, status_code=302)
-        
+
         # Validate required parameters
         if not code:
             logger.error("Authorization code is missing")
             react_error_url = f"{settings.frontend_url}/auth/callback?success=false&error={urllib.parse.quote('Authorization code is required')}"
             return RedirectResponse(url=react_error_url, status_code=302)
-        
+
         if not state:
             logger.warning("State parameter is missing - continuing anyway")
-        
+
         logger.info(f"Processing OAuth callback - code: {code[:10]}..., state: {state}")
         logger.info(f"Frontend URL for redirect: '{settings.frontend_url}'")
-        
-        # Ensure Firebase is connected
-        await ensure_firebase_connected()
-        
+
+        # Ensure CosmosDB is connected
+        await ensure_cosmos_connected()
+
         # Initialize services
-        user_service = UserService(firebase_client.db)
+        user_service = UserService()
         auth_service = AuthService(user_service)
-        
+
         # Process OAuth callback
         user, token = await auth_service.process_google_oauth_callback(code, state)
-        
+
         # Redirect back to React app with success parameters
         user_data = urllib.parse.quote(user.json())
         react_callback_url = f"{settings.frontend_url}/auth/callback?success=true&token={token.access_token}&user={user_data}"
-        
+
         logger.info(f"OAuth callback successful for user: {user.id}")
         logger.info(f"Redirecting to: {react_callback_url}")
         return RedirectResponse(url=react_callback_url, status_code=302)
-        
+
     except AuthenticationError as e:
         logger.error(f"Authentication error in OAuth callback: {str(e)}")
         # Redirect to React app with error
@@ -122,29 +124,26 @@ async def google_oauth_callback(
 
 
 @router.post("/google/revoke")
-async def revoke_google_token(
-    request: Request,
-    token: str
-):
+async def revoke_google_token(request: Request, token: str):
     """
     Revoke Google OAuth token.
     """
     try:
-        # Ensure Firebase is connected
-        await ensure_firebase_connected()
-        
+        # Ensure CosmosDB is connected
+        await ensure_cosmos_connected()
+
         # Initialize services
-        user_service = UserService(firebase_client.db)
+        user_service = UserService()
         auth_service = AuthService(user_service)
-        
+
         # Revoke the token
         success = await auth_service.google_oauth.revoke_token(token)
-        
+
         if success:
             return {"message": "Token revoked successfully"}
         else:
             return {"message": "Token revocation may have failed", "warning": True}
-            
+
     except Exception as e:
         logger.error(f"Error revoking token: {str(e)}")
         raise HTTPException(status_code=500, detail="Token revocation failed")
@@ -156,8 +155,10 @@ async def oauth_status():
     Get OAuth configuration status.
     """
     return {
-        "google_oauth_enabled": bool(settings.google_client_id and settings.google_client_secret),
+        "google_oauth_enabled": bool(
+            settings.google_client_id and settings.google_client_secret
+        ),
         "redirect_uri": settings.google_redirect_uri,
         "frontend_url": settings.frontend_url,
-        "available_flows": ["authorization_code"]
+        "available_flows": ["authorization_code"],
     }
