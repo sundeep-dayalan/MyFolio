@@ -1,6 +1,7 @@
 """
 Security utilities.
 """
+
 from datetime import datetime, timedelta
 from typing import Any, Union, Optional
 from jose import JWTError, jwt
