@@ -12,7 +12,8 @@ on:
   workflow_dispatch:
 
 env:
-  AZURE_FUNCTIONAPP_NAME: sage-11052-api
+  AZURE_FUNCTIONAPP_PACKAGE_PATH: './server'
+  PYTHON_VERSION: '3.11'
   AZURE_FUNCTIONAPP_PACKAGE_PATH: './server'
   PYTHON_VERSION: '3.11'
 
@@ -29,6 +30,13 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Extract AZURE_FUNCTIONAPP_NAME from publish profile
+        run: |
+          echo "${{ secrets.AZURE_FUNCTIONAPP_PUBLISH_PROFILE }}" > publishProfile.xml
+          AZURE_FUNCTIONAPP_NAME=$(xmllint --xpath "string(//publishProfile[@publishMethod='MSDeploy']/@msdeploySite)" publishProfile.xml)
+          echo "AZURE_FUNCTIONAPP_NAME=$AZURE_FUNCTIONAPP_NAME" >> $GITHUB_ENV
+        shell: bash
 
       - name: Install dependencies
         run: |
@@ -49,7 +57,7 @@ jobs:
         uses: Azure/functions-action@v1
         id: deploy-to-function-app
         with:
-          app-name: ${{ env.AZURE_FUNCTIONAPP_NAME }}
+            app-name: ${{ env.AZURE_FUNCTIONAPP_NAME }}
           package: './backend-deployment.zip'
           publish-profile: ${{ secrets.AZURE_FUNCTIONAPP_PUBLISH_PROFILE }}
 
@@ -57,7 +65,7 @@ jobs:
         run: |
           echo "Waiting 60 seconds for deployment to stabilize..."
           sleep 60
-          BASE_URL="https://${{ env.AZURE_FUNCTIONAPP_NAME }}.azurewebsites.net"
+            BASE_URL="https://${{ env.AZURE_FUNCTIONAPP_NAME }}.azurewebsites.net"
           echo "Testing endpoints..."
           curl -v "$BASE_URL/health" || echo "Health endpoint failed"
           curl -v "$BASE_URL/docs" || echo "Docs endpoint failed"
