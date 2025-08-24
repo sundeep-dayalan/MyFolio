@@ -44,7 +44,7 @@ jobs:
         run: npm run build
         working-directory: ${{ env.APP_LOCATION }}
         env:
-          VITE_API_BASE_URL: https://sage-24293-api.azurewebsites.net/api
+          VITE_API_BASE_URL: ${{ secrets.AZURE_FUNCTION_APP_URL }}/api
           VITE_APP_ENV: production
           NODE_ENV: production
 

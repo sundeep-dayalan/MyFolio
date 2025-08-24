@@ -15,11 +15,11 @@ CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # Configuration
-PROJECT_NAME="sage-financial-app"
+PROJECT_NAME="sage"
 LOCATION="Central US"
 CONSUMPTION_LOCATION="centralus"
 ENVIRONMENT="prod"
-UNIQUE_SUFFIX=$(date +%s | tail -c 6)
+UNIQUE_SUFFIX="$(date +%s | tail -c 6)4121997"
 RESOURCE_GROUP_NAME="${PROJECT_NAME}-rg-${UNIQUE_SUFFIX}"
 
 # Resource names with proper conventions
@@ -478,7 +478,7 @@ create_key_vault() {
     FUNCTION_APP_PRINCIPAL_ID=""
 }
 
-# Step 6.5: Create Azure AD App Registration
+# Step 6.5: Create or Update Azure AD App Registration
 create_azure_ad_app() {
     print_header "STEP 6.5: AZURE AD APP REGISTRATION"
     
@@ -489,7 +489,7 @@ create_azure_ad_app() {
     
     # Check if any Sage app registration already exists (search by pattern)
     print_status "Searching for existing Sage app registrations..."
-    local existing_apps=$(az ad app list --query "[?contains(displayName, 'sage-') && contains(displayName, '-app')].{appId:appId,displayName:displayName}" -o tsv 2>/dev/null)
+    local existing_apps=$(az ad app list --query "[?contains(displayName, 'sage-') && contains(displayName, '-app') && contains(displayName, '4121997')].{appId:appId,displayName:displayName}" -o tsv 2>/dev/null)
     
     if [ -n "$existing_apps" ]; then
         # Parse the first existing app
@@ -528,7 +528,7 @@ create_azure_ad_app() {
             --sign-in-audience "AzureADandPersonalMicrosoftAccount" \
             --query appId \
             --output tsv)
-        
+            
         # Wait a moment for the app to be created
         sleep 2
         
@@ -556,10 +556,10 @@ create_azure_ad_app() {
     
     while [ $retry_count -lt $max_retries ]; do
         if AZURE_AD_CLIENT_SECRET=$(az ad app credential reset \
-            --id "$AZURE_AD_CLIENT_ID" \
-            --display-name "$secret_name" \
-            --years 2 \
-            --query password \
+        --id "$AZURE_AD_CLIENT_ID" \
+        --display-name "$secret_name" \
+        --years 2 \
+        --query password \
             --output tsv 2>/dev/null); then
             break
         else
@@ -572,8 +572,8 @@ create_azure_ad_app() {
                 print_error "The corresponding MSA application may not be ready yet"
                 print_warning "You can create the client secret manually in Azure Portal:"
                 print_warning "https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/Credentials/appId/$AZURE_AD_CLIENT_ID"
-                exit 1
-            fi
+        exit 1
+    fi
         fi
     done
     
@@ -1106,9 +1106,10 @@ display_summary() {
     if [ -n "$swa_token" ]; then
         echo "   $swa_token"
     else
-        print_warning "   Unable to retrieve automatically. Get from Azure Portal:"
+        print_warning "   Unable to retrieve automatically for the app: "$STATIC_WEB_APP_NAME" in the resource group: "$RESOURCE_GROUP_NAME". Get from Azure Portal:"
         echo "   https://portal.azure.com/#@/resource/subscriptions/$(az account show --query id --output tsv)/resourceGroups/$RESOURCE_GROUP_NAME/providers/Microsoft.Web/staticSites/$STATIC_WEB_APP_NAME"
     fi
+    echo ""
     echo ""
     
     # Get Function App publish profile
@@ -1124,13 +1125,22 @@ display_summary() {
         echo "   Go to 'Get publish profile' button in the overview section"
     fi
     echo ""
+
+    # Get front end app api url
+    echo "📋 FRONTEND APP BASE API URL:"
+    echo "   Secret Name: AZURE_FUNCTION_APP_URL"
+    echo "   Secret Value:"
+    echo "   $FUNCTION_APP_URL"
     
     echo "════════════════════════════════════════════════════════════════"
     echo "📝 TO ADD SECRETS TO GITHUB:"
     echo "1. Go to your GitHub repository"
     echo "2. Settings → Secrets and variables → Actions"
     echo "3. Click 'New repository secret'"
-    echo "4. Add both secrets above"
+    echo "4. Add these 3 secrets:"
+    echo "   - AZURE_STATIC_WEB_APPS_API_TOKEN (from above)"
+    echo "   - AZURE_FUNCTIONAPP_PUBLISH_PROFILE (from above)"
+    echo "   - AZURE_FUNCTION_APP_URL: $FUNCTION_APP_URL"
     echo "════════════════════════════════════════════════════════════════"
     echo ""
     
@@ -1156,8 +1166,7 @@ handle_error() {
 main() {
     clear
     echo "════════════════════════════════════════════════════════════════"
-    echo "        🏦 Sage Financial Management App Deployment"
-    echo "           ✨ Bulletproof Azure Setup (2025) ✨"
+    echo "        🏦 Sage - Azure setup v1.0"
     echo "════════════════════════════════════════════════════════════════"
     echo ""
     
