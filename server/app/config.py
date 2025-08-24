@@ -48,6 +48,9 @@ class Settings(BaseSettings):
             if origin.strip()
         ]
 
+    # Azure Key Vault Configuration
+    key_vault_url: Optional[str] = Field(default=None, env="KEY_VAULT_URL")
+
     # CosmosDB Configuration
     cosmos_db_endpoint: str = Field(..., env="COSMOS_DB_ENDPOINT")
     cosmos_db_key: str = Field(..., env="COSMOS_DB_KEY")
@@ -78,28 +81,30 @@ class Settings(BaseSettings):
     environment: str = Field(default="development", env="ENVIRONMENT")
 
     def __init__(self, **kwargs):
-        """Initialize settings with GCP Secret Manager support."""
-        # For production deployments, load secrets from Secret Manager
-        # Check for Cloud Run (K_SERVICE) or explicit production environment
-        is_production = (
-            bool(os.getenv("K_SERVICE")) or os.getenv("ENVIRONMENT") == "production"
-        )
-
-        if is_production:
+        """Initialize settings with Azure Key Vault support."""
+        # Check deployment environment
+        is_azure_functions = bool(os.getenv("WEBSITE_SITE_NAME"))
+        is_production = os.getenv("ENVIRONMENT") == "production"
+        is_development = os.getenv("ENVIRONMENT") in ["development", "dev"]
+        
+        # For Azure Functions in production: Key Vault references are automatically resolved
+        # For local development: Manually load from Key Vault using Azure identity
+        if not is_azure_functions and (is_production or is_development):
             secret_manager = get_secret_manager()
-
-            # Override with secrets from Secret Manager if available
+            
+            # Determine environment prefix for secrets
+            env_prefix = "dev" if is_development else "prod"
+            
+            # Override with secrets from Azure Key Vault if available
+            # Using environment-specific secret names (dev-*/prod-*)
+            # Note: Cosmos DB settings are handled as direct environment variables, not secrets
             secret_overrides = {
-                "SECRET_KEY": secret_manager.get_secret("SECRET_KEY"),
-                "COSMOS_DB_ENDPOINT": secret_manager.get_secret("COSMOS_DB_ENDPOINT"),
-                "COSMOS_DB_KEY": secret_manager.get_secret("COSMOS_DB_KEY"),
-                "COSMOS_DB_NAME": secret_manager.get_secret("COSMOS_DB_NAME"),
-                "AZURE_CLIENT_ID": secret_manager.get_secret("AZURE_CLIENT_ID"),
-                "AZURE_CLIENT_SECRET": secret_manager.get_secret("AZURE_CLIENT_SECRET"),
-                "AZURE_TENANT_ID": secret_manager.get_secret("AZURE_TENANT_ID"),
-                "AZURE_REDIRECT_URI": secret_manager.get_secret("AZURE_REDIRECT_URI"),
-                "ALLOWED_ORIGINS": secret_manager.get_secret("ALLOWED_ORIGINS"),
-                "FRONTEND_URL": secret_manager.get_secret("FRONTEND_URL"),
+                "SECRET_KEY": secret_manager.get_secret(f"{env_prefix}-secret-key"),
+                "AZURE_CLIENT_ID": secret_manager.get_secret(f"{env_prefix}-azure-client-id"),
+                "AZURE_CLIENT_SECRET": secret_manager.get_secret(f"{env_prefix}-azure-client-secret"),
+                "AZURE_TENANT_ID": secret_manager.get_secret(f"{env_prefix}-azure-tenant-id"),
+                "PLAID_CLIENT_ID": secret_manager.get_secret(f"{env_prefix}-plaid-client-id"),
+                "PLAID_SECRET": secret_manager.get_secret(f"{env_prefix}-plaid-secret"),
             }
 
             # Update environment with secrets

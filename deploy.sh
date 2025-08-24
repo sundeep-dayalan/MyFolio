@@ -15,11 +15,11 @@ CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # Configuration
-PROJECT_NAME="sage-financial-app"
+PROJECT_NAME="sage"
 LOCATION="Central US"
 CONSUMPTION_LOCATION="centralus"
 ENVIRONMENT="prod"
-UNIQUE_SUFFIX=$(date +%s | tail -c 6)
+UNIQUE_SUFFIX="$(date +%s | tail -c 6)4121997"
 RESOURCE_GROUP_NAME="${PROJECT_NAME}-rg-${UNIQUE_SUFFIX}"
 
 # Resource names with proper conventions
@@ -306,30 +306,35 @@ create_cosmos_db() {
     if az cosmosdb show --name "$COSMOS_NAME" --resource-group "$RESOURCE_GROUP_NAME" >/dev/null 2>&1; then
         print_warning "Cosmos DB $COSMOS_NAME already exists! Checking components..."
         
-        # Check and create database if needed
-        if ! az cosmosdb sql database show --account-name "$COSMOS_NAME" --resource-group "$RESOURCE_GROUP_NAME" --name "sage-db" >/dev/null 2>&1; then
-            print_status "Creating missing database: sage-db"
-            az cosmosdb sql database create \
-                --account-name "$COSMOS_NAME" \
-                --resource-group "$RESOURCE_GROUP_NAME" \
-                --name "sage-db" \
-                --throughput 400 \
-                --output none
-        fi
-        
-        # Check containers
-        local containers=("users" "accounts" "transactions" "plaid_tokens")
-        for container in "${containers[@]}"; do
-            if ! az cosmosdb sql container show --account-name "$COSMOS_NAME" --database-name "sage-db" --resource-group "$RESOURCE_GROUP_NAME" --name "$container" >/dev/null 2>&1; then
-                print_status "Creating missing container: $container"
-                az cosmosdb sql container create \
+        # Check and create databases if needed
+        local databases=("sage-dev-db" "sage-prod-db")
+        for database in "${databases[@]}"; do
+            if ! az cosmosdb sql database show --account-name "$COSMOS_NAME" --resource-group "$RESOURCE_GROUP_NAME" --name "$database" >/dev/null 2>&1; then
+                print_status "Creating missing database: $database"
+                az cosmosdb sql database create \
                     --account-name "$COSMOS_NAME" \
                     --resource-group "$RESOURCE_GROUP_NAME" \
-                    --database-name "sage-db" \
-                    --name "$container" \
-                    --partition-key-path "/userId" \
+                    --name "$database" \
+                    --throughput 400 \
                     --output none
             fi
+        done
+        
+        # Check containers for both databases
+        local containers=("users" "accounts" "transactions" "plaid_tokens")
+        for database in "${databases[@]}"; do
+            for container in "${containers[@]}"; do
+                if ! az cosmosdb sql container show --account-name "$COSMOS_NAME" --database-name "$database" --resource-group "$RESOURCE_GROUP_NAME" --name "$container" >/dev/null 2>&1; then
+                    print_status "Creating missing container: $container in $database"
+                    az cosmosdb sql container create \
+                        --account-name "$COSMOS_NAME" \
+                        --resource-group "$RESOURCE_GROUP_NAME" \
+                        --database-name "$database" \
+                        --name "$container" \
+                        --partition-key-path "/userId" \
+                        --output none
+                fi
+            done
         done
         print_success "Cosmos DB components verified!"
         return
@@ -373,26 +378,38 @@ create_cosmos_db() {
     
     print_success "Cosmos DB account created!"
     
-    # Create database
-    print_status "Creating database: sage-db"
+    # Create dev and prod databases
+    print_status "Creating dev database: sage-dev-db"
     az cosmosdb sql database create \
         --account-name "$COSMOS_NAME" \
         --resource-group "$RESOURCE_GROUP_NAME" \
-        --name "sage-db" \
+        --name "sage-dev-db" \
+        --throughput 400 \
+        --output none
+        
+    print_status "Creating prod database: sage-prod-db"
+    az cosmosdb sql database create \
+        --account-name "$COSMOS_NAME" \
+        --resource-group "$RESOURCE_GROUP_NAME" \
+        --name "sage-prod-db" \
         --throughput 400 \
         --output none
     
-    # Create containers
+    # Create containers for both environments
     local containers=("users" "accounts" "transactions" "plaid_tokens")
-    for container in "${containers[@]}"; do
-        print_status "Creating container: $container"
-        az cosmosdb sql container create \
-            --account-name "$COSMOS_NAME" \
-            --resource-group "$RESOURCE_GROUP_NAME" \
-            --database-name "sage-db" \
-            --name "$container" \
-            --partition-key-path "/userId" \
-            --output none
+    local databases=("sage-dev-db" "sage-prod-db")
+    
+    for database in "${databases[@]}"; do
+        for container in "${containers[@]}"; do
+            print_status "Creating container: $container in $database"
+            az cosmosdb sql container create \
+                --account-name "$COSMOS_NAME" \
+                --resource-group "$RESOURCE_GROUP_NAME" \
+                --database-name "$database" \
+                --name "$container" \
+                --partition-key-path "/userId" \
+                --output none
+        done
     done
     
     print_success "Database and containers created!"
@@ -456,9 +473,12 @@ create_key_vault() {
         --output none
     
     print_success "Key Vault permissions configured!"
+    
+    # Store function app principal ID for later use (will be set after function app creation)
+    FUNCTION_APP_PRINCIPAL_ID=""
 }
 
-# Step 6.5: Create Azure AD App Registration
+# Step 6.5: Create or Update Azure AD App Registration
 create_azure_ad_app() {
     print_header "STEP 6.5: AZURE AD APP REGISTRATION"
     
@@ -467,16 +487,30 @@ create_azure_ad_app() {
     local frontend_url="https://$(echo $STATIC_WEB_APP_NAME | tr '[:upper:]' '[:lower:]').azurestaticapps.net"
     local backend_url="https://${FUNCTION_APP_NAME}.azurewebsites.net"
     
-    # Check if app registration already exists
-    local existing_app_id=$(az ad app list --display-name "$app_name" --query "[0].appId" -o tsv 2>/dev/null)
+    # Check if any Sage app registration already exists (search by pattern)
+    print_status "Searching for existing Sage app registrations..."
+    local existing_apps=$(az ad app list --query "[?contains(displayName, 'sage-') && contains(displayName, '-app') && contains(displayName, '4121997')].{appId:appId,displayName:displayName}" -o tsv 2>/dev/null)
     
-    if [ -n "$existing_app_id" ] && [ "$existing_app_id" != "null" ]; then
-        print_warning "Azure AD app registration '$app_name' already exists with ID: $existing_app_id"
+    if [ -n "$existing_apps" ]; then
+        # Parse the first existing app
+        local existing_app_id=$(echo "$existing_apps" | head -n1 | cut -f1)
+        local existing_app_name=$(echo "$existing_apps" | head -n1 | cut -f2)
+        
+        print_success "Found existing Sage app registration: '$existing_app_name' (ID: $existing_app_id)"
+        print_status "Reusing existing app registration instead of creating new one"
         AZURE_AD_CLIENT_ID="$existing_app_id"
+        app_name="$existing_app_name"  # Use the existing name
         
         # Update existing app to support personal Microsoft accounts
-        print_status "Updating existing app to support personal Microsoft accounts..."
+        print_status "Updating existing app configuration..."
         az ad app update --id "$existing_app_id" --sign-in-audience "AzureADandPersonalMicrosoftAccount" 2>/dev/null || true
+        
+        # Update redirect URIs for current deployment
+        az ad app update \
+            --id "$AZURE_AD_CLIENT_ID" \
+            --web-redirect-uris "${backend_url}/api/v1/auth/oauth/microsoft/callback" "${frontend_url}/auth/callback" "http://localhost:5173/auth/callback" "http://localhost:8000/api/v1/auth/oauth/microsoft/callback" \
+            --enable-access-token-issuance true \
+            --enable-id-token-issuance true 2>/dev/null || print_warning "Some advanced token settings may need manual configuration"
         
         # Get the existing client secret ID to update it
         local existing_secret_id=$(az ad app credential list --id "$existing_app_id" --query "[0].keyId" -o tsv 2>/dev/null)
@@ -494,7 +528,7 @@ create_azure_ad_app() {
             --sign-in-audience "AzureADandPersonalMicrosoftAccount" \
             --query appId \
             --output tsv)
-        
+            
         # Wait a moment for the app to be created
         sleep 2
         
@@ -522,10 +556,10 @@ create_azure_ad_app() {
     
     while [ $retry_count -lt $max_retries ]; do
         if AZURE_AD_CLIENT_SECRET=$(az ad app credential reset \
-            --id "$AZURE_AD_CLIENT_ID" \
-            --display-name "$secret_name" \
-            --years 2 \
-            --query password \
+        --id "$AZURE_AD_CLIENT_ID" \
+        --display-name "$secret_name" \
+        --years 2 \
+        --query password \
             --output tsv 2>/dev/null); then
             break
         else
@@ -538,8 +572,8 @@ create_azure_ad_app() {
                 print_error "The corresponding MSA application may not be ready yet"
                 print_warning "You can create the client secret manually in Azure Portal:"
                 print_warning "https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/Credentials/appId/$AZURE_AD_CLIENT_ID"
-                exit 1
-            fi
+        exit 1
+    fi
         fi
     done
     
@@ -560,6 +594,14 @@ create_azure_ad_app() {
     print_status ""
     print_status "Azure Portal Link:"
     print_status "  https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/Overview/appId/$AZURE_AD_CLIENT_ID"
+    
+    # Show reuse vs creation summary
+    if [ -n "$existing_apps" ]; then
+        print_success "✅ Reused existing Azure AD app registration: $app_name"
+        print_warning "💡 No new app created - using existing registration to avoid duplicates"
+    else
+        print_success "✅ Created new Azure AD app registration: $app_name"
+    fi
     
     print_success "Azure AD app registration completed!"
 }
@@ -590,6 +632,22 @@ create_function_app() {
         --tags "project=$PROJECT_NAME"
     
     print_success "Function App created!"
+    
+    # Enable system-assigned managed identity for Key Vault access
+    print_status "Enabling managed identity for Function App..."
+    az functionapp identity assign \
+        --name "$FUNCTION_APP_NAME" \
+        --resource-group "$RESOURCE_GROUP_NAME" \
+        --output none
+    
+    # Get the managed identity principal ID
+    local function_app_principal_id=$(az functionapp identity show \
+        --name "$FUNCTION_APP_NAME" \
+        --resource-group "$RESOURCE_GROUP_NAME" \
+        --query principalId \
+        --output tsv)
+    
+    print_success "Managed identity enabled with Principal ID: $function_app_principal_id"
 }
 
 # Step 8: Create Static Web App (only if none exists in resource group)
@@ -648,26 +706,113 @@ configure_function_app() {
     
     local key_vault_url="https://${KEY_VAULT_NAME}.vault.azure.net/"
     
-    # Configure function app settings with Microsoft Entra ID
+    # Get Static Web App URL for CORS
+    local static_web_app_hostname=$(az staticwebapp show \
+        --name "$STATIC_WEB_APP_NAME" \
+        --resource-group "$RESOURCE_GROUP_NAME" \
+        --query defaultHostname \
+        --output tsv 2>/dev/null || echo "localhost")
+    local frontend_url="https://${static_web_app_hostname}"
+    
+    # Configure function app settings with mix of direct values and Key Vault references
+    # Infrastructure values: Direct environment variables
+    # Sensitive secrets: Key Vault references
     az functionapp config appsettings set \
         --name "$FUNCTION_APP_NAME" \
         --resource-group "$RESOURCE_GROUP_NAME" \
         --settings \
+            "SECRET_KEY=@Microsoft.KeyVault(VaultName=${KEY_VAULT_NAME};SecretName=prod-secret-key)" \
             "COSMOS_DB_ENDPOINT=$cosmos_endpoint" \
             "COSMOS_DB_KEY=$cosmos_key" \
-            "COSMOS_DB_NAME=sage-db" \
+            "COSMOS_DB_NAME=sage-prod-db" \
+            "AZURE_CLIENT_ID=@Microsoft.KeyVault(VaultName=${KEY_VAULT_NAME};SecretName=prod-azure-client-id)" \
+            "AZURE_CLIENT_SECRET=@Microsoft.KeyVault(VaultName=${KEY_VAULT_NAME};SecretName=prod-azure-client-secret)" \
+            "AZURE_TENANT_ID=@Microsoft.KeyVault(VaultName=${KEY_VAULT_NAME};SecretName=prod-azure-tenant-id)" \
+            "PLAID_CLIENT_ID=@Microsoft.KeyVault(VaultName=${KEY_VAULT_NAME};SecretName=prod-plaid-client-id)" \
+            "PLAID_SECRET=@Microsoft.KeyVault(VaultName=${KEY_VAULT_NAME};SecretName=prod-plaid-secret)" \
             "KEY_VAULT_URL=$key_vault_url" \
             "ENVIRONMENT=$ENVIRONMENT" \
             "APPLICATIONINSIGHTS_CONNECTION_STRING=$insights_connection" \
             "FUNCTIONS_WORKER_RUNTIME=python" \
             "PYTHON_ENABLE_GUNICORN_MULTIPROCESSING=1" \
-            "AZURE_CLIENT_ID=$AZURE_AD_CLIENT_ID" \
-            "AZURE_CLIENT_SECRET=$AZURE_AD_CLIENT_SECRET" \
-            "AZURE_TENANT_ID=$AZURE_AD_TENANT_ID" \
             "AZURE_REDIRECT_URI=https://${FUNCTION_APP_NAME}.azurewebsites.net/api/v1/auth/oauth/microsoft/callback" \
+            "PROJECT_NAME=Sage API" \
+            "VERSION=2.0.2" \
+            "API_V1_PREFIX=/api/v1" \
+            "DEBUG=false" \
+            "ALGORITHM=HS256" \
+            "ACCESS_TOKEN_EXPIRE_MINUTES=1440" \
+            "FRONTEND_URL=$frontend_url" \
+            "ALLOWED_HOSTS=${static_web_app_hostname},${FUNCTION_APP_NAME}.azurewebsites.net" \
+            "ALLOWED_ORIGINS=$frontend_url,https://${FUNCTION_APP_NAME}.azurewebsites.net,http://localhost:5173,http://localhost:3000" \
+            "PLAID_ENV=sandbox" \
+            "LOG_LEVEL=INFO" \
         --output none
     
-    print_success "Function App configured!"
+    print_status "Configuring Function App CORS settings..."
+    
+    # Configure CORS directly in Function App (separate from environment variables)
+    az functionapp cors add \
+        --name "$FUNCTION_APP_NAME" \
+        --resource-group "$RESOURCE_GROUP_NAME" \
+        --allowed-origins "$frontend_url" \
+        --output none 2>/dev/null || true
+        
+    az functionapp cors add \
+        --name "$FUNCTION_APP_NAME" \
+        --resource-group "$RESOURCE_GROUP_NAME" \
+        --allowed-origins "https://${FUNCTION_APP_NAME}.azurewebsites.net" \
+        --output none 2>/dev/null || true
+        
+    az functionapp cors add \
+        --name "$FUNCTION_APP_NAME" \
+        --resource-group "$RESOURCE_GROUP_NAME" \
+        --allowed-origins "http://localhost:5173" \
+        --output none 2>/dev/null || true
+        
+    az functionapp cors add \
+        --name "$FUNCTION_APP_NAME" \
+        --resource-group "$RESOURCE_GROUP_NAME" \
+        --allowed-origins "http://localhost:3000" \
+        --output none 2>/dev/null || true
+    
+    # Enable credentials for CORS (needed for authentication)
+    az functionapp cors credentials \
+        --name "$FUNCTION_APP_NAME" \
+        --resource-group "$RESOURCE_GROUP_NAME" \
+        --enable true \
+        --output none 2>/dev/null || true
+    
+    print_success "Function App configured with environment variables and CORS settings!"
+    
+    # Grant Function App managed identity access to Key Vault
+    print_status "Granting Function App access to Key Vault..."
+    local function_app_principal_id=$(az functionapp identity show \
+        --name "$FUNCTION_APP_NAME" \
+        --resource-group "$RESOURCE_GROUP_NAME" \
+        --query principalId \
+        --output tsv)
+    
+    if [ -n "$function_app_principal_id" ]; then
+        # Grant both Key Vault Secrets User and Reader roles (required for Function App Key Vault references)
+        print_status "Granting Key Vault Secrets User role..."
+        az role assignment create \
+            --role "Key Vault Secrets User" \
+            --assignee "$function_app_principal_id" \
+            --scope "/subscriptions/$(az account show --query id --output tsv)/resourceGroups/$RESOURCE_GROUP_NAME/providers/Microsoft.KeyVault/vaults/$KEY_VAULT_NAME" \
+            --output none 2>/dev/null || print_warning "Key Vault Secrets User role assignment may already exist"
+            
+        print_status "Granting Key Vault Reader role..."
+        az role assignment create \
+            --role "Key Vault Reader" \
+            --assignee "$function_app_principal_id" \
+            --scope "/subscriptions/$(az account show --query id --output tsv)/resourceGroups/$RESOURCE_GROUP_NAME/providers/Microsoft.KeyVault/vaults/$KEY_VAULT_NAME" \
+            --output none 2>/dev/null || print_warning "Key Vault Reader role assignment may already exist"
+        
+        print_success "Function App granted Key Vault access with required roles!"
+    else
+        print_warning "Could not retrieve Function App principal ID. Key Vault access may need manual configuration."
+    fi
 }
 
 # Step 10: Setup secrets in Key Vault
@@ -681,8 +826,31 @@ setup_secrets() {
     # Generate secure JWT secret
     local jwt_secret=$(openssl rand -hex 32)
     
-    # Set secrets with retry logic - Replace Google OAuth with Microsoft Entra ID
-    local secrets=("jwt-secret:$jwt_secret" "azure-client-id:$AZURE_AD_CLIENT_ID" "azure-client-secret:$AZURE_AD_CLIENT_SECRET" "azure-tenant-id:$AZURE_AD_TENANT_ID" "plaid-client-id:configure-me" "plaid-secret:configure-me")
+    # Create environment-specific secrets (both dev and prod)
+    print_status "Creating dev and prod environment secrets..."
+    
+    # Dev environment secrets (only actual secrets, not infrastructure config)
+    local dev_secrets=(
+        "dev-secret-key:$jwt_secret"
+        "dev-azure-client-id:$AZURE_AD_CLIENT_ID"
+        "dev-azure-client-secret:$AZURE_AD_CLIENT_SECRET"
+        "dev-azure-tenant-id:$AZURE_AD_TENANT_ID"
+        "dev-plaid-client-id:configure-me"
+        "dev-plaid-secret:configure-me"
+    )
+    
+    # Prod environment secrets (only actual secrets, not infrastructure config)
+    local prod_secrets=(
+        "prod-secret-key:$jwt_secret"
+        "prod-azure-client-id:$AZURE_AD_CLIENT_ID"
+        "prod-azure-client-secret:$AZURE_AD_CLIENT_SECRET"
+        "prod-azure-tenant-id:$AZURE_AD_TENANT_ID"
+        "prod-plaid-client-id:configure-me"
+        "prod-plaid-secret:configure-me"
+    )
+    
+    # Combine all secrets
+    local secrets=("${dev_secrets[@]}" "${prod_secrets[@]}")
     
     for secret_pair in "${secrets[@]}"; do
         local secret_name=$(echo "$secret_pair" | cut -d: -f1)
@@ -909,7 +1077,11 @@ display_summary() {
     echo "   • Connect GitHub repository in Azure portal"
     echo "   • Or upload build files from frontend/dist/"
     echo ""
-    echo "4️⃣  TEST YOUR APPLICATION:"
+    echo "4️⃣  RESTART FUNCTION APP (Important for Key Vault references):"
+    echo "   • az functionapp restart --name $FUNCTION_APP_NAME --resource-group $RESOURCE_GROUP_NAME"
+    echo "   • Wait 2-3 minutes after restart for Key Vault references to resolve"
+    echo ""
+    echo "5️⃣  TEST YOUR APPLICATION:"
     echo "   • Backend health: curl $FUNCTION_APP_URL/health"
     echo "   • Frontend: Visit $STATIC_WEB_APP_URL"
     echo ""
@@ -934,9 +1106,10 @@ display_summary() {
     if [ -n "$swa_token" ]; then
         echo "   $swa_token"
     else
-        print_warning "   Unable to retrieve automatically. Get from Azure Portal:"
+        print_warning "   Unable to retrieve automatically for the app: "$STATIC_WEB_APP_NAME" in the resource group: "$RESOURCE_GROUP_NAME". Get from Azure Portal:"
         echo "   https://portal.azure.com/#@/resource/subscriptions/$(az account show --query id --output tsv)/resourceGroups/$RESOURCE_GROUP_NAME/providers/Microsoft.Web/staticSites/$STATIC_WEB_APP_NAME"
     fi
+    echo ""
     echo ""
     
     # Get Function App publish profile
@@ -952,13 +1125,22 @@ display_summary() {
         echo "   Go to 'Get publish profile' button in the overview section"
     fi
     echo ""
+
+    # Get front end app api url
+    echo "📋 FRONTEND APP BASE API URL:"
+    echo "   Secret Name: AZURE_FUNCTION_APP_URL"
+    echo "   Secret Value:"
+    echo "   $FUNCTION_APP_URL"
     
     echo "════════════════════════════════════════════════════════════════"
     echo "📝 TO ADD SECRETS TO GITHUB:"
     echo "1. Go to your GitHub repository"
     echo "2. Settings → Secrets and variables → Actions"
     echo "3. Click 'New repository secret'"
-    echo "4. Add both secrets above"
+    echo "4. Add these 3 secrets:"
+    echo "   - AZURE_STATIC_WEB_APPS_API_TOKEN (from above)"
+    echo "   - AZURE_FUNCTIONAPP_PUBLISH_PROFILE (from above)"
+    echo "   - AZURE_FUNCTION_APP_URL: $FUNCTION_APP_URL"
     echo "════════════════════════════════════════════════════════════════"
     echo ""
     
@@ -984,8 +1166,7 @@ handle_error() {
 main() {
     clear
     echo "════════════════════════════════════════════════════════════════"
-    echo "        🏦 Sage Financial Management App Deployment"
-    echo "           ✨ Bulletproof Azure Setup (2025) ✨"
+    echo "        🏦 Sage - Azure setup v1.0"
     echo "════════════════════════════════════════════════════════════════"
     echo ""
     
