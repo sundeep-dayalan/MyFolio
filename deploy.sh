@@ -487,66 +487,33 @@ create_azure_ad_app() {
     local frontend_url="https://$(echo $STATIC_WEB_APP_NAME | tr '[:upper:]' '[:lower:]').azurestaticapps.net"
     local backend_url="https://${FUNCTION_APP_NAME}.azurewebsites.net"
     
-    # Check if any Sage app registration already exists (search by pattern)
-    print_status "Searching for existing Sage app registrations..."
-    local existing_apps=$(az ad app list --query "[?contains(displayName, 'sage-') && contains(displayName, '-app') && contains(displayName, '4121997')].{appId:appId,displayName:displayName}" -o tsv 2>/dev/null)
+    print_status "Creating Azure AD app registration: $app_name"
+        
+    # Create the app registration with basic configuration first
+    # Using "AzureADandPersonalMicrosoftAccount" to support both org and personal accounts
+    AZURE_AD_CLIENT_ID=$(az ad app create \
+        --display-name "$app_name" \
+        --sign-in-audience "AzureADandPersonalMicrosoftAccount" \
+        --query appId \
+        --output tsv)
+        
+    # Wait a moment for the app to be created
+    sleep 2
     
-    if [ -n "$existing_apps" ]; then
-        # Parse the first existing app
-        local existing_app_id=$(echo "$existing_apps" | head -n1 | cut -f1)
-        local existing_app_name=$(echo "$existing_apps" | head -n1 | cut -f2)
+    # Update the app with web redirect URIs and token configuration
+    az ad app update \
+        --id "$AZURE_AD_CLIENT_ID" \
+        --web-redirect-uris "${backend_url}/api/v1/auth/oauth/microsoft/callback" "${frontend_url}/auth/callback" "http://localhost:5173/auth/callback" "http://localhost:8000/api/v1/auth/oauth/microsoft/callback" \
+        --enable-access-token-issuance true \
+        --enable-id-token-issuance true 2>/dev/null || print_warning "Some advanced token settings may need manual configuration"
+    
+    # Add required resource permissions
+    az ad app permission add \
+        --id "$AZURE_AD_CLIENT_ID" \
+        --api 00000003-0000-0000-c000-000000000000 \
+        --api-permissions e1fe6dd8-ba31-4d61-89e7-88639da4683d=Scope 64a6cdd6-aab1-4aaf-94b8-3cc8405e90d0=Scope 14dad69e-099b-42c9-810b-d002981feec1=Scope 2>/dev/null || print_warning "Microsoft Graph permissions may need manual configuration"
         
-        print_success "Found existing Sage app registration: '$existing_app_name' (ID: $existing_app_id)"
-        print_status "Reusing existing app registration instead of creating new one"
-        AZURE_AD_CLIENT_ID="$existing_app_id"
-        app_name="$existing_app_name"  # Use the existing name
-        
-        # Update existing app to support personal Microsoft accounts
-        print_status "Updating existing app configuration..."
-        az ad app update --id "$existing_app_id" --sign-in-audience "AzureADandPersonalMicrosoftAccount" 2>/dev/null || true
-        
-        # Update redirect URIs for current deployment
-        az ad app update \
-            --id "$AZURE_AD_CLIENT_ID" \
-            --web-redirect-uris "${backend_url}/api/v1/auth/oauth/microsoft/callback" "${frontend_url}/auth/callback" "http://localhost:5173/auth/callback" "http://localhost:8000/api/v1/auth/oauth/microsoft/callback" \
-            --enable-access-token-issuance true \
-            --enable-id-token-issuance true 2>/dev/null || print_warning "Some advanced token settings may need manual configuration"
-        
-        # Get the existing client secret ID to update it
-        local existing_secret_id=$(az ad app credential list --id "$existing_app_id" --query "[0].keyId" -o tsv 2>/dev/null)
-        if [ -n "$existing_secret_id" ] && [ "$existing_secret_id" != "null" ]; then
-            print_status "Removing existing client secret..."
-            az ad app credential delete --id "$existing_app_id" --key-id "$existing_secret_id" 2>/dev/null || true
-        fi
-    else
-        print_status "Creating Azure AD app registration: $app_name"
-        
-        # Create the app registration with basic configuration first
-        # Using "AzureADandPersonalMicrosoftAccount" to support both org and personal accounts
-        AZURE_AD_CLIENT_ID=$(az ad app create \
-            --display-name "$app_name" \
-            --sign-in-audience "AzureADandPersonalMicrosoftAccount" \
-            --query appId \
-            --output tsv)
-            
-        # Wait a moment for the app to be created
-        sleep 2
-        
-        # Update the app with web redirect URIs and token configuration
-        az ad app update \
-            --id "$AZURE_AD_CLIENT_ID" \
-            --web-redirect-uris "${backend_url}/api/v1/auth/oauth/microsoft/callback" "${frontend_url}/auth/callback" "http://localhost:5173/auth/callback" "http://localhost:8000/api/v1/auth/oauth/microsoft/callback" \
-            --enable-access-token-issuance true \
-            --enable-id-token-issuance true 2>/dev/null || print_warning "Some advanced token settings may need manual configuration"
-        
-        # Add required resource permissions
-        az ad app permission add \
-            --id "$AZURE_AD_CLIENT_ID" \
-            --api 00000003-0000-0000-c000-000000000000 \
-            --api-permissions e1fe6dd8-ba31-4d61-89e7-88639da4683d=Scope 64a6cdd6-aab1-4aaf-94b8-3cc8405e90d0=Scope 14dad69e-099b-42c9-810b-d002981feec1=Scope 2>/dev/null || print_warning "Microsoft Graph permissions may need manual configuration"
-            
-        print_success "Azure AD app created with ID: $AZURE_AD_CLIENT_ID"
-    fi
+    print_success "Azure AD app created with ID: $AZURE_AD_CLIENT_ID"
     
     # Create a new client secret with retry logic
     print_status "Creating client secret..."
