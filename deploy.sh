@@ -465,6 +465,9 @@ create_key_vault() {
     # Grant current user access to Key Vault
     print_status "Configuring Key Vault permissions..."
     local current_user=$(az ad signed-in-user show --query id --output tsv)
+
+    # Get the object ID of the currently signed-in user
+    local current_user_object_id=$(az ad signed-in-user show --query id -o tsv)
     
     az role assignment create \
         --role "Key Vault Secrets Officer" \
@@ -472,6 +475,12 @@ create_key_vault() {
         --scope "/subscriptions/$(az account show --query id --output tsv)/resourceGroups/$RESOURCE_GROUP_NAME/providers/Microsoft.KeyVault/vaults/$KEY_VAULT_NAME" \
         --output none
     
+    az role assignment create \
+        --role "Key Vault Crypto User" \
+        --assignee-object-id "$current_user_object_id" \
+        --scope "/subscriptions/$(az account show --query id -o tsv)/resourceGroups/$RESOURCE_GROUP_NAME/providers/Microsoft.KeyVault/vaults/$KEY_VAULT_NAME" \
+        --output none
+
     print_success "Key Vault permissions configured!"
     
     # Store function app principal ID for later use (will be set after function app creation)
