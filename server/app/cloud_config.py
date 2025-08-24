@@ -1,73 +1,73 @@
 """
-Cloud-specific configuration utilities for GCP deployment.
+Azure Key Vault configuration utilities for Azure deployment.
 """
 import os
 from typing import Optional
 
 try:
-    from google.cloud import secretmanager
-
-    GOOGLE_CLOUD_AVAILABLE = True
+    from azure.keyvault.secrets import SecretClient
+    from azure.identity import DefaultAzureCredential
+    AZURE_KEYVAULT_AVAILABLE = True
 except ImportError:
-    GOOGLE_CLOUD_AVAILABLE = False
+    AZURE_KEYVAULT_AVAILABLE = False
 
 
-class GCPSecretManager:
-    """Helper class to manage GCP Secret Manager integration."""
+class AzureKeyVaultManager:
+    """Helper class to manage Azure Key Vault integration."""
 
-    def __init__(self, project_id: Optional[str] = None):
-        # For Cloud Run, explicitly use the project ID since GOOGLE_CLOUD_PROJECT might not be set
-        self.project_id = (
-            project_id or os.getenv("GOOGLE_CLOUD_PROJECT") or "fit-guide-465001-p3"
+    def __init__(self, key_vault_url: Optional[str] = None):
+        # Get Key Vault URL from environment or parameter
+        self.key_vault_url = (
+            key_vault_url or os.getenv("KEY_VAULT_URL")
         )
         self.client = None
 
-        if GOOGLE_CLOUD_AVAILABLE and self.project_id:
+        if AZURE_KEYVAULT_AVAILABLE and self.key_vault_url:
             try:
-                self.client = secretmanager.SecretManagerServiceClient()
+                # Use DefaultAzureCredential for authentication
+                # This works with Managed Identity in Azure Functions
+                credential = DefaultAzureCredential()
+                self.client = SecretClient(vault_url=self.key_vault_url, credential=credential)
             except Exception:
-                # Fallback to environment variables if Secret Manager is not available
+                # Fallback to environment variables if Key Vault is not available
                 self.client = None
 
     def get_secret(
-        self, secret_id: str, default: Optional[str] = None
+        self, secret_name: str, default: Optional[str] = None
     ) -> Optional[str]:
         """
-        Get secret from GCP Secret Manager or fallback to environment variable.
+        Get secret from Azure Key Vault or fallback to environment variable.
 
         Args:
-            secret_id: The secret ID in Secret Manager
+            secret_name: The secret name in Key Vault
             default: Default value if secret is not found
 
         Returns:
             Secret value or default
         """
         # First try environment variable (for local development)
-        env_value = os.getenv(secret_id)
+        env_value = os.getenv(secret_name.upper().replace("-", "_"))
         if env_value:
             return env_value
 
-        # Then try Secret Manager (for production)
-        if self.client and self.project_id:
+        # Then try Key Vault (for production)
+        if self.client and self.key_vault_url:
             try:
-                name = f"projects/{self.project_id}/secrets/{secret_id}/versions/latest"
-                response = self.client.access_secret_version(request={"name": name})
-                secret_value = response.payload.data.decode("UTF-8")
-                return secret_value
+                secret = self.client.get_secret(secret_name)
+                return secret.value
             except Exception:
                 pass
 
         return default
 
 
-
 # Global instance
-_secret_manager = None
+_key_vault_manager = None
 
 
-def get_secret_manager() -> GCPSecretManager:
-    """Get global Secret Manager instance."""
-    global _secret_manager
-    if _secret_manager is None:
-        _secret_manager = GCPSecretManager()
-    return _secret_manager
+def get_secret_manager() -> AzureKeyVaultManager:
+    """Get global Key Vault Manager instance."""
+    global _key_vault_manager
+    if _key_vault_manager is None:
+        _key_vault_manager = AzureKeyVaultManager()
+    return _key_vault_manager

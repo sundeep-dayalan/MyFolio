@@ -467,16 +467,30 @@ create_azure_ad_app() {
     local frontend_url="https://$(echo $STATIC_WEB_APP_NAME | tr '[:upper:]' '[:lower:]').azurestaticapps.net"
     local backend_url="https://${FUNCTION_APP_NAME}.azurewebsites.net"
     
-    # Check if app registration already exists
-    local existing_app_id=$(az ad app list --display-name "$app_name" --query "[0].appId" -o tsv 2>/dev/null)
+    # Check if any Sage app registration already exists (search by pattern)
+    print_status "Searching for existing Sage app registrations..."
+    local existing_apps=$(az ad app list --query "[?contains(displayName, 'sage-') && contains(displayName, '-app')].{appId:appId,displayName:displayName}" -o tsv 2>/dev/null)
     
-    if [ -n "$existing_app_id" ] && [ "$existing_app_id" != "null" ]; then
-        print_warning "Azure AD app registration '$app_name' already exists with ID: $existing_app_id"
+    if [ -n "$existing_apps" ]; then
+        # Parse the first existing app
+        local existing_app_id=$(echo "$existing_apps" | head -n1 | cut -f1)
+        local existing_app_name=$(echo "$existing_apps" | head -n1 | cut -f2)
+        
+        print_success "Found existing Sage app registration: '$existing_app_name' (ID: $existing_app_id)"
+        print_status "Reusing existing app registration instead of creating new one"
         AZURE_AD_CLIENT_ID="$existing_app_id"
+        app_name="$existing_app_name"  # Use the existing name
         
         # Update existing app to support personal Microsoft accounts
-        print_status "Updating existing app to support personal Microsoft accounts..."
+        print_status "Updating existing app configuration..."
         az ad app update --id "$existing_app_id" --sign-in-audience "AzureADandPersonalMicrosoftAccount" 2>/dev/null || true
+        
+        # Update redirect URIs for current deployment
+        az ad app update \
+            --id "$AZURE_AD_CLIENT_ID" \
+            --web-redirect-uris "${backend_url}/api/v1/auth/oauth/microsoft/callback" "${frontend_url}/auth/callback" "http://localhost:5173/auth/callback" "http://localhost:8000/api/v1/auth/oauth/microsoft/callback" \
+            --enable-access-token-issuance true \
+            --enable-id-token-issuance true 2>/dev/null || print_warning "Some advanced token settings may need manual configuration"
         
         # Get the existing client secret ID to update it
         local existing_secret_id=$(az ad app credential list --id "$existing_app_id" --query "[0].keyId" -o tsv 2>/dev/null)
@@ -560,6 +574,14 @@ create_azure_ad_app() {
     print_status ""
     print_status "Azure Portal Link:"
     print_status "  https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/Overview/appId/$AZURE_AD_CLIENT_ID"
+    
+    # Show reuse vs creation summary
+    if [ -n "$existing_apps" ]; then
+        print_success "✅ Reused existing Azure AD app registration: $app_name"
+        print_warning "💡 No new app created - using existing registration to avoid duplicates"
+    else
+        print_success "✅ Created new Azure AD app registration: $app_name"
+    fi
     
     print_success "Azure AD app registration completed!"
 }
@@ -648,7 +670,15 @@ configure_function_app() {
     
     local key_vault_url="https://${KEY_VAULT_NAME}.vault.azure.net/"
     
-    # Configure function app settings with Microsoft Entra ID
+    # Get Static Web App URL for CORS
+    local static_web_app_hostname=$(az staticwebapp show \
+        --name "$STATIC_WEB_APP_NAME" \
+        --resource-group "$RESOURCE_GROUP_NAME" \
+        --query defaultHostname \
+        --output tsv 2>/dev/null || echo "localhost")
+    local frontend_url="https://${static_web_app_hostname}"
+    
+    # Configure function app settings with all required environment variables
     az functionapp config appsettings set \
         --name "$FUNCTION_APP_NAME" \
         --resource-group "$RESOURCE_GROUP_NAME" \
@@ -665,9 +695,54 @@ configure_function_app() {
             "AZURE_CLIENT_SECRET=$AZURE_AD_CLIENT_SECRET" \
             "AZURE_TENANT_ID=$AZURE_AD_TENANT_ID" \
             "AZURE_REDIRECT_URI=https://${FUNCTION_APP_NAME}.azurewebsites.net/api/v1/auth/oauth/microsoft/callback" \
+            "PROJECT_NAME=Sage API" \
+            "VERSION=2.0.2" \
+            "API_V1_PREFIX=/api/v1" \
+            "DEBUG=false" \
+            "ALGORITHM=HS256" \
+            "ACCESS_TOKEN_EXPIRE_MINUTES=1440" \
+            "FRONTEND_URL=$frontend_url" \
+            "ALLOWED_HOSTS=${static_web_app_hostname},${FUNCTION_APP_NAME}.azurewebsites.net" \
+            "ALLOWED_ORIGINS=$frontend_url,https://${FUNCTION_APP_NAME}.azurewebsites.net,http://localhost:5173,http://localhost:3000" \
+            "PLAID_ENV=sandbox" \
+            "LOG_LEVEL=INFO" \
         --output none
     
-    print_success "Function App configured!"
+    print_status "Configuring Function App CORS settings..."
+    
+    # Configure CORS directly in Function App (separate from environment variables)
+    az functionapp cors add \
+        --name "$FUNCTION_APP_NAME" \
+        --resource-group "$RESOURCE_GROUP_NAME" \
+        --allowed-origins "$frontend_url" \
+        --output none 2>/dev/null || true
+        
+    az functionapp cors add \
+        --name "$FUNCTION_APP_NAME" \
+        --resource-group "$RESOURCE_GROUP_NAME" \
+        --allowed-origins "https://${FUNCTION_APP_NAME}.azurewebsites.net" \
+        --output none 2>/dev/null || true
+        
+    az functionapp cors add \
+        --name "$FUNCTION_APP_NAME" \
+        --resource-group "$RESOURCE_GROUP_NAME" \
+        --allowed-origins "http://localhost:5173" \
+        --output none 2>/dev/null || true
+        
+    az functionapp cors add \
+        --name "$FUNCTION_APP_NAME" \
+        --resource-group "$RESOURCE_GROUP_NAME" \
+        --allowed-origins "http://localhost:3000" \
+        --output none 2>/dev/null || true
+    
+    # Enable credentials for CORS (needed for authentication)
+    az functionapp cors credentials \
+        --name "$FUNCTION_APP_NAME" \
+        --resource-group "$RESOURCE_GROUP_NAME" \
+        --enable true \
+        --output none 2>/dev/null || true
+    
+    print_success "Function App configured with environment variables and CORS settings!"
 }
 
 # Step 10: Setup secrets in Key Vault
@@ -682,7 +757,7 @@ setup_secrets() {
     local jwt_secret=$(openssl rand -hex 32)
     
     # Set secrets with retry logic - Replace Google OAuth with Microsoft Entra ID
-    local secrets=("jwt-secret:$jwt_secret" "azure-client-id:$AZURE_AD_CLIENT_ID" "azure-client-secret:$AZURE_AD_CLIENT_SECRET" "azure-tenant-id:$AZURE_AD_TENANT_ID" "plaid-client-id:configure-me" "plaid-secret:configure-me")
+    local secrets=("secret-key:$jwt_secret" "azure-client-id:$AZURE_AD_CLIENT_ID" "azure-client-secret:$AZURE_AD_CLIENT_SECRET" "azure-tenant-id:$AZURE_AD_TENANT_ID" "plaid-client-id:configure-me" "plaid-secret:configure-me")
     
     for secret_pair in "${secrets[@]}"; do
         local secret_name=$(echo "$secret_pair" | cut -d: -f1)

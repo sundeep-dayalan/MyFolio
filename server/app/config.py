@@ -78,28 +78,28 @@ class Settings(BaseSettings):
     environment: str = Field(default="development", env="ENVIRONMENT")
 
     def __init__(self, **kwargs):
-        """Initialize settings with GCP Secret Manager support."""
-        # For production deployments, load secrets from Secret Manager
-        # Check for Cloud Run (K_SERVICE) or explicit production environment
+        """Initialize settings with Azure Key Vault support."""
+        # For production deployments, load secrets from Azure Key Vault
+        # Check for Azure Functions (WEBSITE_SITE_NAME) or explicit production environment
         is_production = (
-            bool(os.getenv("K_SERVICE")) or os.getenv("ENVIRONMENT") == "production"
+            bool(os.getenv("WEBSITE_SITE_NAME")) or os.getenv("ENVIRONMENT") == "production"
         )
 
         if is_production:
             secret_manager = get_secret_manager()
 
-            # Override with secrets from Secret Manager if available
+            # Override with secrets from Azure Key Vault if available
+            # Using the secret names defined in deploy.sh
             secret_overrides = {
-                "SECRET_KEY": secret_manager.get_secret("SECRET_KEY"),
+                "SECRET_KEY": secret_manager.get_secret("secret-key"),
                 "COSMOS_DB_ENDPOINT": secret_manager.get_secret("COSMOS_DB_ENDPOINT"),
                 "COSMOS_DB_KEY": secret_manager.get_secret("COSMOS_DB_KEY"),
                 "COSMOS_DB_NAME": secret_manager.get_secret("COSMOS_DB_NAME"),
-                "AZURE_CLIENT_ID": secret_manager.get_secret("AZURE_CLIENT_ID"),
-                "AZURE_CLIENT_SECRET": secret_manager.get_secret("AZURE_CLIENT_SECRET"),
-                "AZURE_TENANT_ID": secret_manager.get_secret("AZURE_TENANT_ID"),
-                "AZURE_REDIRECT_URI": secret_manager.get_secret("AZURE_REDIRECT_URI"),
-                "ALLOWED_ORIGINS": secret_manager.get_secret("ALLOWED_ORIGINS"),
-                "FRONTEND_URL": secret_manager.get_secret("FRONTEND_URL"),
+                "AZURE_CLIENT_ID": secret_manager.get_secret("azure-client-id"),
+                "AZURE_CLIENT_SECRET": secret_manager.get_secret("azure-client-secret"),
+                "AZURE_TENANT_ID": secret_manager.get_secret("azure-tenant-id"),
+                "PLAID_CLIENT_ID": secret_manager.get_secret("plaid-client-id"),
+                "PLAID_SECRET": secret_manager.get_secret("plaid-secret"),
             }
 
             # Update environment with secrets
