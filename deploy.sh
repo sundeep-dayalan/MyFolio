@@ -487,48 +487,61 @@ create_azure_ad_app() {
     else
         print_status "Creating Azure AD app registration: $app_name"
         
-        # Create the app registration with required permissions and redirect URIs
+        # Create the app registration with basic configuration first
         # Using "AzureADandPersonalMicrosoftAccount" to support both org and personal accounts
         AZURE_AD_CLIENT_ID=$(az ad app create \
             --display-name "$app_name" \
             --sign-in-audience "AzureADandPersonalMicrosoftAccount" \
-            --web-redirect-uris "${backend_url}/api/v1/auth/oauth/microsoft/callback" "${frontend_url}/auth/callback" "http://localhost:5173/auth/callback" "http://localhost:8000/api/v1/auth/oauth/microsoft/callback" \
-            --enable-access-token-issuance true \
-            --enable-id-token-issuance true \
-            --required-resource-accesses '[
-                {
-                    "resourceAppId": "00000003-0000-0000-c000-000000000000",
-                    "resourceAccess": [
-                        {
-                            "id": "e1fe6dd8-ba31-4d61-89e7-88639da4683d",
-                            "type": "Scope"
-                        },
-                        {
-                            "id": "64a6cdd6-aab1-4aaf-94b8-3cc8405e90d0",
-                            "type": "Scope"
-                        },
-                        {
-                            "id": "14dad69e-099b-42c9-810b-d002981feec1",
-                            "type": "Scope"
-                        }
-                    ]
-                }
-            ]' \
             --query appId \
             --output tsv)
+        
+        # Wait a moment for the app to be created
+        sleep 2
+        
+        # Update the app with web redirect URIs and token configuration
+        az ad app update \
+            --id "$AZURE_AD_CLIENT_ID" \
+            --web-redirect-uris "${backend_url}/api/v1/auth/oauth/microsoft/callback" "${frontend_url}/auth/callback" "http://localhost:5173/auth/callback" "http://localhost:8000/api/v1/auth/oauth/microsoft/callback" \
+            --enable-access-token-issuance true \
+            --enable-id-token-issuance true 2>/dev/null || print_warning "Some advanced token settings may need manual configuration"
+        
+        # Add required resource permissions
+        az ad app permission add \
+            --id "$AZURE_AD_CLIENT_ID" \
+            --api 00000003-0000-0000-c000-000000000000 \
+            --api-permissions e1fe6dd8-ba31-4d61-89e7-88639da4683d=Scope 64a6cdd6-aab1-4aaf-94b8-3cc8405e90d0=Scope 14dad69e-099b-42c9-810b-d002981feec1=Scope 2>/dev/null || print_warning "Microsoft Graph permissions may need manual configuration"
             
         print_success "Azure AD app created with ID: $AZURE_AD_CLIENT_ID"
     fi
     
-    # Create a new client secret
+    # Create a new client secret with retry logic
     print_status "Creating client secret..."
     local secret_name="sage-client-secret-$(date +%s)"
-    AZURE_AD_CLIENT_SECRET=$(az ad app credential reset \
-        --id "$AZURE_AD_CLIENT_ID" \
-        --display-name "$secret_name" \
-        --years 2 \
-        --query password \
-        --output tsv)
+    local retry_count=0
+    local max_retries=3
+    
+    while [ $retry_count -lt $max_retries ]; do
+        if AZURE_AD_CLIENT_SECRET=$(az ad app credential reset \
+            --id "$AZURE_AD_CLIENT_ID" \
+            --display-name "$secret_name" \
+            --years 2 \
+            --query password \
+            --output tsv 2>/dev/null); then
+            break
+        else
+            ((retry_count++))
+            if [ $retry_count -lt $max_retries ]; then
+                print_warning "Client secret creation failed, retrying in 10 seconds... ($retry_count/$max_retries)"
+                sleep 10
+            else
+                print_error "Failed to create client secret after $max_retries attempts"
+                print_error "The corresponding MSA application may not be ready yet"
+                print_warning "You can create the client secret manually in Azure Portal:"
+                print_warning "https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/Credentials/appId/$AZURE_AD_CLIENT_ID"
+                exit 1
+            fi
+        fi
+    done
     
     print_success "Client secret created successfully"
     
