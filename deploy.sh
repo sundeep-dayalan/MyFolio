@@ -306,30 +306,35 @@ create_cosmos_db() {
     if az cosmosdb show --name "$COSMOS_NAME" --resource-group "$RESOURCE_GROUP_NAME" >/dev/null 2>&1; then
         print_warning "Cosmos DB $COSMOS_NAME already exists! Checking components..."
         
-        # Check and create database if needed
-        if ! az cosmosdb sql database show --account-name "$COSMOS_NAME" --resource-group "$RESOURCE_GROUP_NAME" --name "sage-db" >/dev/null 2>&1; then
-            print_status "Creating missing database: sage-db"
-            az cosmosdb sql database create \
-                --account-name "$COSMOS_NAME" \
-                --resource-group "$RESOURCE_GROUP_NAME" \
-                --name "sage-db" \
-                --throughput 400 \
-                --output none
-        fi
-        
-        # Check containers
-        local containers=("users" "accounts" "transactions" "plaid_tokens")
-        for container in "${containers[@]}"; do
-            if ! az cosmosdb sql container show --account-name "$COSMOS_NAME" --database-name "sage-db" --resource-group "$RESOURCE_GROUP_NAME" --name "$container" >/dev/null 2>&1; then
-                print_status "Creating missing container: $container"
-                az cosmosdb sql container create \
+        # Check and create databases if needed
+        local databases=("sage-dev-db" "sage-prod-db")
+        for database in "${databases[@]}"; do
+            if ! az cosmosdb sql database show --account-name "$COSMOS_NAME" --resource-group "$RESOURCE_GROUP_NAME" --name "$database" >/dev/null 2>&1; then
+                print_status "Creating missing database: $database"
+                az cosmosdb sql database create \
                     --account-name "$COSMOS_NAME" \
                     --resource-group "$RESOURCE_GROUP_NAME" \
-                    --database-name "sage-db" \
-                    --name "$container" \
-                    --partition-key-path "/userId" \
+                    --name "$database" \
+                    --throughput 400 \
                     --output none
             fi
+        done
+        
+        # Check containers for both databases
+        local containers=("users" "accounts" "transactions" "plaid_tokens")
+        for database in "${databases[@]}"; do
+            for container in "${containers[@]}"; do
+                if ! az cosmosdb sql container show --account-name "$COSMOS_NAME" --database-name "$database" --resource-group "$RESOURCE_GROUP_NAME" --name "$container" >/dev/null 2>&1; then
+                    print_status "Creating missing container: $container in $database"
+                    az cosmosdb sql container create \
+                        --account-name "$COSMOS_NAME" \
+                        --resource-group "$RESOURCE_GROUP_NAME" \
+                        --database-name "$database" \
+                        --name "$container" \
+                        --partition-key-path "/userId" \
+                        --output none
+                fi
+            done
         done
         print_success "Cosmos DB components verified!"
         return
@@ -373,26 +378,38 @@ create_cosmos_db() {
     
     print_success "Cosmos DB account created!"
     
-    # Create database
-    print_status "Creating database: sage-db"
+    # Create dev and prod databases
+    print_status "Creating dev database: sage-dev-db"
     az cosmosdb sql database create \
         --account-name "$COSMOS_NAME" \
         --resource-group "$RESOURCE_GROUP_NAME" \
-        --name "sage-db" \
+        --name "sage-dev-db" \
+        --throughput 400 \
+        --output none
+        
+    print_status "Creating prod database: sage-prod-db"
+    az cosmosdb sql database create \
+        --account-name "$COSMOS_NAME" \
+        --resource-group "$RESOURCE_GROUP_NAME" \
+        --name "sage-prod-db" \
         --throughput 400 \
         --output none
     
-    # Create containers
+    # Create containers for both environments
     local containers=("users" "accounts" "transactions" "plaid_tokens")
-    for container in "${containers[@]}"; do
-        print_status "Creating container: $container"
-        az cosmosdb sql container create \
-            --account-name "$COSMOS_NAME" \
-            --resource-group "$RESOURCE_GROUP_NAME" \
-            --database-name "sage-db" \
-            --name "$container" \
-            --partition-key-path "/userId" \
-            --output none
+    local databases=("sage-dev-db" "sage-prod-db")
+    
+    for database in "${databases[@]}"; do
+        for container in "${containers[@]}"; do
+            print_status "Creating container: $container in $database"
+            az cosmosdb sql container create \
+                --account-name "$COSMOS_NAME" \
+                --resource-group "$RESOURCE_GROUP_NAME" \
+                --database-name "$database" \
+                --name "$container" \
+                --partition-key-path "/userId" \
+                --output none
+        done
     done
     
     print_success "Database and containers created!"
@@ -456,6 +473,9 @@ create_key_vault() {
         --output none
     
     print_success "Key Vault permissions configured!"
+    
+    # Store function app principal ID for later use (will be set after function app creation)
+    FUNCTION_APP_PRINCIPAL_ID=""
 }
 
 # Step 6.5: Create Azure AD App Registration
@@ -612,6 +632,22 @@ create_function_app() {
         --tags "project=$PROJECT_NAME"
     
     print_success "Function App created!"
+    
+    # Enable system-assigned managed identity for Key Vault access
+    print_status "Enabling managed identity for Function App..."
+    az functionapp identity assign \
+        --name "$FUNCTION_APP_NAME" \
+        --resource-group "$RESOURCE_GROUP_NAME" \
+        --output none
+    
+    # Get the managed identity principal ID
+    local function_app_principal_id=$(az functionapp identity show \
+        --name "$FUNCTION_APP_NAME" \
+        --resource-group "$RESOURCE_GROUP_NAME" \
+        --query principalId \
+        --output tsv)
+    
+    print_success "Managed identity enabled with Principal ID: $function_app_principal_id"
 }
 
 # Step 8: Create Static Web App (only if none exists in resource group)
@@ -678,22 +714,27 @@ configure_function_app() {
         --output tsv 2>/dev/null || echo "localhost")
     local frontend_url="https://${static_web_app_hostname}"
     
-    # Configure function app settings with all required environment variables
+    # Configure function app settings with mix of direct values and Key Vault references
+    # Infrastructure values: Direct environment variables
+    # Sensitive secrets: Key Vault references
     az functionapp config appsettings set \
         --name "$FUNCTION_APP_NAME" \
         --resource-group "$RESOURCE_GROUP_NAME" \
         --settings \
+            "SECRET_KEY=@Microsoft.KeyVault(VaultName=${KEY_VAULT_NAME};SecretName=prod-secret-key)" \
             "COSMOS_DB_ENDPOINT=$cosmos_endpoint" \
             "COSMOS_DB_KEY=$cosmos_key" \
-            "COSMOS_DB_NAME=sage-db" \
+            "COSMOS_DB_NAME=sage-prod-db" \
+            "AZURE_CLIENT_ID=@Microsoft.KeyVault(VaultName=${KEY_VAULT_NAME};SecretName=prod-azure-client-id)" \
+            "AZURE_CLIENT_SECRET=@Microsoft.KeyVault(VaultName=${KEY_VAULT_NAME};SecretName=prod-azure-client-secret)" \
+            "AZURE_TENANT_ID=@Microsoft.KeyVault(VaultName=${KEY_VAULT_NAME};SecretName=prod-azure-tenant-id)" \
+            "PLAID_CLIENT_ID=@Microsoft.KeyVault(VaultName=${KEY_VAULT_NAME};SecretName=prod-plaid-client-id)" \
+            "PLAID_SECRET=@Microsoft.KeyVault(VaultName=${KEY_VAULT_NAME};SecretName=prod-plaid-secret)" \
             "KEY_VAULT_URL=$key_vault_url" \
             "ENVIRONMENT=$ENVIRONMENT" \
             "APPLICATIONINSIGHTS_CONNECTION_STRING=$insights_connection" \
             "FUNCTIONS_WORKER_RUNTIME=python" \
             "PYTHON_ENABLE_GUNICORN_MULTIPROCESSING=1" \
-            "AZURE_CLIENT_ID=$AZURE_AD_CLIENT_ID" \
-            "AZURE_CLIENT_SECRET=$AZURE_AD_CLIENT_SECRET" \
-            "AZURE_TENANT_ID=$AZURE_AD_TENANT_ID" \
             "AZURE_REDIRECT_URI=https://${FUNCTION_APP_NAME}.azurewebsites.net/api/v1/auth/oauth/microsoft/callback" \
             "PROJECT_NAME=Sage API" \
             "VERSION=2.0.2" \
@@ -743,6 +784,35 @@ configure_function_app() {
         --output none 2>/dev/null || true
     
     print_success "Function App configured with environment variables and CORS settings!"
+    
+    # Grant Function App managed identity access to Key Vault
+    print_status "Granting Function App access to Key Vault..."
+    local function_app_principal_id=$(az functionapp identity show \
+        --name "$FUNCTION_APP_NAME" \
+        --resource-group "$RESOURCE_GROUP_NAME" \
+        --query principalId \
+        --output tsv)
+    
+    if [ -n "$function_app_principal_id" ]; then
+        # Grant both Key Vault Secrets User and Reader roles (required for Function App Key Vault references)
+        print_status "Granting Key Vault Secrets User role..."
+        az role assignment create \
+            --role "Key Vault Secrets User" \
+            --assignee "$function_app_principal_id" \
+            --scope "/subscriptions/$(az account show --query id --output tsv)/resourceGroups/$RESOURCE_GROUP_NAME/providers/Microsoft.KeyVault/vaults/$KEY_VAULT_NAME" \
+            --output none 2>/dev/null || print_warning "Key Vault Secrets User role assignment may already exist"
+            
+        print_status "Granting Key Vault Reader role..."
+        az role assignment create \
+            --role "Key Vault Reader" \
+            --assignee "$function_app_principal_id" \
+            --scope "/subscriptions/$(az account show --query id --output tsv)/resourceGroups/$RESOURCE_GROUP_NAME/providers/Microsoft.KeyVault/vaults/$KEY_VAULT_NAME" \
+            --output none 2>/dev/null || print_warning "Key Vault Reader role assignment may already exist"
+        
+        print_success "Function App granted Key Vault access with required roles!"
+    else
+        print_warning "Could not retrieve Function App principal ID. Key Vault access may need manual configuration."
+    fi
 }
 
 # Step 10: Setup secrets in Key Vault
@@ -756,8 +826,31 @@ setup_secrets() {
     # Generate secure JWT secret
     local jwt_secret=$(openssl rand -hex 32)
     
-    # Set secrets with retry logic - Replace Google OAuth with Microsoft Entra ID
-    local secrets=("secret-key:$jwt_secret" "azure-client-id:$AZURE_AD_CLIENT_ID" "azure-client-secret:$AZURE_AD_CLIENT_SECRET" "azure-tenant-id:$AZURE_AD_TENANT_ID" "plaid-client-id:configure-me" "plaid-secret:configure-me")
+    # Create environment-specific secrets (both dev and prod)
+    print_status "Creating dev and prod environment secrets..."
+    
+    # Dev environment secrets (only actual secrets, not infrastructure config)
+    local dev_secrets=(
+        "dev-secret-key:$jwt_secret"
+        "dev-azure-client-id:$AZURE_AD_CLIENT_ID"
+        "dev-azure-client-secret:$AZURE_AD_CLIENT_SECRET"
+        "dev-azure-tenant-id:$AZURE_AD_TENANT_ID"
+        "dev-plaid-client-id:configure-me"
+        "dev-plaid-secret:configure-me"
+    )
+    
+    # Prod environment secrets (only actual secrets, not infrastructure config)
+    local prod_secrets=(
+        "prod-secret-key:$jwt_secret"
+        "prod-azure-client-id:$AZURE_AD_CLIENT_ID"
+        "prod-azure-client-secret:$AZURE_AD_CLIENT_SECRET"
+        "prod-azure-tenant-id:$AZURE_AD_TENANT_ID"
+        "prod-plaid-client-id:configure-me"
+        "prod-plaid-secret:configure-me"
+    )
+    
+    # Combine all secrets
+    local secrets=("${dev_secrets[@]}" "${prod_secrets[@]}")
     
     for secret_pair in "${secrets[@]}"; do
         local secret_name=$(echo "$secret_pair" | cut -d: -f1)
@@ -984,7 +1077,11 @@ display_summary() {
     echo "   • Connect GitHub repository in Azure portal"
     echo "   • Or upload build files from frontend/dist/"
     echo ""
-    echo "4️⃣  TEST YOUR APPLICATION:"
+    echo "4️⃣  RESTART FUNCTION APP (Important for Key Vault references):"
+    echo "   • az functionapp restart --name $FUNCTION_APP_NAME --resource-group $RESOURCE_GROUP_NAME"
+    echo "   • Wait 2-3 minutes after restart for Key Vault references to resolve"
+    echo ""
+    echo "5️⃣  TEST YOUR APPLICATION:"
     echo "   • Backend health: curl $FUNCTION_APP_URL/health"
     echo "   • Frontend: Visit $STATIC_WEB_APP_URL"
     echo ""

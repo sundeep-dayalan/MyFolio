@@ -79,27 +79,29 @@ class Settings(BaseSettings):
 
     def __init__(self, **kwargs):
         """Initialize settings with Azure Key Vault support."""
-        # For production deployments, load secrets from Azure Key Vault
-        # Check for Azure Functions (WEBSITE_SITE_NAME) or explicit production environment
-        is_production = (
-            bool(os.getenv("WEBSITE_SITE_NAME")) or os.getenv("ENVIRONMENT") == "production"
-        )
-
-        if is_production:
+        # Check deployment environment
+        is_azure_functions = bool(os.getenv("WEBSITE_SITE_NAME"))
+        is_production = os.getenv("ENVIRONMENT") == "production"
+        is_development = os.getenv("ENVIRONMENT") in ["development", "dev"]
+        
+        # For Azure Functions in production: Key Vault references are automatically resolved
+        # For local development: Manually load from Key Vault using Azure identity
+        if not is_azure_functions and (is_production or is_development):
             secret_manager = get_secret_manager()
-
+            
+            # Determine environment prefix for secrets
+            env_prefix = "dev" if is_development else "prod"
+            
             # Override with secrets from Azure Key Vault if available
-            # Using the secret names defined in deploy.sh
+            # Using environment-specific secret names (dev-*/prod-*)
+            # Note: Cosmos DB settings are handled as direct environment variables, not secrets
             secret_overrides = {
-                "SECRET_KEY": secret_manager.get_secret("secret-key"),
-                "COSMOS_DB_ENDPOINT": secret_manager.get_secret("COSMOS_DB_ENDPOINT"),
-                "COSMOS_DB_KEY": secret_manager.get_secret("COSMOS_DB_KEY"),
-                "COSMOS_DB_NAME": secret_manager.get_secret("COSMOS_DB_NAME"),
-                "AZURE_CLIENT_ID": secret_manager.get_secret("azure-client-id"),
-                "AZURE_CLIENT_SECRET": secret_manager.get_secret("azure-client-secret"),
-                "AZURE_TENANT_ID": secret_manager.get_secret("azure-tenant-id"),
-                "PLAID_CLIENT_ID": secret_manager.get_secret("plaid-client-id"),
-                "PLAID_SECRET": secret_manager.get_secret("plaid-secret"),
+                "SECRET_KEY": secret_manager.get_secret(f"{env_prefix}-secret-key"),
+                "AZURE_CLIENT_ID": secret_manager.get_secret(f"{env_prefix}-azure-client-id"),
+                "AZURE_CLIENT_SECRET": secret_manager.get_secret(f"{env_prefix}-azure-client-secret"),
+                "AZURE_TENANT_ID": secret_manager.get_secret(f"{env_prefix}-azure-tenant-id"),
+                "PLAID_CLIENT_ID": secret_manager.get_secret(f"{env_prefix}-plaid-client-id"),
+                "PLAID_SECRET": secret_manager.get_secret(f"{env_prefix}-plaid-secret"),
             }
 
             # Update environment with secrets
