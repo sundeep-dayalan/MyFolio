@@ -224,9 +224,18 @@ class PlaidConfigurationService:
     async def store_configuration(
         self, config: PlaidConfigurationCreate, admin_user_id: str
     ) -> PlaidConfigurationResponse:
-        """Store Plaid configuration with encrypted secret."""
+        """Store Plaid configuration with encrypted secret. Throws error if config already exists."""
         try:
             container = await self._get_container()
+
+            # Check if configuration already exists
+            try:
+                existing_config = container.read_item("plaid_config", "plaid_config")
+                if existing_config:
+                    logger.error("Plaid configuration already exists. Cannot update via POST.")
+                    raise ValueError("Plaid configuration already exists. Delete before creating a new one.")
+            except CosmosResourceNotFoundError:
+                pass  # Not found, safe to create
 
             # Encrypt the secret using Key Vault
             encrypted_secret = await self._encrypt_secret(config.plaid_secret)
@@ -243,8 +252,8 @@ class PlaidConfigurationService:
                 "created_at": datetime.now(timezone.utc).isoformat(),
             }
 
-            # Upsert the configuration
-            container.upsert_item(config_doc)
+            # Create the configuration (not upsert)
+            container.create_item(config_doc)
 
             logger.info(f"Plaid configuration stored by admin: {admin_user_id}")
 
@@ -258,7 +267,7 @@ class PlaidConfigurationService:
 
         except Exception as e:
             logger.error(f"Error storing Plaid configuration: {e}")
-            raise ValueError("Failed to store Plaid configuration")
+            raise ValueError(str(e) or "Failed to store Plaid configuration")
 
     async def get_configuration_status(self) -> PlaidConfigurationStatus:
         """Get Plaid configuration status."""
