@@ -77,6 +77,19 @@ def setup_logging() -> None:
     # Set third-party loggers to WARNING to reduce noise
     logging.getLogger("google").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
+    
+    # Disable verbose Azure SDK logging
+    azure_loggers = [
+        'azure.core.pipeline.policies.http_logging_policy',
+        'azure.cosmos',
+        'azure.keyvault',
+        'azure.identity',
+        'azure.core',
+        'azure'
+    ]
+    
+    for logger_name in azure_loggers:
+        logging.getLogger(logger_name).setLevel(logging.WARNING)
 
 
 def get_logger(name: str) -> logging.Logger:
