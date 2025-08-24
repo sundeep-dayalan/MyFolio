@@ -22,7 +22,11 @@ async def ensure_cosmos_connected():
     """Ensure CosmosDB is connected, initializing if necessary."""
     if not cosmos_client.is_connected:
         logger.info("CosmosDB not connected, initializing...")
-        await cosmos_client.connect()
+        try:
+            await cosmos_client.connect()
+        except Exception as e:
+            logger.warning(f"CosmosDB connection failed, continuing in offline mode: {str(e)}")
+            # Continue in offline mode - OAuth can still work without CosmosDB
 
 
 @router.get("")

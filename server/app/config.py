@@ -48,6 +48,9 @@ class Settings(BaseSettings):
             if origin.strip()
         ]
 
+    # Azure Key Vault Configuration
+    key_vault_url: Optional[str] = Field(default=None, env="KEY_VAULT_URL")
+
     # CosmosDB Configuration
     cosmos_db_endpoint: str = Field(..., env="COSMOS_DB_ENDPOINT")
     cosmos_db_key: str = Field(..., env="COSMOS_DB_KEY")
