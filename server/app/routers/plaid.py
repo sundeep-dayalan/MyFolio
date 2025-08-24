@@ -55,13 +55,13 @@ def get_plaid_service() -> PlaidService:
 
 
 @router.post("/create_link_token")
-def create_link_token(
+async def create_link_token(
     user_id: str = Depends(get_current_user_id),
     plaid_service: PlaidService = Depends(get_plaid_service),
 ):
     """Create a Plaid link token for the current user."""
     try:
-        link_token = plaid_service.create_link_token(user_id)
+        link_token = await plaid_service.create_link_token(user_id)
         return {"link_token": link_token}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))

@@ -481,6 +481,13 @@ create_key_vault() {
         --scope "/subscriptions/$(az account show --query id -o tsv)/resourceGroups/$RESOURCE_GROUP_NAME/providers/Microsoft.KeyVault/vaults/$KEY_VAULT_NAME" \
         --output none
 
+    # Role for managing cryptographic keys (create, delete)
+    az role assignment create \
+        --role "Key Vault Crypto Officer" \
+        --assignee "$current_user" \
+        --scope "/subscriptions/$(az account show --query id --output tsv)/resourceGroups/$RESOURCE_GROUP_NAME/providers/Microsoft.KeyVault/vaults/$KEY_VAULT_NAME" \
+        --output none
+
     print_success "Key Vault permissions configured!"
     
     # Store function app principal ID for later use (will be set after function app creation)
@@ -848,6 +855,22 @@ setup_secrets() {
             fi
         done
     done
+
+    print_status "Creating cryptographic key for all secrets encryption..."
+
+    if az keyvault key create \
+        --vault-name "$KEY_VAULT_NAME" \
+        --name "secrets-encryption-key" \
+        --kty RSA \
+        --size 2048 \
+        --ops encrypt decrypt \
+        --protection software \
+        --output none; then
+        print_success "Successfully created cryptographic key: 'secrets-encryption-key'"
+    else
+        print_error "Failed to create cryptographic key: 'secrets-encryption-key'"
+        exit 1 # Critical key can't be created
+    fi
     
     print_success "Secrets configured!"
 }
