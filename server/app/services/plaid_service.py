@@ -273,6 +273,15 @@ class PlaidService:
                 user_id, access_token, item_id, institution_info
             )
 
+            # Immediately sync account data so accounts are available right away
+            try:
+                logger.info(f"🔄 Syncing account data immediately for item {item_id}")
+                await self.get_accounts_with_balances(user_id, use_cached_balance=False)
+                logger.info(f"✅ Account data synced successfully for item {item_id}")
+            except Exception as e:
+                logger.error(f"❌ Failed to sync account data for item {item_id}: {e}")
+                # Don't fail the entire exchange if account sync fails
+
             logger.info(
                 f"Successfully exchanged and stored token for user {user_id}, item_id: {item_id}"
             )
@@ -1026,7 +1035,7 @@ class PlaidService:
             access_token = TokenEncryption.decrypt_token(target_token.access_token)
             logger.info(f"✅ Successfully decrypted access token for item {item_id}")
 
-            # Perform the sync
+            # Perform transaction sync
             result = await self.sync_all_transactions_for_item(
                 user_id, item_id, access_token
             )
