@@ -282,6 +282,8 @@ class PlaidService:
             except Exception as e:
                 logger.error(f"❌ Failed to sync account data for item {item_id}: {e}")
                 # Don't fail the entire exchange if account sync fails
+                
+            # Note: Transaction sync is handled separately and shouldn't block the main flow
 
             logger.info(
                 f"Successfully exchanged and stored token for user {user_id}, item_id: {item_id}"
@@ -345,14 +347,14 @@ class PlaidService:
         item_id: str,
         institution_info: Dict[str, Any] = None,
     ) -> PlaidAccessToken:
-        """Store access token in CosmosDB."""
+        """Store bank data with token and accounts in single document."""
         try:
-            logger.info(f"Storing access token for user {user_id}, item_id: {item_id}")
+            logger.info(f"Storing bank data for user {user_id}, item_id: {item_id}")
 
             # Check if CosmosDB is connected
             if not cosmos_client.is_connected:
-                logger.error("CosmosDB not connected - cannot store tokens")
-                raise Exception("CosmosDB connection required for token storage")
+                logger.error("CosmosDB not connected - cannot store bank data")
+                raise Exception("CosmosDB connection required for bank data storage")
 
             # Encrypt the access token for production storage
             logger.debug(f"Encrypting access token: {access_token} for secure storage")
@@ -389,41 +391,46 @@ class PlaidService:
                 metadata=clean_metadata,  # Store cleaned institution info in metadata
             )
 
-            # Store the plaid token as individual document in CosmosDB
-            # Use model_dump with mode='json' to properly serialize all types including enums and datetime
-            token_data = plaid_token.model_dump(mode="json")
-
-            token_data.update(
+            # Create bank document with token and account placeholders
+            bank_data = plaid_token.model_dump(mode="json")
+            
+            bank_data.update(
                 {
-                    "id": f"{user_id}_{item_id}",  # Unique document ID
+                    "id": item_id,  # Document ID (unique within partition)
                     "userId": user_id,  # Partition key
-                    "item_id": item_id,
-                    "transactions": {"transaction_sync_status": "inprogress"},
+                    "itemId": item_id,  # Bank identifier
+                    "accounts": [],  # Will be populated when accounts are fetched
+                    "metadata": {
+                        "accountCount": 0,
+                        "totalBalance": 0.0,
+                        "lastUpdated": now.isoformat(),
+                        "transactionSyncStatus": "inprogress"
+                    }
                 }
             )
 
-            # Try to store the token document, update if exists
+            # Store in banks container instead of separate plaid_tokens
             try:
-                cosmos_client.create_item("plaid_tokens", token_data, user_id)
+                cosmos_client.create_item("banks", bank_data, user_id)
             except CosmosHttpResponseError as e:
                 if e.status_code == 409:  # Conflict - document exists, update it
                     cosmos_client.update_item(
-                        "plaid_tokens", token_data["id"], user_id, token_data
+                        "banks", item_id, user_id, bank_data
                     )
                 else:
                     raise
 
             logger.info(
-                f"Successfully stored token for user {user_id}, item_id: {item_id}"
+                f"Successfully stored bank data for user {user_id}, item_id: {item_id}"
             )
             return plaid_token
 
         except Exception as e:
-            logger.error(f"Failed to store access token for user {user_id}: {e}")
-            raise Exception(f"Failed to store access token: {e}")
+            logger.error(f"Failed to store bank data for user {user_id}: {e}")
+            raise Exception(f"Failed to store bank data: {e}")
 
     def get_user_access_tokens(self, user_id: str) -> List[PlaidAccessToken]:
-        """Retrieve all active access tokens for a user from CosmosDB."""
+        """Retrieve all active access tokens for a user from banks container."""
         try:
             logger.info(f"Retrieving access tokens for user {user_id}")
 
@@ -431,32 +438,33 @@ class PlaidService:
                 logger.error("CosmosDB not connected - cannot retrieve tokens")
                 raise Exception("CosmosDB connection required for token retrieval")
 
-            # Query all plaid tokens for the user
+            # Query all banks for the user
             query = "SELECT * FROM c WHERE c.userId = @userId AND c.status = @status"
             parameters = [
                 {"name": "@userId", "value": user_id},
                 {"name": "@status", "value": PlaidTokenStatus.ACTIVE.value},
             ]
 
-            token_documents = cosmos_client.query_items(
-                "plaid_tokens", query, parameters, user_id
+            bank_documents = cosmos_client.query_items(
+                "banks", query, parameters, user_id
             )
             tokens = []
 
-            for token_doc in token_documents:
+            for bank_doc in bank_documents:
                 try:
                     # Convert datetime strings back to datetime objects if needed
                     for field in ["created_at", "updated_at", "last_used_at"]:
-                        if token_doc.get(field) and isinstance(token_doc[field], str):
-                            token_doc[field] = datetime.fromisoformat(
-                                token_doc[field].replace("Z", "+00:00")
+                        if bank_doc.get(field) and isinstance(bank_doc[field], str):
+                            bank_doc[field] = datetime.fromisoformat(
+                                bank_doc[field].replace("Z", "+00:00")
                             )
 
-                    token = PlaidAccessToken.model_validate(token_doc)
+                    # Extract token data from bank document
+                    token = PlaidAccessToken.model_validate(bank_doc)
                     tokens.append(token)
                 except Exception as e:
                     logger.error(
-                        f"Failed to parse token data for document {token_doc.get('id', 'unknown')}: {e}"
+                        f"Failed to parse token data for document {bank_doc.get('id', 'unknown')}: {e}"
                     )
                     continue  # Skip to the next item if one is corrupted
 
@@ -472,11 +480,10 @@ class PlaidService:
         user_id: str,
         account_ids: Optional[List[str]] = None,
         use_cached_balance: bool = True,
-        max_cache_age_hours: int = 4,
     ) -> Dict[str, Any]:
         """
-        If use_cached_balance is True, fetch account data from Cosmos DB only.
-        If use_cached_balance is False, fetch from Plaid API, update Cosmos DB, and return latest.
+        If use_cached_balance is True, fetch account data from bank documents.
+        If use_cached_balance is False, fetch from Plaid API and update bank documents.
         """
         try:
             logger.info(
@@ -484,9 +491,9 @@ class PlaidService:
             )
 
             if use_cached_balance:
-                # Only fetch from Cosmos DB
-                cached_data = account_storage_service.get_stored_account_data(user_id)
-                if cached_data:
+                # Fetch from bank documents
+                cached_data = self._get_cached_accounts_from_banks(user_id)
+                if cached_data and cached_data["accounts"]:
                     logger.info(f"Returning cached account data for user {user_id}")
                     return cached_data
                 else:
@@ -499,7 +506,7 @@ class PlaidService:
                         "message": "No cached account data found. Please refresh.",
                     }
 
-            # If not using cached balance, fetch from Plaid and update Cosmos DB
+            # If not using cached balance, fetch from Plaid and update bank documents
             tokens = self.get_user_access_tokens(user_id)
             if not tokens:
                 logger.warning(f"No active tokens found for user {user_id}")
@@ -532,6 +539,10 @@ class PlaidService:
                     client = await self._get_client()
                     response = client.accounts_balance_get(request)
                     accounts_data = response["accounts"]
+                    
+                    bank_accounts = []
+                    bank_total_balance = 0.0
+                    
                     for account in accounts_data:
                         balance_info = account["balances"]
                         balance = PlaidBalance(
@@ -565,15 +576,24 @@ class PlaidService:
                             institution_name=token.institution_name,
                             institution_id=token.institution_id,
                         )
-                        all_accounts.append(account_with_balance.model_dump())
-                        if balance.current:
-                            total_balance += float(balance.current)
+                        account_dict = account_with_balance.model_dump()
+                        bank_accounts.append(account_dict)
+                        all_accounts.append(account_dict)
+                        if balance.current is not None:
+                            current_balance = float(balance.current)
+                            bank_total_balance += current_balance
+                            total_balance += current_balance
+                    
+                    # Update this bank's document with accounts
+                    self._update_bank_accounts(user_id, token.item_id, bank_accounts, bank_total_balance)
                     self._update_token_last_used(user_id, token.item_id)
+                    
                 except Exception as e:
                     logger.error(
                         f"Failed to get balances for token {token.item_id}: {e}"
                     )
                     continue
+                    
             all_accounts.sort(key=lambda x: x["balances"]["current"] or 0, reverse=True)
             result = {
                 "accounts": all_accounts,
@@ -581,8 +601,6 @@ class PlaidService:
                 "account_count": len(all_accounts),
                 "last_updated": datetime.now(timezone.utc).isoformat(),
             }
-            # Store the result in Cosmos DB
-            account_storage_service.store_account_data(user_id, result)
             logger.info(
                 f"Retrieved {len(all_accounts)} accounts with total balance ${total_balance:.2f} for user {user_id}"
             )
@@ -593,16 +611,72 @@ class PlaidService:
             )
             raise Exception(f"Failed to get account balances: {e}")
 
-    def _update_token_last_used(self, user_id: str, item_id: str) -> bool:
-        """Update the last_used_at timestamp for a token."""
+    def _get_cached_accounts_from_banks(self, user_id: str) -> Dict[str, Any]:
+        """Get cached account data from all bank documents for a user."""
         try:
-            doc_id = f"{user_id}_{item_id}"
+            query = "SELECT * FROM c WHERE c.userId = @userId"
+            parameters = [{"name": "@userId", "value": user_id}]
+            
+            bank_documents = cosmos_client.query_items("banks", query, parameters, user_id)
+            all_accounts = []
+            total_balance = 0.0
+            
+            logger.info(f"Found {len(bank_documents)} bank documents for user {user_id}")
+            
+            for bank_doc in bank_documents:
+                bank_accounts = bank_doc.get("accounts", [])
+                all_accounts.extend(bank_accounts)
+                
+                # Calculate balance from individual accounts instead of relying on stored metadata
+                bank_balance = 0.0
+                for account in bank_accounts:
+                    balances = account.get("balances", {})
+                    current_balance = balances.get("current")
+                    if current_balance is not None:
+                        bank_balance += float(current_balance)
+                
+                logger.info(f"Bank {bank_doc.get('itemId', 'unknown')}: {len(bank_accounts)} accounts, balance: ${bank_balance:.2f}")
+                total_balance += bank_balance
+                
+            logger.info(f"Total cached balance for user {user_id}: ${total_balance:.2f}")
+                
+            return {
+                "accounts": all_accounts,
+                "total_balance": round(total_balance, 2),
+                "account_count": len(all_accounts),
+                "last_updated": datetime.now(timezone.utc).isoformat(),
+            }
+        except Exception as e:
+            logger.error(f"Failed to get cached accounts from banks: {e}")
+            return {"accounts": [], "total_balance": 0.0, "account_count": 0}
+
+    def _update_bank_accounts(self, user_id: str, item_id: str, accounts: List[Dict], total_balance: float) -> bool:
+        """Update accounts and metadata for a specific bank document."""
+        try:
+            update_data = {
+                "accounts": accounts,
+                "metadata.accountCount": len(accounts),
+                "metadata.totalBalance": round(total_balance, 2),
+                "metadata.lastUpdated": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+            
+            cosmos_client.update_item("banks", item_id, user_id, update_data)
+            logger.info(f"Updated bank {item_id} with {len(accounts)} accounts, balance: ${total_balance:.2f}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to update bank accounts for {item_id}: {e}")
+            return False
+
+    def _update_token_last_used(self, user_id: str, item_id: str) -> bool:
+        """Update the last_used_at timestamp for a bank document."""
+        try:
             update_data = {
                 "last_used_at": datetime.now(timezone.utc).isoformat(),
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
 
-            cosmos_client.update_item("plaid_tokens", doc_id, user_id, update_data)
+            cosmos_client.update_item("banks", item_id, user_id, update_data)
             return True
         except Exception as e:
             logger.error(f"Failed to update token last_used for {item_id}: {e}")
@@ -645,12 +719,10 @@ class PlaidService:
                     f"Failed to revoke with Plaid API: {e}, continuing with local cleanup"
                 )
 
-            # Remove token from CosmosDB
-            doc_id = f"{user_id}_{item_id}"
-            cosmos_client.delete_item("plaid_tokens", doc_id, user_id)
+            # Remove bank document from CosmosDB
+            cosmos_client.delete_item("banks", item_id, user_id)
 
-            # Clean up related data
-            account_storage_service.clear_data(user_id)
+            # Clean up transaction data
             transaction_storage_service.delete_item_transactions(user_id, item_id)
 
             logger.info(f"Successfully cleaned up all data for item {item_id}")
@@ -681,12 +753,11 @@ class PlaidService:
                 except Exception as e:
                     logger.error(f"Failed to revoke item {token.item_id}: {e}")
 
-            # Clean up any remaining data
-            account_storage_service.clear_data(user_id)
+            # Clean up transaction data
             transaction_storage_service.delete_all_user_transactions(user_id)
 
-            # Also clean up any remaining plaid_tokens that might not have been caught
-            self._delete_all_user_tokens(user_id)
+            # Also clean up any remaining banks that might not have been caught
+            self._delete_all_user_banks(user_id)
 
             logger.info(
                 f"Removed {success_count}/{len(tokens)} items for user {user_id}"
@@ -697,40 +768,40 @@ class PlaidService:
             logger.error(f"Failed to remove all user data for {user_id}: {e}")
             return False
 
-    def _delete_all_user_tokens(self, user_id: str) -> bool:
-        """Delete all plaid_tokens documents for a user from CosmosDB."""
+    def _delete_all_user_banks(self, user_id: str) -> bool:
+        """Delete all bank documents for a user from CosmosDB."""
         try:
-            logger.info(f"Deleting all plaid_tokens for user {user_id}")
+            logger.info(f"Deleting all banks for user {user_id}")
 
             if not cosmos_client.is_connected:
-                logger.error("CosmosDB not connected - cannot delete tokens")
+                logger.error("CosmosDB not connected - cannot delete banks")
                 return False
 
-            # Query all plaid_tokens for the user
+            # Query all banks for the user
             query = "SELECT c.id FROM c WHERE c.userId = @userId"
             parameters = [{"name": "@userId", "value": user_id}]
 
-            token_docs = cosmos_client.query_items(
-                "plaid_tokens", query, parameters, user_id
+            bank_docs = cosmos_client.query_items(
+                "banks", query, parameters, user_id
             )
 
             deleted_count = 0
-            for token_doc in token_docs:
+            for bank_doc in bank_docs:
                 try:
-                    cosmos_client.delete_item("plaid_tokens", token_doc["id"], user_id)
+                    cosmos_client.delete_item("banks", bank_doc["id"], user_id)
                     deleted_count += 1
                 except Exception as e:
                     logger.warning(
-                        f"Failed to delete token document {token_doc['id']}: {e}"
+                        f"Failed to delete bank document {bank_doc['id']}: {e}"
                     )
 
             logger.info(
-                f"Successfully deleted {deleted_count} plaid_tokens for user {user_id}"
+                f"Successfully deleted {deleted_count} banks for user {user_id}"
             )
             return True
 
         except Exception as e:
-            logger.error(f"Failed to delete all tokens for user {user_id}: {e}")
+            logger.error(f"Failed to delete all banks for user {user_id}: {e}")
             return False
 
     def update_transaction_sync_status(
@@ -738,13 +809,12 @@ class PlaidService:
     ) -> bool:
         """Update transaction sync status for an item."""
         try:
-            doc_id = f"{user_id}_{item_id}"
             update_data = {
-                "transactions.transaction_sync_status": status,
+                "metadata.transactionSyncStatus": status,
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
 
-            cosmos_client.update_item("plaid_tokens", doc_id, user_id, update_data)
+            cosmos_client.update_item("banks", item_id, user_id, update_data)
             logger.info(f"Updated sync status to '{status}' for item {item_id}")
             return True
         except Exception as e:
@@ -767,7 +837,18 @@ class PlaidService:
             modified_count = 0
             removed_count = 0
 
+            # Safety counter to prevent infinite loops
+            max_iterations = 50
+            iteration_count = 0
+            
             while True:
+                iteration_count += 1
+                if iteration_count > max_iterations:
+                    logger.error(f"Transaction sync exceeded {max_iterations} iterations for item {item_id}. Breaking loop.")
+                    break
+                    
+                logger.info(f"Transaction sync iteration {iteration_count} for item {item_id}")
+                
                 # Create request - omit cursor for initial sync when None
                 if cursor is not None:
                     request = TransactionsSyncRequest(
@@ -783,6 +864,8 @@ class PlaidService:
                 added = response.get("added", [])
                 modified = response.get("modified", [])
                 removed = response.get("removed", [])
+                
+                logger.info(f"Sync iteration {iteration_count}: added={len(added)}, modified={len(modified)}, removed={len(removed)}")
 
                 if added:
                     # Store added transactions
@@ -807,8 +890,11 @@ class PlaidService:
 
                 cursor = response.get("next_cursor")
                 has_more = response.get("has_more", False)
+                
+                logger.info(f"Sync iteration {iteration_count}: cursor={cursor}, has_more={has_more}")
 
                 if not has_more:
+                    logger.info(f"Transaction sync completed for item {item_id} after {iteration_count} iterations")
                     break
 
             # Update sync status to complete
