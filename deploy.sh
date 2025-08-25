@@ -22,6 +22,15 @@ ENVIRONMENT="prod"
 UNIQUE_SUFFIX="$(date +%s | tail -c 6)4121997"
 RESOURCE_GROUP_NAME="${PROJECT_NAME}-rg-${UNIQUE_SUFFIX}"
 
+# Environment array for dev and prod
+ENVIRONMENTS=("dev" "prod")
+
+# Variables to store Azure AD credentials for each environment
+AZURE_DEV_CLIENT_ID=""
+AZURE_DEV_CLIENT_SECRET=""
+AZURE_PROD_CLIENT_ID=""
+AZURE_PROD_CLIENT_SECRET=""
+
 # Resource names with proper conventions
 STORAGE_NAME="sage${UNIQUE_SUFFIX}storage"
 COSMOS_NAME="sage-${UNIQUE_SUFFIX}-cosmos"
@@ -497,161 +506,177 @@ create_key_vault() {
 create_azure_ad_app() {
     print_header "STEP 6.5: AZURE AD APP REGISTRATION"
     
-    # Variables for Azure AD app
-    local app_name="sage-${ENVIRONMENT}-app"
     local frontend_url="https://$(echo $STATIC_WEB_APP_NAME | tr '[:upper:]' '[:lower:]').azurestaticapps.net"
     local backend_url="https://${FUNCTION_APP_NAME}.azurewebsites.net"
-    local APP_REG_ACTION="" # To track if we created or reused the app
-
-    print_status "Checking for existing Azure AD app registration: '$app_name'..."
-
-    # --- MODIFICATION START ---
-    # Check if an app with the exact display name already exists.
-    # The JMESPath query [?displayName=='$app_name'] ensures an exact match.
-    AZURE_AD_CLIENT_ID=$(az ad app list --display-name "$app_name" --query "[?displayName=='$app_name'].appId" -o tsv 2>/dev/null)
-
-    if [ -n "$AZURE_AD_CLIENT_ID" ]; then
-        print_warning "Found existing app registration with Client ID: $AZURE_AD_CLIENT_ID"
-        print_status "Reusing and updating the existing application..."
-        APP_REG_ACTION="reused"
-    else
-        print_status "No existing app found. Creating a new Azure AD app registration..."
-        # Create the app registration with basic configuration first
-        # Using "AzureADandPersonalMicrosoftAccount" to support both org and personal accounts
-        AZURE_AD_CLIENT_ID=$(az ad app create \
-            --display-name "$app_name" \
-            --sign-in-audience "AzureADandPersonalMicrosoftAccount" \
-            --query appId \
-            --output tsv)
-        
-        print_success "New app created with Client ID: $AZURE_AD_CLIENT_ID"
-        print_warning "Waiting 15 seconds for the new app registration to propagate before updating..."
-        sleep 15 # Wait a moment for the new app to be fully available for updates
-        APP_REG_ACTION="created"
-    fi
-    # --- MODIFICATION END ---
     
-    # The rest of the function now operates on the existing or newly created app ID
-    
-    # Update the app with web redirect URIs and token configuration
-    print_status "Applying latest configuration (redirect URIs, token settings)..."
-
-   # Retry logic for az ad app update
-    local update_attempt=1
-    local update_max_attempts=3
-    local update_status=1
-
-    while [ $update_attempt -le $update_max_attempts ]; do
-        az ad app update \
-            --id "$AZURE_AD_CLIENT_ID" \
-            --web-redirect-uris "${backend_url}/api/v1/auth/oauth/microsoft/callback" "${frontend_url}/auth/callback" "http://localhost:5173/auth/callback" "http://localhost:8000/api/v1/auth/oauth/microsoft/callback" \
-            --enable-access-token-issuance true \
-            --enable-id-token-issuance true 2>/dev/null
-        
-        update_status=$?
-        
-        if [ $update_status -eq 0 ]; then
-            print_success "Azure AD app update succeeded. Redirect URIs and token settings applied."
-            break
-        else
-            print_warning "Azure AD app update failed (attempt $update_attempt/$update_max_attempts). Retrying in 10 seconds..."
-            sleep 10
-        fi
-        
-        ((update_attempt++))
-    done
-
-    if [ $update_status -ne 0 ]; then
-        print_error "Azure AD app update failed after $update_max_attempts attempts! Some advanced token settings may need manual configuration."
-    fi
-
-    # Retry logic for az ad app permission add
-    local perm_attempt=1
-    local perm_max_attempts=3
-    local perm_status=1
-
-    while [ $perm_attempt -le $perm_max_attempts ]; do
-        az ad app permission add \
-            --id "$AZURE_AD_CLIENT_ID" \
-            --api 00000003-0000-0000-c000-000000000000 \
-            --api-permissions e1fe6dd8-ba31-4d61-89e7-88639da4683d=Scope 64a6cdd6-aab1-4aaf-94b8-3cc8405e90d0=Scope 14dad69e-099b-42c9-810b-d002981feec1=Scope 2>/dev/null
-        
-        perm_status=$?
-        
-        if [ $perm_status -eq 0 ]; then
-            print_success "Microsoft Graph permissions added successfully."
-            break
-        else
-            print_warning "Failed to add Microsoft Graph permissions (attempt $perm_attempt/$perm_max_attempts). Retrying in 10 seconds..."
-            sleep 10
-        fi
-        
-        ((perm_attempt++))
-    done
-
-    if [ $perm_status -ne 0 ]; then
-        print_error "Failed to add Microsoft Graph permissions after $perm_max_attempts attempts! May need manual configuration."
-    fi
-
-        
-    # Create a new client secret with retry logic.
-    # This command always generates a *new* secret, which is a good security practice for automated deployments.
-    print_status "Resetting client secret to ensure a valid secret is available..."
-    local secret_name="sage-client-secret-$(date +%s)"
-    local retry_count=0
-    local max_retries=3
-    
-    while [ $retry_count -lt $max_retries ]; do
-        if AZURE_AD_CLIENT_SECRET=$(az ad app credential reset \
-            --id "$AZURE_AD_CLIENT_ID" \
-            --display-name "$secret_name" \
-            --years 2 \
-            --query password \
-            --output tsv 2>/dev/null); then
-            break
-        else
-            ((retry_count++))
-            if [ $retry_count -lt $max_retries ]; then
-                print_warning "Client secret creation failed, retrying in 10 seconds... ($retry_count/$max_retries)"
-                sleep 10
-            else
-                print_error "Failed to create client secret after $max_retries attempts"
-                print_error "Please try creating the client secret manually in the Azure Portal:"
-                print_warning "https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/Credentials/appId/$AZURE_AD_CLIENT_ID"
-                exit 1
-            fi
-        fi
-    done
-    
-    print_success "Client secret created/reset successfully."
-    
-    # Get tenant ID
+    # Get tenant ID once
     AZURE_AD_TENANT_ID=$(az account show --query tenantId --output tsv)
+    
+    # Loop through each environment to create/reuse app registrations
+    for env in "${ENVIRONMENTS[@]}"; do
+        local app_name="sage-${env}-app"
+        local APP_REG_ACTION="" # To track if we created or reused the app
 
-    print_status "Azure AD Configuration:"
-    print_status "  App ID (Client ID): $AZURE_AD_CLIENT_ID"
-    print_status "  Tenant ID: $AZURE_AD_TENANT_ID"
-    print_status "  Sign-in Audience: AzureADandPersonalMicrosoftAccount (supports personal & org accounts)"
-    print_status "  Redirect URIs configured for:"
-    print_status "    - Production API: ${backend_url}/api/v1/auth/oauth/microsoft/callback"
-    print_status "    - Production Web: ${frontend_url}/auth/callback"
-    print_status "    - Development API: http://localhost:8000/api/v1/auth/oauth/microsoft/callback"
-    print_status "    - Development Web: http://localhost:5173/auth/callback"
-    echo ""
-    print_status "Azure Portal Link:"
-    print_status "  https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/Overview/appId/$AZURE_AD_CLIENT_ID"
+        print_status "Processing environment: $env"
+        print_status "Checking for existing Azure AD app registration: '$app_name'..."
+
+        # Check if an app with the exact display name already exists
+        local client_id=$(az ad app list --display-name "$app_name" --query "[?displayName=='$app_name'].appId" -o tsv 2>/dev/null)
+
+        if [ -n "$client_id" ]; then
+            print_warning "Found existing app registration for $env with Client ID: $client_id"
+            print_status "Reusing and updating the existing application..."
+            APP_REG_ACTION="reused"
+        else
+            print_status "No existing app found for $env. Creating a new Azure AD app registration..."
+            # Create the app registration with basic configuration first
+            # Using "AzureADandPersonalMicrosoftAccount" to support both org and personal accounts
+            client_id=$(az ad app create \
+                --display-name "$app_name" \
+                --sign-in-audience "AzureADandPersonalMicrosoftAccount" \
+                --query appId \
+                --output tsv)
+            
+            print_success "New app created for $env with Client ID: $client_id"
+            print_warning "Waiting 15 seconds for the new app registration to propagate before updating..."
+            sleep 15 # Wait a moment for the new app to be fully available for updates
+            APP_REG_ACTION="created"
+        fi
+        
+        # Store the client ID for this environment
+        if [ "$env" = "dev" ]; then
+            AZURE_DEV_CLIENT_ID="$client_id"
+        elif [ "$env" = "prod" ]; then
+            AZURE_PROD_CLIENT_ID="$client_id"
+        fi
+        
+        # Update the app with web redirect URIs and token configuration
+        print_status "Applying latest configuration (redirect URIs, token settings) for $env..."
+
+        # Retry logic for az ad app update
+        local update_attempt=1
+        local update_max_attempts=3
+        local update_status=1
+
+        while [ $update_attempt -le $update_max_attempts ]; do
+            az ad app update \
+                --id "$client_id" \
+                --web-redirect-uris "${backend_url}/api/v1/auth/oauth/microsoft/callback" "${frontend_url}/auth/callback" "http://localhost:5173/auth/callback" "http://localhost:8000/api/v1/auth/oauth/microsoft/callback" \
+                --enable-access-token-issuance true \
+                --enable-id-token-issuance true 2>/dev/null
+            
+            update_status=$?
+            
+            if [ $update_status -eq 0 ]; then
+                print_success "Azure AD app update succeeded for $env. Redirect URIs and token settings applied."
+                break
+            else
+                print_warning "Azure AD app update failed for $env (attempt $update_attempt/$update_max_attempts). Retrying in 10 seconds..."
+                sleep 10
+            fi
+            
+            ((update_attempt++))
+        done
+
+        if [ $update_status -ne 0 ]; then
+            print_error "Azure AD app update failed for $env after $update_max_attempts attempts! Some advanced token settings may need manual configuration."
+        fi
+
+        # Retry logic for az ad app permission add
+        local perm_attempt=1
+        local perm_max_attempts=3
+        local perm_status=1
+
+        while [ $perm_attempt -le $perm_max_attempts ]; do
+            az ad app permission add \
+                --id "$client_id" \
+                --api 00000003-0000-0000-c000-000000000000 \
+                --api-permissions e1fe6dd8-ba31-4d61-89e7-88639da4683d=Scope 64a6cdd6-aab1-4aaf-94b8-3cc8405e90d0=Scope 14dad69e-099b-42c9-810b-d002981feec1=Scope 2>/dev/null
+            
+            perm_status=$?
+            
+            if [ $perm_status -eq 0 ]; then
+                print_success "Microsoft Graph permissions added successfully for $env."
+                break
+            else
+                print_warning "Failed to add Microsoft Graph permissions for $env (attempt $perm_attempt/$perm_max_attempts). Retrying in 10 seconds..."
+                sleep 10
+            fi
+            
+            ((perm_attempt++))
+        done
+
+        if [ $perm_status -ne 0 ]; then
+            print_error "Failed to add Microsoft Graph permissions for $env after $perm_max_attempts attempts! May need manual configuration."
+        fi
+
+        # Create a new client secret with retry logic.
+        # This command always generates a *new* secret, which is a good security practice for automated deployments.
+        print_status "Resetting client secret for $env to ensure a valid secret is available..."
+        local secret_name="sage-${env}-client-secret-$(date +%s)"
+        local retry_count=0
+        local max_retries=3
+        local client_secret=""
+        
+        while [ $retry_count -lt $max_retries ]; do
+            if client_secret=$(az ad app credential reset \
+                --id "$client_id" \
+                --display-name "$secret_name" \
+                --years 2 \
+                --query password \
+                --output tsv 2>/dev/null); then
+                break
+            else
+                ((retry_count++))
+                if [ $retry_count -lt $max_retries ]; then
+                    print_warning "Client secret creation failed for $env, retrying in 10 seconds... ($retry_count/$max_retries)"
+                    sleep 10
+                else
+                    print_error "Failed to create client secret for $env after $max_retries attempts"
+                    print_error "Please try creating the client secret manually in the Azure Portal:"
+                    print_warning "https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/Credentials/appId/$client_id"
+                    exit 1
+                fi
+            fi
+        done
+        
+        # Store the client secret for this environment
+        if [ "$env" = "dev" ]; then
+            AZURE_DEV_CLIENT_SECRET="$client_secret"
+        elif [ "$env" = "prod" ]; then
+            AZURE_PROD_CLIENT_SECRET="$client_secret"
+        fi
+        
+        print_success "Client secret created/reset successfully for $env."
+
+        print_status "Azure AD Configuration for $env:"
+        print_status "  App ID (Client ID): $client_id"
+        print_status "  Tenant ID: $AZURE_AD_TENANT_ID"
+        print_status "  Sign-in Audience: AzureADandPersonalMicrosoftAccount (supports personal & org accounts)"
+        print_status "  Redirect URIs configured for:"
+        print_status "    - Production API: ${backend_url}/api/v1/auth/oauth/microsoft/callback"
+        print_status "    - Production Web: ${frontend_url}/auth/callback"
+        print_status "    - Development API: http://localhost:8000/api/v1/auth/oauth/microsoft/callback"
+        print_status "    - Development Web: http://localhost:5173/auth/callback"
+        echo ""
+        print_status "Azure Portal Link for $env:"
+        print_status "  https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/Overview/appId/$client_id"
+        
+        # Show reuse vs creation summary
+        echo ""
+        if [ "$APP_REG_ACTION" == "reused" ]; then
+            print_success "✅ Reused and updated existing Azure AD app registration for $env: $app_name"
+        else
+            print_success "✅ Created new Azure AD app registration for $env: $app_name"
+        fi
+        echo ""
+    done
     
-    # --- MODIFICATION START ---
-    # Show reuse vs creation summary
-    echo ""
-    if [ "$APP_REG_ACTION" == "reused" ]; then
-        print_success "✅ Reused and updated existing Azure AD app registration: $app_name"
-    else
-        print_success "✅ Created new Azure AD app registration: $app_name"
-    fi
-    # --- MODIFICATION END ---
+    # Set the production environment variables for backwards compatibility with the rest of the script
+    AZURE_AD_CLIENT_ID="$AZURE_PROD_CLIENT_ID"
+    AZURE_AD_CLIENT_SECRET="$AZURE_PROD_CLIENT_SECRET"
     
-    print_success "Azure AD app registration completed!"
+    print_success "Azure AD app registration completed for all environments!"
 }
 
 # Step 7: Create Azure Function App
@@ -877,16 +902,16 @@ setup_secrets() {
     # Dev environment secrets (only actual secrets, not infrastructure config)
     local dev_secrets=(
         "dev-secret-key:$jwt_secret"
-        "dev-azure-client-id:$AZURE_AD_CLIENT_ID"
-        "dev-azure-client-secret:$AZURE_AD_CLIENT_SECRET"
+        "dev-azure-client-id:$AZURE_DEV_CLIENT_ID"
+        "dev-azure-client-secret:$AZURE_DEV_CLIENT_SECRET"
         "dev-azure-tenant-id:$AZURE_AD_TENANT_ID"
     )
     
     # Prod environment secrets (only actual secrets, not infrastructure config)
     local prod_secrets=(
         "prod-secret-key:$jwt_secret"
-        "prod-azure-client-id:$AZURE_AD_CLIENT_ID"
-        "prod-azure-client-secret:$AZURE_AD_CLIENT_SECRET"
+        "prod-azure-client-id:$AZURE_PROD_CLIENT_ID"
+        "prod-azure-client-secret:$AZURE_PROD_CLIENT_SECRET"
         "prod-azure-tenant-id:$AZURE_AD_TENANT_ID"
     )
 
