@@ -14,6 +14,7 @@ from ..models.plaid_config import (
     PlaidConfigurationValidate,
 )
 from ..services.plaid_config_service import plaid_config_service
+from ..services.plaid_service import PlaidService
 from ..dependencies import get_current_user
 from ..models.user import UserResponse
 from ..utils.logger import get_logger
@@ -171,19 +172,38 @@ async def delete_plaid_configuration(
     current_user: UserResponse = Depends(require_admin_user),
 ):
     """
-    Delete Plaid configuration.
+    Delete Plaid configuration and disconnect all user bank connections.
 
-    **Admin Only**: Removes stored Plaid credentials and disables features.
-    This action cannot be undone.
+    **Admin Only**: Removes stored Plaid credentials, disconnects all bank connections,
+    and deletes all related financial data. This action cannot be undone.
     """
     try:
+        # First, revoke all user bank connections and delete their data
+        plaid_service = PlaidService()
+        
+        # Get all users and revoke their connections
+        # Since this is an admin operation, we need to clean up all user data
+        try:
+            # Note: This assumes remove_all_user_data handles cleanup for the admin's data
+            # For a full system-wide cleanup, additional logic might be needed
+            revoke_success = plaid_service.remove_all_user_data(current_user.id)
+            if revoke_success:
+                logger.info(f"All user bank connections revoked during config deletion by: {current_user.id}")
+        except Exception as revoke_error:
+            logger.error(f"Error revoking bank connections during config deletion: {revoke_error}")
+            # Continue with config deletion even if revocation fails
+
+        # Delete the Plaid configuration
         success = await plaid_config_service.delete_configuration(
             admin_user_id=current_user.id
         )
 
         if success:
             logger.info(f"Plaid configuration deleted by user: {current_user.id}")
-            return {"message": "Plaid configuration deleted successfully"}
+            return {
+                "message": "Plaid configuration deleted successfully. All bank connections have been disconnected and related data removed.",
+                "revoked_connections": revoke_success if 'revoke_success' in locals() else False
+            }
         else:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

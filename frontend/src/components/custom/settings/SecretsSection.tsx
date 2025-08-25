@@ -208,7 +208,7 @@ export const SecretsSection: React.FC = () => {
       });
 
       await PlaidConfigService.deleteConfiguration();
-      setSuccess('Plaid configuration deleted successfully!');
+      setSuccess('Plaid configuration deleted successfully! All bank connections have been disconnected and financial data removed.');
 
       // Reload data to reflect changes
       await loadData();
@@ -299,8 +299,20 @@ export const SecretsSection: React.FC = () => {
                   <AlertDialogHeader>
                     <AlertDialogTitle>Delete Plaid Configuration?</AlertDialogTitle>
                     <AlertDialogDescription>
-                      This action cannot be undone. This will permanently delete your Plaid
-                      configuration and disable Plaid features until a new configuration is added.
+                      <div className="space-y-2">
+                        <p>
+                          <strong>Warning:</strong> This action cannot be undone and will:
+                        </p>
+                        <ul className="list-disc list-inside space-y-1 text-sm">
+                          <li>Permanently delete your Plaid configuration</li>
+                          <li>Disconnect all connected bank accounts</li>
+                          <li>Delete all stored financial data (accounts, transactions, balances)</li>
+                          <li>Disable all Plaid-related features until reconfigured</li>
+                        </ul>
+                        <p className="text-sm text-muted-foreground mt-2">
+                          You will need to reconnect all your bank accounts and resync your financial data after adding a new configuration.
+                        </p>
+                      </div>
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>

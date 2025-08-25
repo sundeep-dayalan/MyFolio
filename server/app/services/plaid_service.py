@@ -680,6 +680,9 @@ class PlaidService:
             # Clean up any remaining data
             account_storage_service.clear_data(user_id)
             transaction_storage_service.delete_all_user_transactions(user_id)
+            
+            # Also clean up any remaining plaid_tokens that might not have been caught
+            self._delete_all_user_tokens(user_id)
 
             logger.info(
                 f"Removed {success_count}/{len(tokens)} items for user {user_id}"
@@ -688,6 +691,40 @@ class PlaidService:
 
         except Exception as e:
             logger.error(f"Failed to remove all user data for {user_id}: {e}")
+            return False
+
+    def _delete_all_user_tokens(self, user_id: str) -> bool:
+        """Delete all plaid_tokens documents for a user from CosmosDB."""
+        try:
+            logger.info(f"Deleting all plaid_tokens for user {user_id}")
+
+            if not cosmos_client.is_connected:
+                logger.error("CosmosDB not connected - cannot delete tokens")
+                return False
+
+            # Query all plaid_tokens for the user
+            query = "SELECT c.id FROM c WHERE c.userId = @userId"
+            parameters = [{"name": "@userId", "value": user_id}]
+
+            token_docs = cosmos_client.query_items(
+                "plaid_tokens", query, parameters, user_id
+            )
+
+            deleted_count = 0
+            for token_doc in token_docs:
+                try:
+                    cosmos_client.delete_item("plaid_tokens", token_doc["id"], user_id)
+                    deleted_count += 1
+                except Exception as e:
+                    logger.warning(f"Failed to delete token document {token_doc['id']}: {e}")
+
+            logger.info(
+                f"Successfully deleted {deleted_count} plaid_tokens for user {user_id}"
+            )
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to delete all tokens for user {user_id}: {e}")
             return False
 
     def update_transaction_sync_status(
