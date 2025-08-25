@@ -1209,17 +1209,68 @@ display_summary() {
     echo ""
     echo ""
     
-    # Get Function App publish profile
+    # Get Function App publish profile with retry logic and multiple methods
     echo "📋 FUNCTION APP PUBLISH PROFILE:"
     echo "   Secret Name: AZURE_FUNCTIONAPP_PUBLISH_PROFILE"
     echo "   Secret Value (XML content):"
-    local publish_profile=$(az functionapp deployment list-publishing-profiles --name "$FUNCTION_APP_NAME" --resource-group "$RESOURCE_GROUP_NAME" --xml 2>/dev/null || echo "")
+    
+    local publish_profile=""
+    local retry_count=0
+    local max_retries=3
+    
+    # Method 1: Standard list-publishing-profiles command with retries
+    while [ $retry_count -lt $max_retries ] && [ -z "$publish_profile" ]; do
+        print_status "Attempting to retrieve publish profile (attempt $((retry_count + 1))/$max_retries)..."
+        publish_profile=$(az functionapp deployment list-publishing-profiles \
+            --name "$FUNCTION_APP_NAME" \
+            --resource-group "$RESOURCE_GROUP_NAME" \
+            --xml 2>/dev/null || echo "")
+        
+        if [ -n "$publish_profile" ]; then
+            print_success "Successfully retrieved publish profile!"
+            break
+        fi
+        
+        ((retry_count++))
+        if [ $retry_count -lt $max_retries ]; then
+            print_warning "Retry in 10 seconds..."
+            sleep 10
+        fi
+    done
+    
+    # Method 2: Alternative approach using webapp deployment if function app method fails
+    if [ -z "$publish_profile" ]; then
+        print_status "Trying alternative method using webapp deployment..."
+        publish_profile=$(az webapp deployment list-publishing-profiles \
+            --name "$FUNCTION_APP_NAME" \
+            --resource-group "$RESOURCE_GROUP_NAME" \
+            --xml 2>/dev/null || echo "")
+    fi
+    
+    # Method 3: Force refresh the function app and try again
+    if [ -z "$publish_profile" ]; then
+        print_status "Forcing function app sync and retrying..."
+        az functionapp sync --name "$FUNCTION_APP_NAME" --resource-group "$RESOURCE_GROUP_NAME" >/dev/null 2>&1 || true
+        sleep 5
+        publish_profile=$(az functionapp deployment list-publishing-profiles \
+            --name "$FUNCTION_APP_NAME" \
+            --resource-group "$RESOURCE_GROUP_NAME" \
+            --xml 2>/dev/null || echo "")
+    fi
+    
     if [ -n "$publish_profile" ]; then
         echo "   $publish_profile"
+        print_success "✅ Publish profile retrieved successfully!"
     else
-        print_warning "   Unable to retrieve automatically. Get from Azure Portal:"
-        echo "   https://portal.azure.com/#@/resource/subscriptions/$(az account show --query id --output tsv)/resourceGroups/$RESOURCE_GROUP_NAME/providers/Microsoft.Web/sites/$FUNCTION_APP_NAME"
-        echo "   Go to 'Get publish profile' button in the overview section"
+        print_error "❌ Unable to retrieve publish profile automatically after all attempts."
+        print_warning "Manual steps to get publish profile:"
+        print_warning "1. Go to Azure Portal: https://portal.azure.com"
+        print_warning "2. Navigate to: Resource Groups → $RESOURCE_GROUP_NAME → $FUNCTION_APP_NAME"
+        print_warning "3. Click 'Get publish profile' button in the overview section"
+        print_warning "4. Copy the entire XML content as the secret value"
+        echo ""
+        print_warning "Or try this Azure CLI command manually:"
+        echo "   az functionapp deployment list-publishing-profiles --name \"$FUNCTION_APP_NAME\" --resource-group \"$RESOURCE_GROUP_NAME\" --xml"
     fi
     echo ""
 
