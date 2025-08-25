@@ -24,7 +24,7 @@ const SettingsPage: React.FC = () => {
               href="#secrets"
               className="flex items-center px-3 py-2 text-sm font-medium rounded-md hover:bg-muted transition-colors"
             >
-              Secrets and variables
+              Secrets
             </a>
           </nav>
         </div>
@@ -39,10 +39,10 @@ const SettingsPage: React.FC = () => {
             <TabsContent value="secrets" className="mt-6">
               <Card>
                 <CardHeader>
-                  <CardTitle>Secrets and variables</CardTitle>
+                  <CardTitle>Secrets</CardTitle>
                   <CardDescription>
-                    Secrets and variables allow you to manage reusable configuration data. Secrets
-                    are encrypted and are used for sensitive data.
+                    Secrets allow you to manage reusable configuration data. Secrets are encrypted
+                    and are used for sensitive data.
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
