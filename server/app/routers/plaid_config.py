@@ -100,7 +100,7 @@ async def get_plaid_configuration_status():
     except Exception as e:
         logger.error(f"Error getting configuration status: {e}")
         # Return unconfigured status on error
-        return PlaidConfigurationStatus(is_configured=False, environment="sandbox")
+        return PlaidConfigurationStatus(is_configured=False)
 
 
 @router.get("/configuration", response_model=PlaidConfigurationResponse)

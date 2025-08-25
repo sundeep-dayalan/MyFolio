@@ -55,4 +55,3 @@ class PlaidConfigurationStatus(BaseModel):
     """Simple status response for checking configuration."""
 
     is_configured: bool = Field(..., description="Whether Plaid is configured")
-    environment: str = Field(..., description="Plaid environment")

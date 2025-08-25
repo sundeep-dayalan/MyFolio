@@ -7,6 +7,7 @@ import ProtectedRoute from './components/ProtectedRoute';
 import { OAuthCallback } from './pages/OAuthCallback';
 import AccountsPage from './pages/AccountsPage';
 import TransactionsPage from './pages/TransactionsPage';
+import SettingsPage from './pages/SettingsPage';
 import { Toaster } from './components/ui/sonner';
 function App() {
   return (
@@ -38,6 +39,16 @@ function App() {
             <Layout>
               <ProtectedRoute>
                 <TransactionsPage />
+              </ProtectedRoute>
+            </Layout>
+          }
+        />
+        <Route
+          path="/settings"
+          element={
+            <Layout>
+              <ProtectedRoute>
+                <SettingsPage />
               </ProtectedRoute>
             </Layout>
           }

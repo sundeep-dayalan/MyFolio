@@ -203,7 +203,7 @@ class PlaidConfigurationService:
 
                 return PlaidValidationResult(
                     is_valid=True,
-                    message="Credentials format is valid (full API validation requires live testing)",
+                    message="Credentials format is valid. Actual credentials will be validated with Plaid once stored.",
                     environment=environment,
                 )
 
@@ -232,8 +232,12 @@ class PlaidConfigurationService:
             try:
                 existing_config = container.read_item("plaid_config", "plaid_config")
                 if existing_config:
-                    logger.error("Plaid configuration already exists. Cannot update via POST.")
-                    raise ValueError("Plaid configuration already exists. Delete before creating a new one.")
+                    logger.error(
+                        "Plaid configuration already exists. Cannot update via POST."
+                    )
+                    raise ValueError(
+                        "Plaid configuration already exists. Delete before creating a new one."
+                    )
             except CosmosResourceNotFoundError:
                 pass  # Not found, safe to create
 
@@ -277,13 +281,10 @@ class PlaidConfigurationService:
             try:
                 config_doc = container.read_item("plaid_config", "plaid_config")
                 return PlaidConfigurationStatus(
-                    is_configured=config_doc.get("is_active", False),
-                    environment=config_doc.get("environment", "sandbox"),
+                    is_configured=config_doc.get("is_active", False)
                 )
             except CosmosResourceNotFoundError:
-                return PlaidConfigurationStatus(
-                    is_configured=False, environment="sandbox"
-                )
+                return PlaidConfigurationStatus(is_configured=False)
 
         except Exception as e:
             logger.error(f"Error getting Plaid configuration status: {e}")

@@ -45,7 +45,7 @@ export class MicrosoftAuthService {
           const tokenData = {
             access_token: token,
             token_type: 'bearer',
-            expires_in: 1800, // 30 minutes default
+            expires_in: 7200, // 2 hours default
           };
 
           // Store authentication data
@@ -141,12 +141,15 @@ export class MicrosoftAuthService {
   /**
    * Store authentication data in localStorage
    */
-  private static setAuthData(user: UserResponse, token: { access_token: string; token_type: string; expires_in: number }): void {
+  private static setAuthData(
+    user: UserResponse,
+    token: { access_token: string; token_type: string; expires_in: number },
+  ): void {
     localStorage.setItem('authToken', token.access_token);
     localStorage.setItem('user', JSON.stringify(user));
     localStorage.setItem('tokenType', token.token_type);
     localStorage.setItem('tokenExpiry', (Date.now() + token.expires_in * 1000).toString());
-    
+
     logger.info('Authentication data stored successfully', 'AUTH');
   }
 
@@ -158,7 +161,7 @@ export class MicrosoftAuthService {
     localStorage.removeItem('user');
     localStorage.removeItem('tokenType');
     localStorage.removeItem('tokenExpiry');
-    
+
     logger.info('Authentication data cleared', 'AUTH');
   }
 
@@ -168,7 +171,7 @@ export class MicrosoftAuthService {
   static isTokenExpired(): boolean {
     const expiry = localStorage.getItem('tokenExpiry');
     if (!expiry) return true;
-    
+
     return Date.now() >= parseInt(expiry);
   }
 
