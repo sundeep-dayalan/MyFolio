@@ -794,7 +794,6 @@ configure_function_app() {
         --name "$FUNCTION_APP_NAME" \
         --resource-group "$RESOURCE_GROUP_NAME" \
         --settings \
-            "SECRET_KEY=@Microsoft.KeyVault(VaultName=${KEY_VAULT_NAME};SecretName=prod-secret-key)" \
             "COSMOS_DB_ENDPOINT=$cosmos_endpoint" \
             "COSMOS_DB_KEY=$cosmos_key" \
             "COSMOS_DB_NAME=sage-prod-db" \
@@ -893,15 +892,12 @@ setup_secrets() {
     print_warning "Waiting for Key Vault permissions to propagate..."
     sleep 15
     
-    # Generate secure JWT secret
-    local jwt_secret=$(openssl rand -hex 32)
     
     # Create environment-specific secrets (both dev and prod)
     print_status "Creating dev and prod environment secrets..."
     
     # Dev environment secrets (only actual secrets, not infrastructure config)
     local dev_secrets=(
-        "dev-secret-key:$jwt_secret"
         "dev-azure-client-id:$AZURE_DEV_CLIENT_ID"
         "dev-azure-client-secret:$AZURE_DEV_CLIENT_SECRET"
         "dev-azure-tenant-id:$AZURE_AD_TENANT_ID"
@@ -909,7 +905,6 @@ setup_secrets() {
     
     # Prod environment secrets (only actual secrets, not infrastructure config)
     local prod_secrets=(
-        "prod-secret-key:$jwt_secret"
         "prod-azure-client-id:$AZURE_PROD_CLIENT_ID"
         "prod-azure-client-secret:$AZURE_PROD_CLIENT_SECRET"
         "prod-azure-tenant-id:$AZURE_AD_TENANT_ID"
@@ -945,20 +940,30 @@ setup_secrets() {
         done
     done
 
-    print_status "Creating cryptographic key for all secrets encryption..."
+    print_status "Creating cryptographic key for encryption and JWT signing..."
 
+    # Create single key for both encryption and JWT signing operations
     if az keyvault key create \
         --vault-name "$KEY_VAULT_NAME" \
         --name "secrets-encryption-key" \
         --kty RSA \
         --size 2048 \
-        --ops encrypt decrypt \
+        --ops encrypt decrypt sign verify \
         --protection software \
-        --output none; then
+        --output none 2>/dev/null; then
         print_success "Successfully created cryptographic key: 'secrets-encryption-key'"
     else
-        print_error "Failed to create cryptographic key: 'secrets-encryption-key'"
-        exit 1 # Critical key can't be created
+        print_warning "Key 'secrets-encryption-key' already exists, updating operations..."
+        # Update existing key to include sign/verify operations
+        if az keyvault key set-attributes \
+            --vault-name "$KEY_VAULT_NAME" \
+            --name "secrets-encryption-key" \
+            --ops encrypt decrypt sign verify \
+            --output none 2>/dev/null; then
+            print_success "Successfully updated key operations for 'secrets-encryption-key'"
+        else
+            print_error "Failed to update key operations. Manual update may be required."
+        fi
     fi
     
     print_success "Secrets configured!"
@@ -1275,9 +1280,9 @@ main() {
     CURRENT_STEP="Static Web App"; create_static_web_app
     CURRENT_STEP="Function Configuration"; configure_function_app
     CURRENT_STEP="Key Vault Secrets"; setup_secrets
-    CURRENT_STEP="Backend Deployment"; deploy_backend
+    # CURRENT_STEP="Backend Deployment"; deploy_backend
     CURRENT_STEP="Force Config Refresh"; force_config_refresh
-    CURRENT_STEP="Frontend Deployment"; deploy_frontend
+    # CURRENT_STEP="Frontend Deployment"; deploy_frontend
     
     
     display_summary

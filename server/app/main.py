@@ -97,7 +97,6 @@ def create_app() -> FastAPI:
     # Add session middleware for OAuth state management
     app.add_middleware(
         SessionMiddleware,
-        secret_key=settings.secret_key,
         max_age=3600,  # 1 hour session timeout
         same_site="lax",
         https_only=not settings.debug,  # Use secure cookies in production

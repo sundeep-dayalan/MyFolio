@@ -20,8 +20,7 @@ class Settings(BaseSettings):
     api_v1_prefix: str = Field(default="/api/v1", env="API_V1_PREFIX")
     debug: bool = Field(default=False, env="DEBUG")
 
-    # Security - Use Secret Manager for production
-    secret_key: str = Field(..., env="SECRET_KEY")
+    # Security
     algorithm: str = Field(default="HS256", env="ALGORITHM")
     access_token_expire_minutes: int = Field(
         default=30, env="ACCESS_TOKEN_EXPIRE_MINUTES"
@@ -77,6 +76,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = False
+        extra = "ignore"
 
 
 def get_settings() -> Settings:
