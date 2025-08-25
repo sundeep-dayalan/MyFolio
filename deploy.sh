@@ -502,32 +502,68 @@ create_azure_ad_app() {
     local app_name="sage-${UNIQUE_SUFFIX}-app"
     local frontend_url="https://$(echo $STATIC_WEB_APP_NAME | tr '[:upper:]' '[:lower:]').azurestaticapps.net"
     local backend_url="https://${FUNCTION_APP_NAME}.azurewebsites.net"
-    
+
     print_status "Creating Azure AD app registration: $app_name"
-        
+    
     # Create the app registration with basic configuration first
     # Using "AzureADandPersonalMicrosoftAccount" to support both org and personal accounts
-    AZURE_AD_CLIENT_ID=$(az ad app create \
-        --display-name "$app_name" \
-        --sign-in-audience "AzureADandPersonalMicrosoftAccount" \
-        --query appId \
-        --output tsv)
+        AZURE_AD_CLIENT_ID=$(az ad app create \
+            --display-name "$app_name" \
+            --sign-in-audience "AzureADandPersonalMicrosoftAccount" \
+            --query appId \
+            --output tsv)
         
     # Wait a moment for the app to be created
     sleep 2
     
     # Update the app with web redirect URIs and token configuration
-    az ad app update \
-        --id "$AZURE_AD_CLIENT_ID" \
-        --web-redirect-uris "${backend_url}/api/v1/auth/oauth/microsoft/callback" "${frontend_url}/auth/callback" "http://localhost:5173/auth/callback" "http://localhost:8000/api/v1/auth/oauth/microsoft/callback" \
-        --enable-access-token-issuance true \
-        --enable-id-token-issuance true 2>/dev/null || print_warning "Some advanced token settings may need manual configuration"
-    
-    # Add required resource permissions
-    az ad app permission add \
-        --id "$AZURE_AD_CLIENT_ID" \
-        --api 00000003-0000-0000-c000-000000000000 \
-        --api-permissions e1fe6dd8-ba31-4d61-89e7-88639da4683d=Scope 64a6cdd6-aab1-4aaf-94b8-3cc8405e90d0=Scope 14dad69e-099b-42c9-810b-d002981feec1=Scope 2>/dev/null || print_warning "Microsoft Graph permissions may need manual configuration"
+
+    # Retry logic for az ad app update
+    local update_attempt=1
+    local update_max_attempts=3
+    local update_status=1
+    while [ $update_attempt -le $update_max_attempts ]; do
+        az ad app update \
+            --id "$AZURE_AD_CLIENT_ID" \
+            --web-redirect-uris "${backend_url}/api/v1/auth/oauth/microsoft/callback" "${frontend_url}/auth/callback" "http://localhost:5173/auth/callback" "http://localhost:8000/api/v1/auth/oauth/microsoft/callback" \
+            --enable-access-token-issuance true \
+            --enable-id-token-issuance true 2>/dev/null
+        update_status=$?
+        if [ $update_status -eq 0 ]; then
+            print_success "Azure AD app update succeeded. Redirect URIs and token settings applied."
+            break
+        else
+            print_warning "Azure AD app update failed (attempt $update_attempt/$update_max_attempts). Retrying in 10 seconds..."
+            sleep 10
+        fi
+        ((update_attempt++))
+    done
+    if [ $update_status -ne 0 ]; then
+        print_error "Azure AD app update failed after $update_max_attempts attempts! Some advanced token settings may need manual configuration."
+    fi
+
+    # Retry logic for az ad app permission add
+    local perm_attempt=1
+    local perm_max_attempts=3
+    local perm_status=1
+    while [ $perm_attempt -le $perm_max_attempts ]; do
+        az ad app permission add \
+            --id "$AZURE_AD_CLIENT_ID" \
+            --api 00000003-0000-0000-c000-000000000000 \
+            --api-permissions e1fe6dd8-ba31-4d61-89e7-88639da4683d=Scope 64a6cdd6-aab1-4aaf-94b8-3cc8405e90d0=Scope 14dad69e-099b-42c9-810b-d002981feec1=Scope 2>/dev/null
+        perm_status=$?
+        if [ $perm_status -eq 0 ]; then
+            print_success "Microsoft Graph permissions added successfully."
+            break
+        else
+            print_warning "Failed to add Microsoft Graph permissions (attempt $perm_attempt/$perm_max_attempts). Retrying in 10 seconds..."
+            sleep 10
+        fi
+        ((perm_attempt++))
+    done
+    if [ $perm_status -ne 0 ]; then
+        print_error "Failed to add Microsoft Graph permissions after $perm_max_attempts attempts! May need manual configuration."
+    fi
         
     print_success "Azure AD app created with ID: $AZURE_AD_CLIENT_ID"
     
@@ -554,7 +590,7 @@ create_azure_ad_app() {
                 print_error "Failed to create client secret after $max_retries attempts"
                 print_error "The corresponding MSA application may not be ready yet"
                 print_warning "You can create the client secret manually in Azure Portal:"
-                print_warning "https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/Credentials/appId/$AZURE_AD_CLIENT_ID"
+        print_warning "https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/Credentials/appId/$AZURE_AD_CLIENT_ID"
         exit 1
     fi
         fi
@@ -564,7 +600,7 @@ create_azure_ad_app() {
     
     # Get tenant ID
     AZURE_AD_TENANT_ID=$(az account show --query tenantId --output tsv)
-    
+
     print_status "Azure AD Configuration:"
     print_status "  App ID (Client ID): $AZURE_AD_CLIENT_ID"
     print_status "  Tenant ID: $AZURE_AD_TENANT_ID"
@@ -726,7 +762,6 @@ configure_function_app() {
             "FRONTEND_URL=$frontend_url" \
             "ALLOWED_HOSTS=${static_web_app_hostname},${FUNCTION_APP_NAME}.azurewebsites.net" \
             "ALLOWED_ORIGINS=$frontend_url,https://${FUNCTION_APP_NAME}.azurewebsites.net,http://localhost:5173,http://localhost:3000" \
-            "PLAID_ENV=sandbox" \
             "LOG_LEVEL=INFO" \
         --output none
     
@@ -825,14 +860,14 @@ setup_secrets() {
         "prod-azure-client-secret:$AZURE_AD_CLIENT_SECRET"
         "prod-azure-tenant-id:$AZURE_AD_TENANT_ID"
     )
-    
+
     # Combine all secrets
     local secrets=("${dev_secrets[@]}" "${prod_secrets[@]}")
     
     for secret_pair in "${secrets[@]}"; do
         local secret_name=$(echo "$secret_pair" | cut -d: -f1)
         local secret_value=$(echo "$secret_pair" | cut -d: -f2-)
-        
+
         local retry_count=0
         local max_retries=3
         
@@ -1060,16 +1095,6 @@ display_summary() {
     echo "     - Personal Microsoft accounts (outlook.com, hotmail.com, live.com)"
     echo "     - Organizational Azure AD accounts"
     echo "   • Login at: $STATIC_WEB_APP_URL"
-    echo ""
-    echo "2️⃣  SETUP PLAID ENCRYPTION KEY (Required for Plaid features):"
-    echo "   • Run: ./setup_plaid_encryption.sh"
-    echo "   • This creates a Key Vault key for secure credential encryption"
-    echo ""
-    echo "3️⃣  CONFIGURE PLAID CREDENTIALS (On-Demand):"
-    echo "   • Plaid features are DISABLED by default for security"
-    echo "   • Admin can activate by providing credentials via API:"
-    echo "   • POST $FUNCTION_APP_URL/api/v1/plaid/configuration"
-    echo "   • Microsoft Entra ID credentials are automatically configured!"
     echo ""
     echo "4️⃣  DEPLOY FRONTEND to Static Web App:"
     echo "   • Connect GitHub repository in Azure portal"
