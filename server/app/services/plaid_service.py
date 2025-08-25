@@ -1,4 +1,5 @@
 from typing import Tuple, List, Dict, Any, Optional
+
 from plaid.api import plaid_api
 from plaid.model.transactions_sync_request import TransactionsSyncRequest
 from plaid.model.transactions_get_request import TransactionsGetRequest
@@ -44,6 +45,7 @@ from ..models.plaid import (
 )
 from .account_storage_service import account_storage_service
 from .transaction_storage_service import transaction_storage_service
+from .plaid_config_service import plaid_config_service
 import json
 from datetime import date, datetime, timezone
 from plaid.model.accounts_balance_get_request_options import (
@@ -80,7 +82,7 @@ class TokenEncryption:
             # f = Fernet(TokenEncryption._get_key())
             # encrypted_token = f.encrypt(token.encode())
             # return base64.urlsafe_b64encode(encrypted_token).decode()
-            return token  # For now removing  encrpytion and decrypt
+            return token  # For now removing encrpytion and decrypt
         except Exception as e:
             logger.error(f"Failed to encrypt token: {e}")
             raise Exception("Token encryption failed")
@@ -93,17 +95,39 @@ class TokenEncryption:
             # decoded_token = base64.urlsafe_b64decode(encrypted_token.encode())
             # decrypted_token = f.decrypt(decoded_token)
             # return decrypted_token.decode()
-            return encrypted_token  # For now removing  encrpytion and decrypt
+            return encrypted_token  # For now removing encrpytion and decrypt
         except Exception as e:
             logger.error(f"Failed to decrypt token: {e}")
             raise Exception("Token decryption failed")
 
 
 class PlaidService:
-    """Production-ready service for interacting with the Plaid API."""
+    """Production-ready service for interacting with the Plaid API with dynamic credentials."""
 
     def __init__(self):
-        # Configure Plaid client
+        # Environment will be determined dynamically from stored configuration
+        self._client = None
+        self._client_initialized = False
+
+    async def _get_client(self) -> plaid_api.PlaidApi:
+        """Get Plaid client with dynamic credentials (Just-In-Time initialization)."""
+        if self._client and self._client_initialized:
+            return self._client
+
+        # Get credentials and environment from secure storage
+        credentials = await plaid_config_service.get_decrypted_credentials()
+
+        if not credentials:
+            raise ValueError(
+                "Plaid credentials not configured. Admin must provide credentials via "
+                "/api/v1/plaid/configuration endpoint."
+            )
+
+        client_id, secret, environment = credentials
+
+        self.environment = environment
+
+        # Configure Plaid client with user-provided credentials
         from plaid.configuration import Configuration, Environment
 
         # Map environment string to Plaid Environment enum
@@ -113,21 +137,32 @@ class PlaidService:
             "production": Environment.Production,
         }
 
-        plaid_env = getattr(settings, "plaid_env", "sandbox").lower()
-        environment = environment_map.get(plaid_env, Environment.Sandbox)
+        plaid_environment = environment_map.get(
+            environment.lower(), Environment.Sandbox
+        )
 
         config = Configuration(
-            host=environment,
+            host=plaid_environment,
             api_key={
-                "clientId": settings.plaid_client_id,
-                "secret": settings.plaid_secret,
+                "clientId": client_id,
+                "secret": secret,
             },
         )
         api_client = ApiClient(config)
-        self.client = plaid_api.PlaidApi(api_client)
-        self.environment = plaid_env
+        self._client = plaid_api.PlaidApi(api_client)
+        self._client_initialized = True
 
-    def create_link_token(
+        logger.info(
+            f"Plaid client initialized with dynamic credentials for {environment} environment"
+        )
+        return self._client
+
+    def _reset_client(self):
+        """Reset client to force re-initialization with fresh credentials."""
+        self._client = None
+        self._client_initialized = False
+
+    async def create_link_token(
         self,
         user_id: str,
         products: list = None,
@@ -138,6 +173,7 @@ class PlaidService:
     ) -> str:
         """Create a Plaid Link token for a user, supporting any Plaid product."""
         try:
+            client = await self._get_client()
             logger.info(
                 f"Creating link token for user {user_id} in {self.environment} environment"
             )
@@ -177,12 +213,15 @@ class PlaidService:
 
             request = LinkTokenCreateRequest(**request_params)
 
-            response = self.client.link_token_create(request)
+            response = client.link_token_create(request)
             link_token = response["link_token"]
 
             logger.info(f"Link token created successfully for user {user_id}")
             return link_token
 
+        except ValueError as ve:
+            # Re-raise credential configuration errors
+            raise ve
         except Exception as e:
             logger.error(f"Failed to create link token for user {user_id}: {e}")
             raise Exception(f"Failed to create link token: {e}")
@@ -211,43 +250,57 @@ class PlaidService:
 
         return LinkTokenAccountFilters(**filter_params)
 
-    def exchange_public_token(
+    async def exchange_public_token(
         self, user_id: str, public_token: str
     ) -> PlaidAccessToken:
         """Exchange public token for access token and store it securely."""
         try:
+            client = await self._get_client()
             logger.info(f"Exchanging public token for user {user_id}")
 
             # Exchange public token for access token
             request = ItemPublicTokenExchangeRequest(public_token=public_token)
-            response = self.client.item_public_token_exchange(request)
+            response = client.item_public_token_exchange(request)
 
             access_token = response["access_token"]
             item_id = response["item_id"]
 
             # Get institution info
-            institution_info = self._get_institution_info_by_item(access_token)
+            institution_info = await self._get_institution_info_by_item(access_token)
 
             # Store the access token
             stored_token = self._store_access_token(
                 user_id, access_token, item_id, institution_info
             )
 
+            # Immediately sync account data so accounts are available right away
+            try:
+                logger.info(f"🔄 Syncing account data immediately for item {item_id}")
+                await self.get_accounts_with_balances(user_id, use_cached_balance=False)
+                logger.info(f"✅ Account data synced successfully for item {item_id}")
+            except Exception as e:
+                logger.error(f"❌ Failed to sync account data for item {item_id}: {e}")
+                # Don't fail the entire exchange if account sync fails
+
             logger.info(
                 f"Successfully exchanged and stored token for user {user_id}, item_id: {item_id}"
             )
             return stored_token
 
+        except ValueError as ve:
+            # Re-raise credential configuration errors
+            raise ve
         except Exception as e:
             logger.error(f"Failed to exchange public token for user {user_id}: {e}")
             raise Exception(f"Failed to exchange public token: {e}")
 
-    def _get_institution_info_by_item(self, access_token: str) -> Dict[str, Any]:
+    async def _get_institution_info_by_item(self, access_token: str) -> Dict[str, Any]:
         """Get institution information using item access token."""
         try:
+            client = await self._get_client()
             # Get item info first
             request = ItemGetRequest(access_token=access_token)
-            item_response = self.client.item_get(request)
+            item_response = client.item_get(request)
             institution_id = item_response["item"]["institution_id"]
 
             logger.info(f"Got institution_id: {institution_id}")
@@ -256,7 +309,7 @@ class PlaidService:
             inst_request = InstitutionsGetByIdRequest(
                 institution_id=institution_id, country_codes=[CountryCode("US")]
             )
-            inst_response = self.client.institutions_get_by_id(inst_request)
+            inst_response = client.institutions_get_by_id(inst_request)
             institution = inst_response["institution"]
 
             institution_info = {
@@ -411,7 +464,7 @@ class PlaidService:
             logger.error(f"Failed to retrieve access tokens for user {user_id}: {e}")
             raise Exception(f"Failed to retrieve access tokens: {e}")
 
-    def get_accounts_with_balances(
+    async def get_accounts_with_balances(
         self,
         user_id: str,
         account_ids: Optional[List[str]] = None,
@@ -471,7 +524,8 @@ class PlaidService:
                         request = AccountsBalanceGetRequest(
                             access_token=decrypted_token
                         )
-                    response = self.client.accounts_balance_get(request)
+                    client = await self._get_client()
+                    response = client.accounts_balance_get(request)
                     accounts_data = response["accounts"]
                     for account in accounts_data:
                         balance_info = account["balances"]
@@ -549,7 +603,7 @@ class PlaidService:
             logger.error(f"Failed to update token last_used for {item_id}: {e}")
             return False
 
-    def revoke_item_access(self, user_id: str, item_id: str) -> bool:
+    async def revoke_item_access(self, user_id: str, item_id: str) -> bool:
         """Revoke access to a Plaid item and remove from database."""
         try:
             logger.info(f"Revoking access for user {user_id}, item {item_id}")
@@ -574,8 +628,13 @@ class PlaidService:
             request = ItemRemoveRequest(access_token=decrypted_token)
 
             try:
-                self.client.item_remove(request)
+                client = await self._get_client()
+                client.item_remove(request)
                 logger.info(f"Successfully revoked Plaid access for item {item_id}")
+            except ValueError as ve:
+                logger.warning(
+                    f"Plaid credentials not configured, skipping API revocation: {ve}"
+                )
             except Exception as e:
                 logger.warning(
                     f"Failed to revoke with Plaid API: {e}, continuing with local cleanup"
@@ -648,7 +707,7 @@ class PlaidService:
             logger.error(f"Failed to update sync status for {item_id}: {e}")
             return False
 
-    def sync_all_transactions_for_item(
+    async def sync_all_transactions_for_item(
         self, user_id: str, item_id: str, access_token: str
     ) -> Dict[str, Any]:
         """Initial full sync of transactions for a newly connected item."""
@@ -673,7 +732,8 @@ class PlaidService:
                 else:
                     request = TransactionsSyncRequest(access_token=access_token)
 
-                response = self.client.transactions_sync(request)
+                client = await self._get_client()
+                response = client.transactions_sync(request)
 
                 # Process transactions
                 added = response.get("added", [])
@@ -727,7 +787,7 @@ class PlaidService:
             self.update_transaction_sync_status(user_id, item_id, "error")
             raise Exception(f"Transaction sync failed: {e}")
 
-    def refresh_transactions(self, user_id: str, item_id: str) -> Dict[str, Any]:
+    async def refresh_transactions(self, user_id: str, item_id: str) -> Dict[str, Any]:
         """Refresh transactions for a specific item using sync API."""
         try:
             logger.info(f"Refreshing transactions for item {item_id}")
@@ -758,7 +818,8 @@ class PlaidService:
             else:
                 request = TransactionsSyncRequest(access_token=access_token)
 
-            response = self.client.transactions_sync(request)
+            client = await self._get_client()
+            response = client.transactions_sync(request)
 
             # Process new transactions
             added = response.get("added", [])
@@ -812,7 +873,9 @@ class PlaidService:
             logger.error(f"Failed to refresh transactions for {item_id}: {e}")
             raise Exception(f"Transaction refresh failed: {e}")
 
-    def force_refresh_transactions(self, user_id: str, item_id: str) -> Dict[str, Any]:
+    async def force_refresh_transactions(
+        self, user_id: str, item_id: str
+    ) -> Dict[str, Any]:
         """Force refresh by clearing all data and performing complete resync."""
         try:
             logger.info(f"Force refreshing transactions for item {item_id}")
@@ -836,7 +899,7 @@ class PlaidService:
             access_token = TokenEncryption.decrypt_token(target_token.access_token)
 
             # Perform complete resync
-            sync_result = self.sync_all_transactions_for_item(
+            sync_result = await self.sync_all_transactions_for_item(
                 user_id, item_id, access_token
             )
 
@@ -943,7 +1006,9 @@ class PlaidService:
             logger.error(f"Failed to get Plaid items for user {user_id}: {e}")
             raise Exception(f"Failed to get Plaid items: {e}")
 
-    def _sync_transactions_for_stored_item(self, user_id: str, item_id: str) -> None:
+    async def _sync_transactions_for_stored_item(
+        self, user_id: str, item_id: str
+    ) -> None:
         """Background task to sync transactions for a newly stored item."""
         try:
             logger.info(
@@ -970,8 +1035,10 @@ class PlaidService:
             access_token = TokenEncryption.decrypt_token(target_token.access_token)
             logger.info(f"✅ Successfully decrypted access token for item {item_id}")
 
-            # Perform the sync
-            result = self.sync_all_transactions_for_item(user_id, item_id, access_token)
+            # Perform transaction sync
+            result = await self.sync_all_transactions_for_item(
+                user_id, item_id, access_token
+            )
             logger.info(
                 f"🎉 Background transaction sync completed for item {item_id}: {result}"
             )

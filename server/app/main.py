@@ -30,6 +30,7 @@ from .middleware import (
 from .routers import plaid_router
 from .routers.microsoft_oauth import router as microsoft_oauth_router
 from .utils.logger import setup_logging, get_logger
+from .routers.plaid_config import router as plaid_config_router
 
 # Setup logging
 setup_logging()
@@ -103,9 +104,13 @@ def create_app() -> FastAPI:
     )
 
     # Add routers
-    app.include_router(microsoft_oauth_router, prefix=settings.api_v1_prefix)  # Microsoft OAuth
+    app.include_router(
+        microsoft_oauth_router, prefix=settings.api_v1_prefix
+    )  # Microsoft OAuth
     # Plaid integration endpoints
     app.include_router(plaid_router, prefix=settings.api_v1_prefix)
+    # Plaid configuration endpoints
+    app.include_router(plaid_config_router, prefix=settings.api_v1_prefix)
 
     # Health check endpoint
     @app.get("/health")

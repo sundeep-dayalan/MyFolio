@@ -67,52 +67,12 @@ class Settings(BaseSettings):
         env="AZURE_REDIRECT_URI",
     )
 
-
-    # Plaid Configuration
-    plaid_client_id: str = Field(..., env="PLAID_CLIENT_ID")
-    plaid_secret: str = Field(..., env="PLAID_SECRET")
-    plaid_env: str = Field(default="sandbox", env="PLAID_ENV")
-
     # Logging
     log_level: str = Field(default="INFO", env="LOG_LEVEL")
     log_file: Optional[str] = Field(default=None, env="LOG_FILE")
 
     # Environment
     environment: str = Field(default="development", env="ENVIRONMENT")
-
-    def __init__(self, **kwargs):
-        """Initialize settings with Azure Key Vault support."""
-        # Check deployment environment
-        is_azure_functions = bool(os.getenv("WEBSITE_SITE_NAME"))
-        is_production = os.getenv("ENVIRONMENT") == "production"
-        is_development = os.getenv("ENVIRONMENT") in ["development", "dev"]
-        
-        # For Azure Functions in production: Key Vault references are automatically resolved
-        # For local development: Manually load from Key Vault using Azure identity
-        if not is_azure_functions and (is_production or is_development):
-            secret_manager = get_secret_manager()
-            
-            # Determine environment prefix for secrets
-            env_prefix = "dev" if is_development else "prod"
-            
-            # Override with secrets from Azure Key Vault if available
-            # Using environment-specific secret names (dev-*/prod-*)
-            # Note: Cosmos DB settings are handled as direct environment variables, not secrets
-            secret_overrides = {
-                "SECRET_KEY": secret_manager.get_secret(f"{env_prefix}-secret-key"),
-                "AZURE_CLIENT_ID": secret_manager.get_secret(f"{env_prefix}-azure-client-id"),
-                "AZURE_CLIENT_SECRET": secret_manager.get_secret(f"{env_prefix}-azure-client-secret"),
-                "AZURE_TENANT_ID": secret_manager.get_secret(f"{env_prefix}-azure-tenant-id"),
-                "PLAID_CLIENT_ID": secret_manager.get_secret(f"{env_prefix}-plaid-client-id"),
-                "PLAID_SECRET": secret_manager.get_secret(f"{env_prefix}-plaid-secret"),
-            }
-
-            # Update environment with secrets
-            for key, value in secret_overrides.items():
-                if value:
-                    os.environ[key] = value
-
-        super().__init__(**kwargs)
 
     class Config:
         env_file = ".env"

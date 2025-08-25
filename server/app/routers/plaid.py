@@ -55,20 +55,20 @@ def get_plaid_service() -> PlaidService:
 
 
 @router.post("/create_link_token")
-def create_link_token(
+async def create_link_token(
     user_id: str = Depends(get_current_user_id),
     plaid_service: PlaidService = Depends(get_plaid_service),
 ):
     """Create a Plaid link token for the current user."""
     try:
-        link_token = plaid_service.create_link_token(user_id)
+        link_token = await plaid_service.create_link_token(user_id)
         return {"link_token": link_token}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.post("/exchange_public_token")
-def exchange_public_token(
+async def exchange_public_token(
     request: ExchangeTokenRequest,
     background_tasks: BackgroundTasks,
     user_id: str = Depends(get_current_user_id),
@@ -76,10 +76,10 @@ def exchange_public_token(
 ):
     """Exchange public token for an access token and store securely."""
     try:
-        result = plaid_service.exchange_public_token(user_id, request.public_token)
+        result = await plaid_service.exchange_public_token(user_id, request.public_token)
 
         # Convert to dict for response
-        result_dict = result.dict() if hasattr(result, "dict") else result
+        result_dict = result.model_dump() if hasattr(result, "model_dump") else result
 
         # Add the long-running sync as a background task
         # The sync method will get the encrypted token from CosmosDB storage
@@ -102,13 +102,13 @@ def exchange_public_token(
 
 
 @router.get("/accounts")
-def get_accounts(
+async def get_accounts(
     user_id: str = Depends(get_current_user_id),
     plaid_service: PlaidService = Depends(get_plaid_service),
 ):
     """Fetch all account balances for the current user from Cosmos DB only (never hits Plaid API)."""
     try:
-        result = plaid_service.get_accounts_with_balances(
+        result = await plaid_service.get_accounts_with_balances(
             user_id, use_cached_balance=True
         )
         return result
@@ -121,13 +121,13 @@ def get_accounts(
 
 
 @router.post("/accounts/refresh")
-def refresh_accounts(
+async def refresh_accounts(
     user_id: str = Depends(get_current_user_id),
     plaid_service: PlaidService = Depends(get_plaid_service),
 ):
     """Force refresh account balances from Plaid API, update Cosmos DB, and return latest."""
     try:
-        result = plaid_service.get_accounts_with_balances(
+        result = await plaid_service.get_accounts_with_balances(
             user_id, use_cached_balance=False
         )
         return result
@@ -150,13 +150,13 @@ def get_accounts_data_info(
 
 
 @router.get("/balance")
-def get_balance_legacy(
+async def get_balance_legacy(
     user_id: str = Depends(get_current_user_id),
     plaid_service: PlaidService = Depends(get_plaid_service),
 ):
     """Legacy endpoint - redirects to /accounts for backward compatibility."""
     try:
-        result = plaid_service.get_accounts_with_balances(user_id)
+        result = await plaid_service.get_accounts_with_balances(user_id)
         return {"accounts": result.get("accounts", [])}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -176,14 +176,14 @@ def get_plaid_items(
 
 
 @router.delete("/items/{item_id}")
-def revoke_plaid_item(
+async def revoke_plaid_item(
     item_id: str,
     user_id: str = Depends(get_current_user_id),
     plaid_service: PlaidService = Depends(get_plaid_service),
 ):
     """Revoke access to a specific Plaid item."""
     try:
-        success = plaid_service.revoke_item_access(user_id, item_id)
+        success = await plaid_service.revoke_item_access(user_id, item_id)
         if success:
             return {"message": "Item revoked successfully"}
         else:
@@ -246,7 +246,7 @@ def get_transactions_by_account(
 @router.post(
     "/transactions/refresh/{item_id}", response_model=RefreshTransactionsResponse
 )
-def refresh_transactions(
+async def refresh_transactions(
     item_id: str,
     user_id: str = Depends(get_current_user_id),
     plaid_service: PlaidService = Depends(get_plaid_service),
@@ -256,7 +256,7 @@ def refresh_transactions(
     Fetches only new transactions since the last sync.
     """
     try:
-        result = plaid_service.refresh_transactions(user_id, item_id)
+        result = await plaid_service.refresh_transactions(user_id, item_id)
         return RefreshTransactionsResponse(**result)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -266,7 +266,7 @@ def refresh_transactions(
     "/transactions/force-refresh/{item_id}",
     response_model=ForceRefreshTransactionsResponse,
 )
-def force_refresh_transactions(
+async def force_refresh_transactions(
     item_id: str,
     user_id: str = Depends(get_current_user_id),
     plaid_service: PlaidService = Depends(get_plaid_service),
@@ -276,7 +276,7 @@ def force_refresh_transactions(
     and performing a complete resync. This is an async operation that returns immediately.
     """
     try:
-        result = plaid_service.force_refresh_transactions(user_id, item_id)
+        result = await plaid_service.force_refresh_transactions(user_id, item_id)
         return ForceRefreshTransactionsResponse(**result)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))

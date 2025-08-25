@@ -465,6 +465,9 @@ create_key_vault() {
     # Grant current user access to Key Vault
     print_status "Configuring Key Vault permissions..."
     local current_user=$(az ad signed-in-user show --query id --output tsv)
+
+    # Get the object ID of the currently signed-in user
+    local current_user_object_id=$(az ad signed-in-user show --query id -o tsv)
     
     az role assignment create \
         --role "Key Vault Secrets Officer" \
@@ -472,6 +475,19 @@ create_key_vault() {
         --scope "/subscriptions/$(az account show --query id --output tsv)/resourceGroups/$RESOURCE_GROUP_NAME/providers/Microsoft.KeyVault/vaults/$KEY_VAULT_NAME" \
         --output none
     
+    az role assignment create \
+        --role "Key Vault Crypto User" \
+        --assignee-object-id "$current_user_object_id" \
+        --scope "/subscriptions/$(az account show --query id -o tsv)/resourceGroups/$RESOURCE_GROUP_NAME/providers/Microsoft.KeyVault/vaults/$KEY_VAULT_NAME" \
+        --output none
+
+    # Role for managing cryptographic keys (create, delete)
+    az role assignment create \
+        --role "Key Vault Crypto Officer" \
+        --assignee "$current_user" \
+        --scope "/subscriptions/$(az account show --query id --output tsv)/resourceGroups/$RESOURCE_GROUP_NAME/providers/Microsoft.KeyVault/vaults/$KEY_VAULT_NAME" \
+        --output none
+
     print_success "Key Vault permissions configured!"
     
     # Store function app principal ID for later use (will be set after function app creation)
@@ -695,8 +711,6 @@ configure_function_app() {
             "AZURE_CLIENT_ID=@Microsoft.KeyVault(VaultName=${KEY_VAULT_NAME};SecretName=prod-azure-client-id)" \
             "AZURE_CLIENT_SECRET=@Microsoft.KeyVault(VaultName=${KEY_VAULT_NAME};SecretName=prod-azure-client-secret)" \
             "AZURE_TENANT_ID=@Microsoft.KeyVault(VaultName=${KEY_VAULT_NAME};SecretName=prod-azure-tenant-id)" \
-            "PLAID_CLIENT_ID=@Microsoft.KeyVault(VaultName=${KEY_VAULT_NAME};SecretName=prod-plaid-client-id)" \
-            "PLAID_SECRET=@Microsoft.KeyVault(VaultName=${KEY_VAULT_NAME};SecretName=prod-plaid-secret)" \
             "KEY_VAULT_URL=$key_vault_url" \
             "ENVIRONMENT=$ENVIRONMENT" \
             "APPLICATIONINSIGHTS_CONNECTION_STRING=$insights_connection" \
@@ -802,8 +816,6 @@ setup_secrets() {
         "dev-azure-client-id:$AZURE_AD_CLIENT_ID"
         "dev-azure-client-secret:$AZURE_AD_CLIENT_SECRET"
         "dev-azure-tenant-id:$AZURE_AD_TENANT_ID"
-        "dev-plaid-client-id:configure-me"
-        "dev-plaid-secret:configure-me"
     )
     
     # Prod environment secrets (only actual secrets, not infrastructure config)
@@ -812,8 +824,6 @@ setup_secrets() {
         "prod-azure-client-id:$AZURE_AD_CLIENT_ID"
         "prod-azure-client-secret:$AZURE_AD_CLIENT_SECRET"
         "prod-azure-tenant-id:$AZURE_AD_TENANT_ID"
-        "prod-plaid-client-id:configure-me"
-        "prod-plaid-secret:configure-me"
     )
     
     # Combine all secrets
@@ -845,6 +855,22 @@ setup_secrets() {
             fi
         done
     done
+
+    print_status "Creating cryptographic key for all secrets encryption..."
+
+    if az keyvault key create \
+        --vault-name "$KEY_VAULT_NAME" \
+        --name "secrets-encryption-key" \
+        --kty RSA \
+        --size 2048 \
+        --ops encrypt decrypt \
+        --protection software \
+        --output none; then
+        print_success "Successfully created cryptographic key: 'secrets-encryption-key'"
+    else
+        print_error "Failed to create cryptographic key: 'secrets-encryption-key'"
+        exit 1 # Critical key can't be created
+    fi
     
     print_success "Secrets configured!"
 }
@@ -1035,24 +1061,30 @@ display_summary() {
     echo "     - Organizational Azure AD accounts"
     echo "   • Login at: $STATIC_WEB_APP_URL"
     echo ""
-    echo "2️⃣  UPDATE CREDENTIALS in Azure Key Vault:"
-    echo "   • Go to: https://portal.azure.com/#@/resource/subscriptions/$(az account show --query id --output tsv)/resourceGroups/$RESOURCE_GROUP_NAME/providers/Microsoft.KeyVault/vaults/$KEY_VAULT_NAME"
-    echo "   • Microsoft Entra ID credentials are automatically configured!"
-    echo "   • Update: plaid-client-id, plaid-secret"
+    echo "2️⃣  SETUP PLAID ENCRYPTION KEY (Required for Plaid features):"
+    echo "   • Run: ./setup_plaid_encryption.sh"
+    echo "   • This creates a Key Vault key for secure credential encryption"
     echo ""
-    echo "3️⃣  DEPLOY FRONTEND to Static Web App:"
+    echo "3️⃣  CONFIGURE PLAID CREDENTIALS (On-Demand):"
+    echo "   • Plaid features are DISABLED by default for security"
+    echo "   • Admin can activate by providing credentials via API:"
+    echo "   • POST $FUNCTION_APP_URL/api/v1/plaid/configuration"
+    echo "   • Microsoft Entra ID credentials are automatically configured!"
+    echo ""
+    echo "4️⃣  DEPLOY FRONTEND to Static Web App:"
     echo "   • Connect GitHub repository in Azure portal"
     echo "   • Or upload build files from frontend/dist/"
     echo ""
-    echo "4️⃣  RESTART FUNCTION APP (Important for Key Vault references):"
+    echo "5️⃣  RESTART FUNCTION APP (Important for Key Vault references):"
     echo "   • az functionapp restart --name $FUNCTION_APP_NAME --resource-group $RESOURCE_GROUP_NAME"
     echo "   • Wait 2-3 minutes after restart for Key Vault references to resolve"
     echo ""
-    echo "5️⃣  TEST YOUR APPLICATION:"
+    echo "6️⃣  TEST YOUR APPLICATION:"
     echo "   • Backend health: curl $FUNCTION_APP_URL/health"
     echo "   • Frontend: Visit $STATIC_WEB_APP_URL"
+    echo "   • Plaid status: GET $FUNCTION_APP_URL/api/v1/plaid/configuration/status"
     echo ""
-    echo "5️⃣  MONITOR & MANAGE:"
+    echo "7️⃣  MONITOR & MANAGE:"
     echo "   • Azure portal: https://portal.azure.com"
     echo "   • Application Insights: Monitor performance and errors"
     echo "   • Key Vault: Manage secrets securely"
