@@ -1280,9 +1280,9 @@ main() {
     CURRENT_STEP="Static Web App"; create_static_web_app
     CURRENT_STEP="Function Configuration"; configure_function_app
     CURRENT_STEP="Key Vault Secrets"; setup_secrets
-    # CURRENT_STEP="Backend Deployment"; deploy_backend
+    CURRENT_STEP="Backend Deployment"; deploy_backend
     CURRENT_STEP="Force Config Refresh"; force_config_refresh
-    # CURRENT_STEP="Frontend Deployment"; deploy_frontend
+    CURRENT_STEP="Frontend Deployment"; deploy_frontend
     
     
     display_summary
