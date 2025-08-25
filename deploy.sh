@@ -816,6 +816,7 @@ configure_function_app() {
             "ALLOWED_HOSTS=${static_web_app_hostname},${FUNCTION_APP_NAME}.azurewebsites.net" \
             "ALLOWED_ORIGINS=$frontend_url,https://${FUNCTION_APP_NAME}.azurewebsites.net,http://localhost:5173,http://localhost:3000" \
             "LOG_LEVEL=INFO" \
+            "SESSION_SECRET_KEY=@Microsoft.KeyVault(VaultName=${KEY_VAULT_NAME};SecretName=session-secret-key)" \
         --output none
     
     print_status "Configuring Function App CORS settings..."
@@ -908,6 +909,7 @@ setup_secrets() {
         "prod-azure-client-id:$AZURE_PROD_CLIENT_ID"
         "prod-azure-client-secret:$AZURE_PROD_CLIENT_SECRET"
         "prod-azure-tenant-id:$AZURE_AD_TENANT_ID"
+        "session-secret-key:$(openssl rand -base64 32)"
     )
 
     # Combine all secrets
