@@ -62,8 +62,10 @@ async def create_link_token(
     """Create a Plaid link token for the current user."""
     try:
         link_token = await plaid_service.create_link_token(user_id)
+        logger.debug(f"Created link token for user {user_id} link token: {link_token}")
         return {"link_token": link_token}
     except Exception as e:
+        logger.error(f"Failed to create link token for user {user_id}: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
 
 
@@ -76,7 +78,9 @@ async def exchange_public_token(
 ):
     """Exchange public token for an access token and store securely."""
     try:
-        result = await plaid_service.exchange_public_token(user_id, request.public_token)
+        result = await plaid_service.exchange_public_token(
+            user_id, request.public_token
+        )
 
         # Convert to dict for response
         result_dict = result.model_dump() if hasattr(result, "model_dump") else result

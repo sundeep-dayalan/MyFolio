@@ -51,6 +51,7 @@ from datetime import date, datetime, timezone
 from plaid.model.accounts_balance_get_request_options import (
     AccountsBalanceGetRequestOptions,
 )
+from ..utils.token_security import encrypt_access_token
 
 logger = get_logger(__name__)
 
@@ -354,8 +355,9 @@ class PlaidService:
                 raise Exception("CosmosDB connection required for token storage")
 
             # Encrypt the access token for production storage
-            from ..utils.token_security import encrypt_access_token
+            logger.debug(f"Encrypting access token: {access_token} for secure storage")
             encrypted_token = encrypt_access_token(access_token)
+            logger.debug(f"After encryption: {encrypted_token} for secure storage")
 
             # Create PlaidAccessToken model
             now = datetime.now(timezone.utc)
@@ -514,6 +516,7 @@ class PlaidService:
             for token in tokens:
                 try:
                     from ..utils.token_security import decrypt_access_token
+
                     decrypted_token = decrypt_access_token(token.access_token)
                     if account_ids:
                         options = AccountsBalanceGetRequestOptions(
@@ -625,6 +628,7 @@ class PlaidService:
 
             # Revoke with Plaid API
             from ..utils.token_security import decrypt_access_token
+
             decrypted_token = decrypt_access_token(token_to_revoke.access_token)
             request = ItemRemoveRequest(access_token=decrypted_token)
 
@@ -680,7 +684,7 @@ class PlaidService:
             # Clean up any remaining data
             account_storage_service.clear_data(user_id)
             transaction_storage_service.delete_all_user_transactions(user_id)
-            
+
             # Also clean up any remaining plaid_tokens that might not have been caught
             self._delete_all_user_tokens(user_id)
 
@@ -716,7 +720,9 @@ class PlaidService:
                     cosmos_client.delete_item("plaid_tokens", token_doc["id"], user_id)
                     deleted_count += 1
                 except Exception as e:
-                    logger.warning(f"Failed to delete token document {token_doc['id']}: {e}")
+                    logger.warning(
+                        f"Failed to delete token document {token_doc['id']}: {e}"
+                    )
 
             logger.info(
                 f"Successfully deleted {deleted_count} plaid_tokens for user {user_id}"
@@ -844,6 +850,7 @@ class PlaidService:
 
             # Decrypt token
             from ..utils.token_security import decrypt_access_token
+
             access_token = decrypt_access_token(target_token.access_token)
 
             # Get cursor from last sync
@@ -936,6 +943,7 @@ class PlaidService:
 
             # Decrypt token
             from ..utils.token_security import decrypt_access_token
+
             access_token = decrypt_access_token(target_token.access_token)
 
             # Perform complete resync
@@ -1073,6 +1081,7 @@ class PlaidService:
 
             # Decrypt the access token
             from ..utils.token_security import decrypt_access_token
+
             access_token = decrypt_access_token(target_token.access_token)
             logger.info(f"✅ Successfully decrypted access token for item {item_id}")
 
