@@ -17,6 +17,7 @@ Recent changes in 2.0.3:
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from fastapi import FastAPI
+from .cloud_config import get_secret_manager
 from starlette.middleware.sessions import SessionMiddleware
 
 from .config import settings
@@ -95,8 +96,13 @@ def create_app() -> FastAPI:
     app.middleware("http")(rate_limiter)
 
     # Add session middleware for OAuth state management
+    secret_manager = get_secret_manager()
+    session_secret = secret_manager.get_secret(
+        "session-secret-key", default="fallback-dev-secret-key"
+    )
     app.add_middleware(
         SessionMiddleware,
+        secret_key=session_secret,
         max_age=3600,  # 1 hour session timeout
         same_site="lax",
         https_only=not settings.debug,  # Use secure cookies in production
