@@ -2,11 +2,9 @@
 Security utilities for token encryption and data protection.
 """
 
-import os
 import base64
-from cryptography.fernet import Fernet
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from azure.keyvault.keys.crypto import CryptographyClient, EncryptionAlgorithm
+from azure.identity import DefaultAzureCredential
 from typing import Union
 import logging
 
@@ -17,75 +15,65 @@ settings = get_settings()
 
 
 class TokenEncryption:
-    """Token encryption utility for securing sensitive data."""
+    """Token encryption utility for securing sensitive data using Key Vault."""
 
     def __init__(self):
-        self._key = None
-        self._fernet = None
+        self.key_vault_url = settings.key_vault_url
+        self.crypto_client = None
         self._initialize_encryption()
 
     def _initialize_encryption(self):
-        """Initialize encryption with app secret key."""
+        """Initialize encryption with Key Vault or fallback."""
         try:
-            # Use app secret key as the base for encryption
-            secret_key = settings.SECRET_KEY.encode()
-
-            # Generate a salt (in production, this could be stored separately)
-            salt = b"plaid_token_salt"
-
-            # Derive a key using PBKDF2
-            kdf = PBKDF2HMAC(
-                algorithm=hashes.SHA256(),
-                length=32,
-                salt=salt,
-                iterations=100000,
-            )
-            key = base64.urlsafe_b64encode(kdf.derive(secret_key))
-            self._key = key
-            self._fernet = Fernet(key)
-
+            if self.key_vault_url:
+                credential = DefaultAzureCredential()
+                self.crypto_client = CryptographyClient(
+                    f"{self.key_vault_url}/keys/secrets-encryption-key", credential
+                )
+                logger.info("Token encryption initialized with Key Vault")
+            else:
+                logger.warning("Key Vault not configured. Using development mode for token encryption.")
         except Exception as e:
-            logger.error(f"Failed to initialize token encryption: {e}")
-            raise
+            logger.warning(f"Failed to initialize Key Vault for token encryption: {e}. Using development mode.")
+            self.crypto_client = None
 
     def encrypt_token(self, token: str) -> str:
-        """
-        Encrypt a token string.
-
-        Args:
-            token: The token string to encrypt
-
-        Returns:
-            Encrypted token as base64 string
-        """
+        """Encrypt a token string using Key Vault or fallback."""
         try:
             if not token:
                 return ""
 
-            encrypted_bytes = self._fernet.encrypt(token.encode())
-            return base64.urlsafe_b64encode(encrypted_bytes).decode()
+            if self.crypto_client:
+                logger.info("Encrypting token using Key Vault RSA encryption")
+                result = self.crypto_client.encrypt(
+                    EncryptionAlgorithm.rsa_oaep, token.encode()
+                )
+                encrypted = base64.b64encode(result.ciphertext).decode()
+                logger.info(f"Token encrypted successfully, length: {len(encrypted)}")
+                return encrypted
+            else:
+                logger.warning("Using development mode token encryption (NOT SECURE)")
+                return base64.b64encode(token.encode()).decode()
 
         except Exception as e:
             logger.error(f"Failed to encrypt token: {e}")
             raise
 
     def decrypt_token(self, encrypted_token: str) -> str:
-        """
-        Decrypt an encrypted token string.
-
-        Args:
-            encrypted_token: The encrypted token as base64 string
-
-        Returns:
-            Decrypted token string
-        """
+        """Decrypt an encrypted token string using Key Vault or fallback."""
         try:
             if not encrypted_token:
                 return ""
 
-            encrypted_bytes = base64.urlsafe_b64decode(encrypted_token.encode())
-            decrypted_bytes = self._fernet.decrypt(encrypted_bytes)
-            return decrypted_bytes.decode()
+            if self.crypto_client:
+                ciphertext = base64.b64decode(encrypted_token.encode())
+                result = self.crypto_client.decrypt(
+                    EncryptionAlgorithm.rsa_oaep, ciphertext
+                )
+                return result.plaintext.decode()
+            else:
+                logger.warning("Using development mode token decryption")
+                return base64.b64decode(encrypted_token.encode()).decode()
 
         except Exception as e:
             logger.error(f"Failed to decrypt token: {e}")

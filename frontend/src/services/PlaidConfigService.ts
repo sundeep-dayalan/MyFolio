@@ -44,18 +44,6 @@ const getAuthHeaders = async (): Promise<HeadersInit> => {
     throw new Error('Authentication token required. Please log in.');
   }
 
-  // Check if token is expired
-  if (MicrosoftAuthService.isTokenExpired()) {
-    const expiry = localStorage.getItem('tokenExpiry');
-    const currentTime = Date.now();
-    logger.warn('Authentication token expired', 'PLAID_CONFIG', {
-      expiry: expiry ? new Date(parseInt(expiry)).toISOString() : 'null',
-      currentTime: new Date(currentTime).toISOString(),
-      isExpired: expiry ? currentTime >= parseInt(expiry) : true,
-    });
-    throw new Error('Authentication token expired. Please log in.');
-  }
-
   logger.info('Authentication token valid', 'PLAID_CONFIG');
   return {
     'Content-Type': 'application/json',

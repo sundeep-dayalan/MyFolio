@@ -2,11 +2,9 @@
 Security utilities.
 """
 
-from datetime import datetime, timedelta
-from typing import Any, Union, Optional
-from jose import JWTError, jwt
+from datetime import timedelta
+from typing import Optional
 from passlib.context import CryptContext
-from ..config import settings
 
 
 # Password hashing
@@ -25,30 +23,14 @@ def get_password_hash(password: str) -> str:
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     """Create a JWT access token."""
-    to_encode = data.copy()
-    if expires_delta:
-        expire = datetime.utcnow() + expires_delta
-    else:
-        expire = datetime.utcnow() + timedelta(
-            minutes=settings.access_token_expire_minutes
-        )
-
-    to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(
-        to_encode, settings.secret_key, algorithm=settings.algorithm
-    )
-    return encoded_jwt
+    from ..services.jwt_key_service import jwt_key_service
+    return jwt_key_service.create_access_token(data, expires_delta)
 
 
 def verify_token(token: str) -> Optional[dict]:
     """Verify and decode a JWT token."""
-    try:
-        payload = jwt.decode(
-            token, settings.secret_key, algorithms=[settings.algorithm]
-        )
-        return payload
-    except JWTError:
-        return None
+    from ..services.jwt_key_service import jwt_key_service
+    return jwt_key_service.verify_token(token)
 
 
 def sanitize_input(input_string: str) -> str:

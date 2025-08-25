@@ -354,7 +354,8 @@ class PlaidService:
                 raise Exception("CosmosDB connection required for token storage")
 
             # Encrypt the access token for production storage
-            encrypted_token = TokenEncryption.encrypt_token(access_token)
+            from ..utils.token_security import encrypt_access_token
+            encrypted_token = encrypt_access_token(access_token)
 
             # Create PlaidAccessToken model
             now = datetime.now(timezone.utc)
@@ -512,7 +513,8 @@ class PlaidService:
 
             for token in tokens:
                 try:
-                    decrypted_token = TokenEncryption.decrypt_token(token.access_token)
+                    from ..utils.token_security import decrypt_access_token
+                    decrypted_token = decrypt_access_token(token.access_token)
                     if account_ids:
                         options = AccountsBalanceGetRequestOptions(
                             account_ids=account_ids
@@ -622,9 +624,8 @@ class PlaidService:
                 return False
 
             # Revoke with Plaid API
-            decrypted_token = TokenEncryption.decrypt_token(
-                token_to_revoke.access_token
-            )
+            from ..utils.token_security import decrypt_access_token
+            decrypted_token = decrypt_access_token(token_to_revoke.access_token)
             request = ItemRemoveRequest(access_token=decrypted_token)
 
             try:
@@ -805,7 +806,8 @@ class PlaidService:
                 raise Exception(f"No token found for item {item_id}")
 
             # Decrypt token
-            access_token = TokenEncryption.decrypt_token(target_token.access_token)
+            from ..utils.token_security import decrypt_access_token
+            access_token = decrypt_access_token(target_token.access_token)
 
             # Get cursor from last sync
             cursor = transaction_storage_service.get_last_sync_cursor(user_id, item_id)
@@ -896,7 +898,8 @@ class PlaidService:
             transaction_storage_service.clear_item_transactions(user_id, item_id)
 
             # Decrypt token
-            access_token = TokenEncryption.decrypt_token(target_token.access_token)
+            from ..utils.token_security import decrypt_access_token
+            access_token = decrypt_access_token(target_token.access_token)
 
             # Perform complete resync
             sync_result = await self.sync_all_transactions_for_item(
@@ -1032,7 +1035,8 @@ class PlaidService:
             logger.info(f"✅ Found target token for item {item_id}")
 
             # Decrypt the access token
-            access_token = TokenEncryption.decrypt_token(target_token.access_token)
+            from ..utils.token_security import decrypt_access_token
+            access_token = decrypt_access_token(target_token.access_token)
             logger.info(f"✅ Successfully decrypted access token for item {item_id}")
 
             # Perform transaction sync
