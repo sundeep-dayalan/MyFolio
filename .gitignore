@@ -38,9 +38,8 @@ firebase-adminsdk*.json
 google-credentials*.json
 
 # API keys and secrets
-**/secrets/
-**/*secret*
 **/*key*.json
+**/*secret*.json
 **/*credentials*.json
 
 # Python
