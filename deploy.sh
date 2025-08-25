@@ -67,6 +67,41 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
+# Function to retry Azure CLI commands with exponential backoff
+retry_az_command() {
+    local max_attempts=${1:-3}
+    local delay=${2:-5}
+    local operation_name=${3:-"Azure operation"}
+    shift 3  # Remove first 3 arguments, rest are the command
+    local cmd=("$@")
+    
+    local attempt=1
+    local exit_code=0
+    
+    while [ $attempt -le $max_attempts ]; do
+        print_status "Attempting $operation_name (attempt $attempt/$max_attempts)..."
+        
+        if "${cmd[@]}" 2>/dev/null; then
+            if [ $attempt -gt 1 ]; then
+                print_success "$operation_name succeeded on attempt $attempt"
+            fi
+            return 0
+        else
+            exit_code=$?
+            if [ $attempt -lt $max_attempts ]; then
+                local wait_time=$((delay * attempt))
+                print_warning "$operation_name failed (attempt $attempt/$max_attempts). Retrying in ${wait_time}s..."
+                sleep $wait_time
+            else
+                print_error "$operation_name failed after $max_attempts attempts (exit code: $exit_code)"
+                print_error "Failed command: ${cmd[*]}"
+                return $exit_code
+            fi
+        fi
+        ((attempt++))
+    done
+}
+
 # Function to wait for resource provider registration
 wait_for_provider_registration() {
     local provider=$1
@@ -132,7 +167,7 @@ setup_prerequisites() {
         
         if [ "$status" != "Registered" ]; then
             print_warning "$provider not registered. Registering now..."
-            az provider register --namespace "$provider" --wait
+            retry_az_command 5 10 "Register $provider" az provider register --namespace "$provider" --wait
             wait_for_provider_registration "$provider"
         else
             print_success "$provider already registered"
@@ -191,7 +226,8 @@ setup_resource_group() {
         return
     fi
     
-    az group create \
+    retry_az_command 3 5 "Create resource group $RESOURCE_GROUP_NAME" \
+        az group create \
         --name "$RESOURCE_GROUP_NAME" \
         --location "$LOCATION" \
         --tags "project=$PROJECT_NAME" "environment=$ENVIRONMENT" \
@@ -292,7 +328,8 @@ create_storage_account() {
     
     print_status "Creating storage account: $STORAGE_NAME"
     
-    az storage account create \
+    retry_az_command 3 10 "Create storage account $STORAGE_NAME" \
+        az storage account create \
         --name "$STORAGE_NAME" \
         --resource-group "$RESOURCE_GROUP_NAME" \
         --location "$LOCATION" \
@@ -320,7 +357,8 @@ create_cosmos_db() {
         for database in "${databases[@]}"; do
             if ! az cosmosdb sql database show --account-name "$COSMOS_NAME" --resource-group "$RESOURCE_GROUP_NAME" --name "$database" >/dev/null 2>&1; then
                 print_status "Creating missing database: $database"
-                az cosmosdb sql database create \
+                retry_az_command 3 10 "Create missing database $database" \
+                    az cosmosdb sql database create \
                     --account-name "$COSMOS_NAME" \
                     --resource-group "$RESOURCE_GROUP_NAME" \
                     --name "$database" \
@@ -335,7 +373,8 @@ create_cosmos_db() {
             for container in "${containers[@]}"; do
                 if ! az cosmosdb sql container show --account-name "$COSMOS_NAME" --database-name "$database" --resource-group "$RESOURCE_GROUP_NAME" --name "$container" >/dev/null 2>&1; then
                     print_status "Creating missing container: $container in $database"
-                    az cosmosdb sql container create \
+                    retry_az_command 3 10 "Create container $container in $database" \
+                        az cosmosdb sql container create \
                         --account-name "$COSMOS_NAME" \
                         --resource-group "$RESOURCE_GROUP_NAME" \
                         --database-name "$database" \
@@ -362,7 +401,8 @@ create_cosmos_db() {
     print_warning "If free tier is unavailable, will create standard account"
     
     # Create Cosmos DB account - try with free tier first
-    if ! az cosmosdb create \
+    if ! retry_az_command 3 15 "Create Cosmos DB with free tier" \
+        az cosmosdb create \
         --name "$COSMOS_NAME" \
         --resource-group "$RESOURCE_GROUP_NAME" \
         --kind GlobalDocumentDB \
@@ -371,10 +411,11 @@ create_cosmos_db() {
         --enable-automatic-failover false \
         --locations regionName="$LOCATION" failoverPriority=0 isZoneRedundant=false \
         --tags "project=$PROJECT_NAME" \
-        --output none 2>/dev/null; then
+        --output none; then
         
         print_warning "Free tier not available, creating standard Cosmos DB account..."
-        az cosmosdb create \
+        retry_az_command 3 15 "Create standard Cosmos DB account" \
+            az cosmosdb create \
             --name "$COSMOS_NAME" \
             --resource-group "$RESOURCE_GROUP_NAME" \
             --kind GlobalDocumentDB \
@@ -389,7 +430,8 @@ create_cosmos_db() {
     
     # Create dev and prod databases
     print_status "Creating dev database: sage-dev-db"
-    az cosmosdb sql database create \
+    retry_az_command 3 10 "Create dev database sage-dev-db" \
+        az cosmosdb sql database create \
         --account-name "$COSMOS_NAME" \
         --resource-group "$RESOURCE_GROUP_NAME" \
         --name "sage-dev-db" \
@@ -397,7 +439,8 @@ create_cosmos_db() {
         --output none
         
     print_status "Creating prod database: sage-prod-db"
-    az cosmosdb sql database create \
+    retry_az_command 3 10 "Create prod database sage-prod-db" \
+        az cosmosdb sql database create \
         --account-name "$COSMOS_NAME" \
         --resource-group "$RESOURCE_GROUP_NAME" \
         --name "sage-prod-db" \
@@ -411,7 +454,8 @@ create_cosmos_db() {
     for database in "${databases[@]}"; do
         for container in "${containers[@]}"; do
             print_status "Creating container: $container in $database"
-            az cosmosdb sql container create \
+            retry_az_command 3 10 "Create container $container in $database" \
+                az cosmosdb sql container create \
                 --account-name "$COSMOS_NAME" \
                 --resource-group "$RESOURCE_GROUP_NAME" \
                 --database-name "$database" \
@@ -436,7 +480,8 @@ create_app_insights() {
     
     print_status "Creating Application Insights: $INSIGHTS_NAME"
     
-    az monitor app-insights component create \
+    retry_az_command 3 10 "Create Application Insights $INSIGHTS_NAME" \
+        az monitor app-insights component create \
         --app "$INSIGHTS_NAME" \
         --location "$LOCATION" \
         --resource-group "$RESOURCE_GROUP_NAME" \
@@ -460,7 +505,8 @@ create_key_vault() {
     
     print_status "Creating Key Vault: $KEY_VAULT_NAME"
     
-    az keyvault create \
+    retry_az_command 3 10 "Create Key Vault $KEY_VAULT_NAME" \
+        az keyvault create \
         --name "$KEY_VAULT_NAME" \
         --resource-group "$RESOURCE_GROUP_NAME" \
         --location "$LOCATION" \
@@ -478,20 +524,23 @@ create_key_vault() {
     # Get the object ID of the currently signed-in user
     local current_user_object_id=$(az ad signed-in-user show --query id -o tsv)
     
-    az role assignment create \
+    retry_az_command 3 5 "Grant Key Vault Secrets Officer role to current user" \
+        az role assignment create \
         --role "Key Vault Secrets Officer" \
         --assignee "$current_user" \
         --scope "/subscriptions/$(az account show --query id --output tsv)/resourceGroups/$RESOURCE_GROUP_NAME/providers/Microsoft.KeyVault/vaults/$KEY_VAULT_NAME" \
         --output none
     
-    az role assignment create \
+    retry_az_command 3 5 "Grant Key Vault Crypto User role to current user" \
+        az role assignment create \
         --role "Key Vault Crypto User" \
         --assignee-object-id "$current_user_object_id" \
         --scope "/subscriptions/$(az account show --query id -o tsv)/resourceGroups/$RESOURCE_GROUP_NAME/providers/Microsoft.KeyVault/vaults/$KEY_VAULT_NAME" \
         --output none
 
     # Role for managing cryptographic keys (create, delete)
-    az role assignment create \
+    retry_az_command 3 5 "Grant Key Vault Crypto Officer role to current user" \
+        az role assignment create \
         --role "Key Vault Crypto Officer" \
         --assignee "$current_user" \
         --scope "/subscriptions/$(az account show --query id --output tsv)/resourceGroups/$RESOURCE_GROUP_NAME/providers/Microsoft.KeyVault/vaults/$KEY_VAULT_NAME" \
@@ -553,92 +602,58 @@ create_azure_ad_app() {
         # Update the app with web redirect URIs and token configuration
         print_status "Applying latest configuration (redirect URIs, token settings) for $env..."
 
-        # Retry logic for az ad app update
-        local update_attempt=1
-        local update_max_attempts=3
-        local update_status=1
-
-        while [ $update_attempt -le $update_max_attempts ]; do
+        # Update Azure AD app configuration using centralized retry logic
+        if retry_az_command 3 10 "Update Azure AD app configuration for $env" \
             az ad app update \
-                --id "$client_id" \
-                --web-redirect-uris "${backend_url}/api/v1/auth/oauth/microsoft/callback" "${frontend_url}/auth/callback" "http://localhost:5173/auth/callback" "http://localhost:8000/api/v1/auth/oauth/microsoft/callback" \
-                --enable-access-token-issuance true \
-                --enable-id-token-issuance true 2>/dev/null
-            
-            update_status=$?
-            
-            if [ $update_status -eq 0 ]; then
-                print_success "Azure AD app update succeeded for $env. Redirect URIs and token settings applied."
-                break
-            else
-                print_warning "Azure AD app update failed for $env (attempt $update_attempt/$update_max_attempts). Retrying in 10 seconds..."
-                sleep 10
-            fi
-            
-            ((update_attempt++))
-        done
-
-        if [ $update_status -ne 0 ]; then
-            print_error "Azure AD app update failed for $env after $update_max_attempts attempts! Some advanced token settings may need manual configuration."
+            --id "$client_id" \
+            --web-redirect-uris "${backend_url}/api/v1/auth/oauth/microsoft/callback" "${frontend_url}/auth/callback" "http://localhost:5173/auth/callback" "http://localhost:8000/api/v1/auth/oauth/microsoft/callback" \
+            --enable-access-token-issuance true \
+            --enable-id-token-issuance true; then
+            print_success "Azure AD app update succeeded for $env. Redirect URIs and token settings applied."
+        else
+            print_error "Azure AD app update failed for $env after all retry attempts! Some advanced token settings may need manual configuration."
         fi
 
-        # Retry logic for az ad app permission add
-        local perm_attempt=1
-        local perm_max_attempts=3
-        local perm_status=1
-
-        while [ $perm_attempt -le $perm_max_attempts ]; do
+        # Add Microsoft Graph permissions using centralized retry logic
+        if retry_az_command 3 10 "Add Microsoft Graph permissions for $env" \
             az ad app permission add \
-                --id "$client_id" \
-                --api 00000003-0000-0000-c000-000000000000 \
-                --api-permissions e1fe6dd8-ba31-4d61-89e7-88639da4683d=Scope 64a6cdd6-aab1-4aaf-94b8-3cc8405e90d0=Scope 14dad69e-099b-42c9-810b-d002981feec1=Scope 2>/dev/null
-            
-            perm_status=$?
-            
-            if [ $perm_status -eq 0 ]; then
-                print_success "Microsoft Graph permissions added successfully for $env."
-                break
-            else
-                print_warning "Failed to add Microsoft Graph permissions for $env (attempt $perm_attempt/$perm_max_attempts). Retrying in 10 seconds..."
-                sleep 10
-            fi
-            
-            ((perm_attempt++))
-        done
-
-        if [ $perm_status -ne 0 ]; then
-            print_error "Failed to add Microsoft Graph permissions for $env after $perm_max_attempts attempts! May need manual configuration."
+            --id "$client_id" \
+            --api 00000003-0000-0000-c000-000000000000 \
+            --api-permissions e1fe6dd8-ba31-4d61-89e7-88639da4683d=Scope 64a6cdd6-aab1-4aaf-94b8-3cc8405e90d0=Scope 14dad69e-099b-42c9-810b-d002981feec1=Scope; then
+            print_success "Microsoft Graph permissions added successfully for $env."
+        else
+            print_error "Failed to add Microsoft Graph permissions for $env after all retry attempts! May need manual configuration."
         fi
 
         # Create a new client secret with retry logic.
         # This command always generates a *new* secret, which is a good security practice for automated deployments.
         print_status "Resetting client secret for $env to ensure a valid secret is available..."
         local secret_name="sage-${env}-client-secret-$(date +%s)"
-        local retry_count=0
-        local max_retries=3
         local client_secret=""
         
-        while [ $retry_count -lt $max_retries ]; do
-            if client_secret=$(az ad app credential reset \
+        # Use a temporary function to capture the output while using retry logic
+        get_client_secret() {
+            client_secret=$(az ad app credential reset \
                 --id "$client_id" \
                 --display-name "$secret_name" \
                 --years 2 \
                 --query password \
-                --output tsv 2>/dev/null); then
-                break
-            else
-                ((retry_count++))
-                if [ $retry_count -lt $max_retries ]; then
-                    print_warning "Client secret creation failed for $env, retrying in 10 seconds... ($retry_count/$max_retries)"
-                    sleep 10
-                else
-                    print_error "Failed to create client secret for $env after $max_retries attempts"
-                    print_error "Please try creating the client secret manually in the Azure Portal:"
-                    print_warning "https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/Credentials/appId/$client_id"
-                    exit 1
-                fi
+                --output tsv)
+        }
+        
+        if retry_az_command 3 10 "Create client secret for $env" get_client_secret; then
+            if [ -z "$client_secret" ]; then
+                print_error "Client secret creation succeeded but returned empty value for $env"
+                print_error "Please try creating the client secret manually in the Azure Portal:"
+                print_warning "https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/Credentials/appId/$client_id"
+                exit 1
             fi
-        done
+        else
+            print_error "Failed to create client secret for $env after all retry attempts"
+            print_error "Please try creating the client secret manually in the Azure Portal:"
+            print_warning "https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/Credentials/appId/$client_id"
+            exit 1
+        fi
         
         # Store the client secret for this environment
         if [ "$env" = "dev" ]; then
@@ -648,6 +663,37 @@ create_azure_ad_app() {
         fi
         
         print_success "Client secret created/reset successfully for $env."
+
+        # Create service principal for the Azure AD app
+        print_status "Creating service principal for $env Azure AD app..."
+        local sp_creation_attempt=1
+        local sp_max_attempts=3
+        local sp_status=1
+
+        while [ $sp_creation_attempt -le $sp_max_attempts ]; do
+            if az ad sp create --id "$client_id" --output none 2>/dev/null; then
+                print_success "Service principal created successfully for $env."
+                sp_status=0
+                break
+            else
+                # Check if service principal already exists
+                if az ad sp show --id "$client_id" --output none 2>/dev/null; then
+                    print_warning "Service principal already exists for $env. Skipping creation."
+                    sp_status=0
+                    break
+                else
+                    print_warning "Service principal creation failed for $env (attempt $sp_creation_attempt/$sp_max_attempts). Retrying in 5 seconds..."
+                    sleep 5
+                fi
+            fi
+            
+            ((sp_creation_attempt++))
+        done
+
+        if [ $sp_status -ne 0 ]; then
+            print_error "Failed to create service principal for $env after $sp_max_attempts attempts!"
+            print_warning "Manual creation may be required: az ad sp create --id $client_id"
+        fi
 
         print_status "Azure AD Configuration for $env:"
         print_status "  App ID (Client ID): $client_id"
@@ -693,7 +739,8 @@ create_function_app() {
     print_warning "Using Consumption plan (serverless, pay-per-execution)"
     
     # Create Function App with consumption plan (free tier)
-    az functionapp create \
+    retry_az_command 3 15 "Create Function App $FUNCTION_APP_NAME" \
+        az functionapp create \
         --resource-group "$RESOURCE_GROUP_NAME" \
         --consumption-plan-location "$CONSUMPTION_LOCATION" \
         --runtime python \
@@ -708,7 +755,8 @@ create_function_app() {
     
     # Enable system-assigned managed identity for Key Vault access
     print_status "Enabling managed identity for Function App..."
-    az functionapp identity assign \
+    retry_az_command 3 10 "Enable managed identity for $FUNCTION_APP_NAME" \
+        az functionapp identity assign \
         --name "$FUNCTION_APP_NAME" \
         --resource-group "$RESOURCE_GROUP_NAME" \
         --output none
@@ -734,7 +782,8 @@ create_static_web_app() {
     if [ -z "$existing_staticwebapps" ]; then
         print_status "No existing Static Web App found. Creating new Static Web App: $STATIC_WEB_APP_NAME"
         
-        az staticwebapp create \
+        retry_az_command 3 15 "Create Static Web App $STATIC_WEB_APP_NAME" \
+            az staticwebapp create \
             --name "$STATIC_WEB_APP_NAME" \
             --resource-group "$RESOURCE_GROUP_NAME" \
             --location "Central US" \
@@ -790,7 +839,8 @@ configure_function_app() {
     # Configure function app settings with mix of direct values and Key Vault references
     # Infrastructure values: Direct environment variables
     # Sensitive secrets: Key Vault references
-    az functionapp config appsettings set \
+    retry_az_command 3 10 "Configure Function App settings" \
+        az functionapp config appsettings set \
         --name "$FUNCTION_APP_NAME" \
         --resource-group "$RESOURCE_GROUP_NAME" \
         --settings \
@@ -822,36 +872,41 @@ configure_function_app() {
     print_status "Configuring Function App CORS settings..."
     
     # Configure CORS directly in Function App (separate from environment variables)
-    az functionapp cors add \
+    retry_az_command 2 3 "Add CORS origin $frontend_url" \
+        az functionapp cors add \
         --name "$FUNCTION_APP_NAME" \
         --resource-group "$RESOURCE_GROUP_NAME" \
         --allowed-origins "$frontend_url" \
-        --output none 2>/dev/null || true
+        --output none || true
         
-    az functionapp cors add \
+    retry_az_command 2 3 "Add CORS origin https://${FUNCTION_APP_NAME}.azurewebsites.net" \
+        az functionapp cors add \
         --name "$FUNCTION_APP_NAME" \
         --resource-group "$RESOURCE_GROUP_NAME" \
         --allowed-origins "https://${FUNCTION_APP_NAME}.azurewebsites.net" \
-        --output none 2>/dev/null || true
+        --output none || true
         
-    az functionapp cors add \
+    retry_az_command 2 3 "Add CORS origin http://localhost:5173" \
+        az functionapp cors add \
         --name "$FUNCTION_APP_NAME" \
         --resource-group "$RESOURCE_GROUP_NAME" \
         --allowed-origins "http://localhost:5173" \
-        --output none 2>/dev/null || true
+        --output none || true
         
-    az functionapp cors add \
+    retry_az_command 2 3 "Add CORS origin http://localhost:3000" \
+        az functionapp cors add \
         --name "$FUNCTION_APP_NAME" \
         --resource-group "$RESOURCE_GROUP_NAME" \
         --allowed-origins "http://localhost:3000" \
-        --output none 2>/dev/null || true
+        --output none || true
     
     # Enable credentials for CORS (needed for authentication)
-    az functionapp cors credentials \
+    retry_az_command 2 3 "Enable CORS credentials" \
+        az functionapp cors credentials \
         --name "$FUNCTION_APP_NAME" \
         --resource-group "$RESOURCE_GROUP_NAME" \
         --enable true \
-        --output none 2>/dev/null || true
+        --output none || true
     
     print_success "Function App configured with environment variables and CORS settings!"
     
@@ -864,20 +919,30 @@ configure_function_app() {
         --output tsv)
     
     if [ -n "$function_app_principal_id" ]; then
-        # Grant both Key Vault Secrets User and Reader roles (required for Function App Key Vault references)
+        # Grant Key Vault roles (required for Function App Key Vault references)
         print_status "Granting Key Vault Secrets User role..."
-        az role assignment create \
+        retry_az_command 3 5 "Grant Key Vault Secrets User role" \
+            az role assignment create \
             --role "Key Vault Secrets User" \
             --assignee "$function_app_principal_id" \
             --scope "/subscriptions/$(az account show --query id --output tsv)/resourceGroups/$RESOURCE_GROUP_NAME/providers/Microsoft.KeyVault/vaults/$KEY_VAULT_NAME" \
-            --output none 2>/dev/null || print_warning "Key Vault Secrets User role assignment may already exist"
+            --output none
             
         print_status "Granting Key Vault Reader role..."
-        az role assignment create \
+        retry_az_command 3 5 "Grant Key Vault Reader role" \
+            az role assignment create \
             --role "Key Vault Reader" \
             --assignee "$function_app_principal_id" \
             --scope "/subscriptions/$(az account show --query id --output tsv)/resourceGroups/$RESOURCE_GROUP_NAME/providers/Microsoft.KeyVault/vaults/$KEY_VAULT_NAME" \
-            --output none 2>/dev/null || print_warning "Key Vault Reader role assignment may already exist"
+            --output none
+            
+        print_status "Granting Key Vault Crypto User role..."
+        retry_az_command 3 5 "Grant Key Vault Crypto User role" \
+            az role assignment create \
+            --role "Key Vault Crypto User" \
+            --assignee "$function_app_principal_id" \
+            --scope "/subscriptions/$(az account show --query id --output tsv)/resourceGroups/$RESOURCE_GROUP_NAME/providers/Microsoft.KeyVault/vaults/$KEY_VAULT_NAME" \
+            --output none
         
         print_success "Function App granted Key Vault access with required roles!"
     else
@@ -919,52 +984,43 @@ setup_secrets() {
         local secret_name=$(echo "$secret_pair" | cut -d: -f1)
         local secret_value=$(echo "$secret_pair" | cut -d: -f2-)
 
-        local retry_count=0
-        local max_retries=3
-        
-        while [ $retry_count -lt $max_retries ]; do
-            if az keyvault secret set \
-                --vault-name "$KEY_VAULT_NAME" \
-                --name "$secret_name" \
-                --value "$secret_value" \
-                --output none 2>/dev/null; then
-                print_status "Set secret: $secret_name"
-                break
-            else
-                ((retry_count++))
-                if [ $retry_count -lt $max_retries ]; then
-                    print_warning "Retry $retry_count/$max_retries for secret: $secret_name"
-                    sleep 5
-                else
-                    print_error "Failed to set secret: $secret_name after $max_retries attempts"
-                fi
-            fi
-        done
+        if retry_az_command 3 5 "Set secret $secret_name" \
+            az keyvault secret set \
+            --vault-name "$KEY_VAULT_NAME" \
+            --name "$secret_name" \
+            --value "$secret_value" \
+            --output none; then
+            print_status "Set secret: $secret_name"
+        else
+            print_error "Failed to set secret: $secret_name after all retry attempts"
+        fi
     done
 
     print_status "Creating cryptographic key for encryption and JWT signing..."
 
     # Create single key for both encryption and JWT signing operations
-    if az keyvault key create \
+    if retry_az_command 3 10 "Create cryptographic key secrets-encryption-key" \
+        az keyvault key create \
         --vault-name "$KEY_VAULT_NAME" \
         --name "secrets-encryption-key" \
         --kty RSA \
         --size 2048 \
         --ops encrypt decrypt sign verify \
         --protection software \
-        --output none 2>/dev/null; then
+        --output none; then
         print_success "Successfully created cryptographic key: 'secrets-encryption-key'"
     else
-        print_warning "Key 'secrets-encryption-key' already exists, updating operations..."
+        print_warning "Key creation failed, attempting to update existing key operations..."
         # Update existing key to include sign/verify operations
-        if az keyvault key set-attributes \
+        if retry_az_command 3 5 "Update key operations for secrets-encryption-key" \
+            az keyvault key set-attributes \
             --vault-name "$KEY_VAULT_NAME" \
             --name "secrets-encryption-key" \
             --ops encrypt decrypt sign verify \
-            --output none 2>/dev/null; then
+            --output none; then
             print_success "Successfully updated key operations for 'secrets-encryption-key'"
         else
-            print_error "Failed to update key operations. Manual update may be required."
+            print_error "Failed to create or update cryptographic key. Manual intervention may be required."
         fi
     fi
     
@@ -1031,7 +1087,8 @@ force_config_refresh() {
     print_warning "Forcing a platform-level refresh of all settings by updating a dummy variable..."
     print_warning "This is the definitive way to ensure new Key Vault secret versions are loaded."
     
-    az functionapp config appsettings set \
+    retry_az_command 3 5 "Force configuration refresh" \
+        az functionapp config appsettings set \
         --name "$FUNCTION_APP_NAME" \
         --resource-group "$RESOURCE_GROUP_NAME" \
         --settings "LAST_CONFIG_REFRESH_TIMESTAMP=$(date +%s)" \
@@ -1252,7 +1309,8 @@ display_summary() {
     # Method 3: Force refresh the function app and try again
     if [ -z "$publish_profile" ]; then
         print_status "Forcing function app sync and retrying..."
-        az functionapp sync --name "$FUNCTION_APP_NAME" --resource-group "$RESOURCE_GROUP_NAME" >/dev/null 2>&1 || true
+        retry_az_command 2 5 "Sync Function App" \
+            az functionapp sync --name "$FUNCTION_APP_NAME" --resource-group "$RESOURCE_GROUP_NAME" --output none || true
         sleep 5
         publish_profile=$(az functionapp deployment list-publishing-profiles \
             --name "$FUNCTION_APP_NAME" \
