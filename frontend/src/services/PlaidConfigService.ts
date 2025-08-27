@@ -87,13 +87,14 @@ export const PlaidConfigService = {
 
   async getConfigurationStatus(): Promise<PlaidConfigurationStatus> {
     try {
-      // This is a public endpoint, no auth headers needed
+      // Now requires authentication to get user-specific configuration status
+      const headers = await getAuthHeaders();
       const response = await fetch(`${API_BASE}/plaid/configuration/status`, {
         method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
       });
+
+      await handleAuthError(response);
 
       if (!response.ok) {
         // Return default unconfigured status on error

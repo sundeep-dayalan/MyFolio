@@ -87,15 +87,17 @@ async def store_plaid_configuration(
 
 
 @router.get("/configuration/status", response_model=PlaidConfigurationStatus)
-async def get_plaid_configuration_status():
+async def get_plaid_configuration_status(
+    current_user: UserResponse = Depends(get_current_user),
+):
     """
-    Check if Plaid is configured and active.
+    Check if Plaid is configured and active for the current user.
 
-    **Public endpoint** - Returns basic status without sensitive information.
+    Returns basic status without sensitive information.
     Used by frontend to show/hide Plaid features.
     """
     try:
-        status_result = await plaid_config_service.get_configuration_status()
+        status_result = await plaid_config_service.get_configuration_status(current_user.id)
         return status_result
 
     except Exception as e:
@@ -109,13 +111,13 @@ async def get_plaid_configuration(
     current_user: UserResponse = Depends(require_admin_user),
 ):
     """
-    Get Plaid configuration details.
+    Get Plaid configuration details for the current user.
 
     **Admin Only**: Returns configuration with masked client_id.
     Secret is never returned for security.
     """
     try:
-        config = await plaid_config_service.get_configuration()
+        config = await plaid_config_service.get_configuration(current_user.id)
 
         if not config:
             raise HTTPException(

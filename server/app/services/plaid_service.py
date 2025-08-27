@@ -110,13 +110,13 @@ class PlaidService:
         self._client = None
         self._client_initialized = False
 
-    async def _get_client(self) -> plaid_api.PlaidApi:
+    async def _get_client(self, user_id: str) -> plaid_api.PlaidApi:
         """Get Plaid client with dynamic credentials (Just-In-Time initialization)."""
         if self._client and self._client_initialized:
             return self._client
 
         # Get credentials and environment from secure storage
-        credentials = await plaid_config_service.get_decrypted_credentials()
+        credentials = await plaid_config_service.get_decrypted_credentials(user_id)
 
         if not credentials:
             raise ValueError(
@@ -174,7 +174,7 @@ class PlaidService:
     ) -> str:
         """Create a Plaid Link token for a user, supporting any Plaid product."""
         try:
-            client = await self._get_client()
+            client = await self._get_client(user_id)
             logger.info(
                 f"Creating link token for user {user_id} in {self.environment} environment"
             )
@@ -256,7 +256,7 @@ class PlaidService:
     ) -> PlaidAccessToken:
         """Exchange public token for access token and store it securely."""
         try:
-            client = await self._get_client()
+            client = await self._get_client(user_id)
             logger.info(f"Exchanging public token for user {user_id}")
 
             # Exchange public token for access token
@@ -267,7 +267,7 @@ class PlaidService:
             item_id = response["item_id"]
 
             # Get institution info
-            institution_info = await self._get_institution_info_by_item(access_token)
+            institution_info = await self._get_institution_info_by_item(user_id, access_token)
 
             # Store the access token
             stored_token = self._store_access_token(
@@ -297,10 +297,10 @@ class PlaidService:
             logger.error(f"Failed to exchange public token for user {user_id}: {e}")
             raise Exception(f"Failed to exchange public token: {e}")
 
-    async def _get_institution_info_by_item(self, access_token: str) -> Dict[str, Any]:
+    async def _get_institution_info_by_item(self, user_id: str, access_token: str) -> Dict[str, Any]:
         """Get institution information using item access token."""
         try:
-            client = await self._get_client()
+            client = await self._get_client(user_id)
             # Get item info first
             request = ItemGetRequest(access_token=access_token)
             item_response = client.item_get(request)
@@ -536,7 +536,7 @@ class PlaidService:
                         request = AccountsBalanceGetRequest(
                             access_token=decrypted_token
                         )
-                    client = await self._get_client()
+                    client = await self._get_client(user_id)
                     response = client.accounts_balance_get(request)
                     accounts_data = response["accounts"]
                     
@@ -707,7 +707,7 @@ class PlaidService:
             request = ItemRemoveRequest(access_token=decrypted_token)
 
             try:
-                client = await self._get_client()
+                client = await self._get_client(user_id)
                 client.item_remove(request)
                 logger.info(f"Successfully revoked Plaid access for item {item_id}")
             except ValueError as ve:
@@ -857,7 +857,7 @@ class PlaidService:
                 else:
                     request = TransactionsSyncRequest(access_token=access_token)
 
-                client = await self._get_client()
+                client = await self._get_client(user_id)
                 response = client.transactions_sync(request)
 
                 # Process transactions
@@ -950,7 +950,7 @@ class PlaidService:
             else:
                 request = TransactionsSyncRequest(access_token=access_token)
 
-            client = await self._get_client()
+            client = await self._get_client(user_id)
             response = client.transactions_sync(request)
 
             # Process new transactions
