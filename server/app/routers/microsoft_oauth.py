@@ -1,6 +1,7 @@
 """
 Microsoft Entra ID OAuth authentication routes.
 """
+
 import urllib.parse
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -26,7 +27,9 @@ async def ensure_cosmos_connected():
         try:
             await cosmos_client.connect()
         except Exception as e:
-            logger.warning(f"CosmosDB connection failed, continuing in offline mode: {str(e)}")
+            logger.warning(
+                f"CosmosDB connection failed, continuing in offline mode: {str(e)}"
+            )
             # Continue in offline mode - OAuth can still work without CosmosDB
 
 
@@ -67,7 +70,9 @@ async def microsoft_oauth_callback(
     code: Optional[str] = Query(None, description="Authorization code from Microsoft"),
     state: Optional[str] = Query(None, description="State parameter for security"),
     error: Optional[str] = Query(None, description="Error from Microsoft OAuth"),
-    error_description: Optional[str] = Query(None, description="Error description from Microsoft"),
+    error_description: Optional[str] = Query(
+        None, description="Error description from Microsoft"
+    ),
 ):
     """
     Handle Microsoft Entra ID OAuth 2.0 callback.
@@ -92,7 +97,9 @@ async def microsoft_oauth_callback(
         if not state:
             logger.warning("State parameter is missing - continuing anyway")
 
-        logger.info(f"Processing Microsoft OAuth callback - code: {code[:10]}..., state: {state}")
+        logger.info(
+            f"Processing Microsoft OAuth callback - code: {code[:10]}..., state: {state}"
+        )
         logger.info(f"Frontend URL for redirect: '{settings.frontend_url}'")
 
         # Ensure CosmosDB is connected
@@ -130,32 +137,6 @@ async def microsoft_oauth_callback(
         return RedirectResponse(url=react_error_url, status_code=302)
 
 
-@router.post("/revoke")
-async def revoke_microsoft_token(token: str):
-    """
-    Revoke Microsoft OAuth token.
-    """
-    try:
-        # Ensure CosmosDB is connected
-        await ensure_cosmos_connected()
-
-        # Initialize services
-        user_service = UserService()
-        auth_service = AuthService(user_service)
-
-        # Revoke the token
-        success = await auth_service.microsoft_oauth.revoke_token(token)
-
-        if success:
-            return {"message": "Token revoked successfully"}
-        else:
-            return {"message": "Token revocation may have failed", "warning": True}
-
-    except Exception as e:
-        logger.error(f"Error revoking token: {str(e)}")
-        raise HTTPException(status_code=500, detail="Token revocation failed")
-
-
 @router.get("/status")
 async def microsoft_oauth_status():
     """
@@ -163,9 +144,9 @@ async def microsoft_oauth_status():
     """
     return {
         "microsoft_oauth_enabled": bool(
-            settings.azure_client_id and 
-            settings.azure_client_secret and
-            settings.azure_tenant_id
+            settings.azure_client_id
+            and settings.azure_client_secret
+            and settings.azure_tenant_id
         ),
         "redirect_uri": settings.azure_redirect_uri,
         "frontend_url": settings.frontend_url,

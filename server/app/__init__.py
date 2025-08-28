@@ -2,7 +2,7 @@
 Sage API
 
 A streamlined production-ready FastAPI application for financial management:
-- Google OAuth 2.0 authentication
+- Microsoft Entra ID OAuth 2.0 authentication
 - Plaid financial data integration
 - Real-time account balances and transactions
 - Secure token management
