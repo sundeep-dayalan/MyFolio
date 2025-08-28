@@ -1,10 +1,11 @@
 """
 Authentication service for handling Microsoft Entra ID OAuth and JWT tokens.
 """
-from datetime import datetime, timedelta
+import uuid
+from datetime import timedelta
 from typing import Optional, Tuple
 
-from ..models.user import MicrosoftUserInfo, Token, UserResponse, UserCreate
+from ..models.user import MicrosoftUserInfo, Token, UserResponse, UserCreate, UserUpdate
 from ..exceptions import AuthenticationError
 from ..utils.logger import get_logger
 from ..utils.security import create_access_token, verify_token
@@ -21,6 +22,22 @@ class AuthService:
     def __init__(self, user_service: UserService):
         self.user_service = user_service
         self.microsoft_oauth = MicrosoftEntraOAuthService()
+
+    @staticmethod
+    def generate_unique_user_id() -> str:
+        """Generate a unique UUID for the user."""
+        return str(uuid.uuid4())
+
+    @staticmethod
+    def create_provider_metadata(provider: str, provider_user_id: str) -> dict:
+        """Create provider metadata for storing OAuth provider information."""
+        return {
+            "auth_provider": provider,
+            "provider_user_id": provider_user_id,
+            "provider_data": {
+                f"{provider}_id": provider_user_id
+            }
+        }
 
     def generate_microsoft_auth_url(self, state: Optional[str] = None) -> Tuple[str, str]:
         """Generate Microsoft Entra ID OAuth authorization URL."""
@@ -63,37 +80,31 @@ class AuthService:
                 user = await self.user_service.get_user_by_email(microsoft_user_info.email)
 
                 if not user:
-                    # Create new user from Microsoft info
-                    user_id = microsoft_user_info.oid or microsoft_user_info.sub
+                    # Create new user with unique UUID and store provider info in metadata
+                    provider_user_id = microsoft_user_info.oid or microsoft_user_info.sub
+                    unique_user_id = self.generate_unique_user_id()
+                    
                     user_data = UserCreate(
-                        id=user_id,  # Use Microsoft's user ID (oid preferred, sub as fallback)
+                        id=unique_user_id,  # Use unique UUID
                         email=microsoft_user_info.email,
                         name=microsoft_user_info.name,
                         given_name=microsoft_user_info.given_name,
                         family_name=microsoft_user_info.family_name,
                     )
                     user = await self.user_service.create_user(user_data)
-                    logger.info(f"New user created from Microsoft OAuth: {user.id}")
+                    
+                    # Update user with provider metadata
+                    provider_metadata = self.create_provider_metadata("microsoft", provider_user_id)
+                    await self.user_service.update_user(
+                        user.id, 
+                        UserUpdate(metadata=provider_metadata)
+                    )
+                    
+                    logger.info(f"New user created from Microsoft OAuth with provider metadata: {user.id}")
 
             except Exception as db_error:
-                # If CosmosDB is disabled, create a mock user for testing
-                if "CosmosDB" in str(db_error) or "not connected" in str(db_error):
-                    logger.warning(
-                        "CosmosDB is disabled, creating mock user for testing"
-                    )
-                    user_id = microsoft_user_info.oid or microsoft_user_info.sub
-                    user = UserResponse(
-                        id=user_id,
-                        email=microsoft_user_info.email,
-                        name=microsoft_user_info.name,
-                        given_name=microsoft_user_info.given_name,
-                        family_name=microsoft_user_info.family_name,
-                        is_active=True,
-                        created_at=datetime.utcnow(),
-                        updated_at=datetime.utcnow(),
-                    )
-                else:
-                    raise db_error
+                logger.error(f"Database error during user lookup/creation: {str(db_error)}")
+                raise AuthenticationError("Database error during authentication")
 
             # Check if user is active
             if not user.is_active:
