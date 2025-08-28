@@ -6,9 +6,13 @@ import {
   useRefreshTransactionsMutation,
   useForceRefreshTransactionsMutation,
 } from '../hooks/usePlaidApi';
+import { usePlaidConfigStatus } from '../hooks/usePlaidConfigStatus';
 import type { AuthContextType } from '@/types/types';
 import { TransactionsHeader } from '@/components/custom/transactions/transactions-header';
 import { TransactionsEmptyState } from '@/components/custom/transactions/transactions-empty-state';
+import { FeatureNotAvailable } from '@/components/custom/FeatureNotAvailable';
+import { Spinner } from '@/components/ui/spinner';
+import { Card, CardContent } from '@/components/ui/card';
 import { toast } from 'sonner';
 import { TransactionsDataTable } from '@/components/custom/transactions/transactions-data-table';
 import { columns } from '@/components/custom/transactions/transactions-columns';
@@ -18,11 +22,8 @@ const TransactionsPage: React.FC = () => {
   const auth = useContext(AuthContext) as AuthContextType;
   const { user } = auth || {};
 
-  // If no user is authenticated, redirect to login
-  if (!user) {
-    window.location.href = '/login';
-    return null;
-  }
+  // Check Plaid configuration status
+  const { data: plaidConfigStatus, isLoading: isConfigLoading } = usePlaidConfigStatus();
 
   // State for filtering and UI
   const [errorMessage, setErrorMessage] = useState<string>('');
@@ -37,6 +38,7 @@ const TransactionsPage: React.FC = () => {
   const refreshTransactionsMutation = useRefreshTransactionsMutation();
   const forceRefreshTransactionsMutation = useForceRefreshTransactionsMutation();
 
+  // Derived data
   const accounts = accountsData?.accounts || [];
   const items = itemsData?.items || [];
 
@@ -85,6 +87,39 @@ const TransactionsPage: React.FC = () => {
 
     return request;
   }, [selectedBank, institutionToItemMap, transactionType]);
+
+  // If no user is authenticated, redirect to login
+  if (!user) {
+    window.location.href = '/login';
+    return null;
+  }
+
+  // Show loading while checking configuration
+  if (isConfigLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <Card className="w-full max-w-md">
+          <CardContent className="flex flex-col items-center space-y-4 py-8">
+            <Spinner />
+            <p className="text-muted-foreground">Checking configuration...</p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // Check if Plaid is configured
+  if (!plaidConfigStatus?.is_configured) {
+    return (
+      <FeatureNotAvailable
+        featureName="Transactions"
+        title="Transaction Data Not Available"
+        description="Plaid integration is not configured. Please add your Plaid credentials in Settings to view transaction data from your connected bank accounts."
+        actionLabel="Configure Plaid Settings"
+        actionPath="/settings"
+      />
+    );
+  }
   const handleGoToAccounts = () => {
     window.location.href = '/accounts';
   };

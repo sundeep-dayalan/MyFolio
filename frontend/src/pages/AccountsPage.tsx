@@ -10,6 +10,7 @@ import {
   useRevokeAllItemsMutation,
 } from '../hooks/usePlaidApi';
 import { usePlaidConnectionFlow } from '../hooks/usePlaidConnectionFlow';
+import { usePlaidConfigStatus } from '../hooks/usePlaidConfigStatus';
 import type { AuthContextType } from '@/types/types';
 
 import { Button } from '@/components/ui/button';
@@ -20,10 +21,14 @@ import { AccountsSummary } from '@/components/custom/accounts/accounts-summary';
 import { AccountsHeader } from '@/components/custom/accounts/accounts-header';
 import { AccountsDisplay } from '@/components/custom/accounts/accounts-display';
 import { ConfirmationDialog } from '@/components/custom/accounts/confirmation-dialog';
+import { FeatureNotAvailable } from '@/components/custom/FeatureNotAvailable';
 
 const AccountsPage: React.FC = () => {
   const auth = useContext(AuthContext) as AuthContextType;
   const { user } = auth || {};
+
+  // Check Plaid configuration status
+  const { data: plaidConfigStatus, isLoading: isConfigLoading } = usePlaidConfigStatus();
 
   // State
   const [linkToken, setLinkToken] = useState<string | null>(null);
@@ -178,16 +183,31 @@ const AccountsPage: React.FC = () => {
   }
 
   // Loading state
-  if (isLoading) {
+  if (isLoading || isConfigLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <Card className="w-full max-w-md">
           <CardContent className="flex flex-col items-center space-y-4 py-8">
             <Spinner />
-            <p className="text-muted-foreground">Loading your accounts...</p>
+            <p className="text-muted-foreground">
+              {isConfigLoading ? 'Checking configuration...' : 'Loading your accounts...'}
+            </p>
           </CardContent>
         </Card>
       </div>
+    );
+  }
+
+  // Check if Plaid is configured
+  if (!plaidConfigStatus?.is_configured) {
+    return (
+      <FeatureNotAvailable
+        featureName="Bank Accounts"
+        title="Bank Account Integration Not Available"
+        description="Plaid integration is not configured. Please add your Plaid credentials in Settings to connect your bank accounts and view financial data."
+        actionLabel="Configure Plaid Settings"
+        actionPath="/settings"
+      />
     );
   }
 

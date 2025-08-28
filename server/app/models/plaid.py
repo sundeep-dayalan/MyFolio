@@ -80,11 +80,58 @@ class PlaidAccountWithBalance(BaseModel):
     subtype: Optional[str] = None
     mask: Optional[str] = None
     balances: PlaidBalance
+    item_id: Optional[str] = None  # Bank identifier
     institution_name: Optional[str] = None
     institution_id: Optional[str] = None
     logo: Optional[str] = None  # Institution logo URL
 
     class Config:
+        from_attributes = True
+
+
+class BankMetadata(BaseModel):
+    """Metadata for bank document."""
+    
+    accountCount: int = 0
+    totalBalance: float = 0.0
+    lastUpdated: str
+    transactionSyncStatus: str = "pending"
+
+    class Config:
+        from_attributes = True
+
+
+class BankDocument(BaseModel):
+    """Complete bank document model combining token and accounts."""
+    
+    # Document identifiers
+    id: str = Field(..., description="Document ID: item_id (unique within userId partition)")
+    userId: str = Field(..., description="User ID (partition key)")
+    itemId: str = Field(..., description="Plaid item ID (bank identifier)")
+    
+    # Token information
+    access_token: str = Field(..., description="Encrypted Plaid access token")
+    institution_id: Optional[str] = Field(None, description="Institution ID")
+    institution_name: Optional[str] = Field(None, description="Institution name")
+    status: PlaidTokenStatus = Field(default=PlaidTokenStatus.ACTIVE)
+    environment: PlaidEnvironment = Field(default=PlaidEnvironment.SANDBOX)
+    
+    # Timestamps
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    last_used_at: Optional[datetime] = None
+    
+    # Account data
+    accounts: List[Dict[str, Any]] = Field(default_factory=list, description="Account data with balances")
+    
+    # Metadata
+    metadata: BankMetadata = Field(default_factory=lambda: BankMetadata(lastUpdated=datetime.utcnow().isoformat()))
+    
+    # Additional metadata from institution
+    institution_metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
+
+    class Config:
+        use_enum_values = True
         from_attributes = True
 
 

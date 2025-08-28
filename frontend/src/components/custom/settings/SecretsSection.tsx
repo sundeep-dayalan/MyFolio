@@ -48,8 +48,7 @@ export const SecretsSection: React.FC = () => {
   const [status, setStatus] = useState<PlaidConfigurationStatus | null>(null);
   const [config, setConfig] = useState<PlaidConfigurationResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isValidating, setIsValidating] = useState(false);
+  const [saveState, setSaveState] = useState<'idle' | 'validating' | 'saving'>('idle');
   const [isDeleting, setIsDeleting] = useState(false);
   const [validationResult, setValidationResult] = useState<PlaidValidationResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -122,30 +121,6 @@ export const SecretsSection: React.FC = () => {
     setSuccess(null);
   };
 
-  const validateCredentials = async () => {
-    if (!formData.plaid_client_id || !formData.plaid_secret) {
-      setError('Please fill in both Client ID and Secret');
-      return;
-    }
-
-    try {
-      setIsValidating(true);
-      setError(null);
-
-      const result = await PlaidConfigService.validateCredentials({
-        plaid_client_id: formData.plaid_client_id,
-        plaid_secret: formData.plaid_secret,
-        environment: formData.environment,
-      });
-
-      setValidationResult(result);
-    } catch (error) {
-      logger.error('Validation failed', 'PLAID_CONFIG', error);
-      setError(error instanceof Error ? error.message : 'Validation failed');
-    } finally {
-      setIsValidating(false);
-    }
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -156,10 +131,31 @@ export const SecretsSection: React.FC = () => {
     }
 
     try {
-      setIsSubmitting(true);
+      setSaveState('validating');
       setError(null);
       setSuccess(null);
 
+      // Step 1: Validate credentials
+      logger.info('Validating credentials before saving', 'PLAID_CONFIG');
+      
+      const validationResult = await PlaidConfigService.validateCredentials({
+        plaid_client_id: formData.plaid_client_id,
+        plaid_secret: formData.plaid_secret,
+        environment: formData.environment,
+      });
+
+      if (!validationResult.is_valid) {
+        setValidationResult(validationResult);
+        setError(validationResult.message);
+        return;
+      }
+      
+      // Clear validation result on success to avoid showing stale results
+      setValidationResult(null);
+
+      // Step 2: Save configuration
+      setSaveState('saving');
+      
       const configData: PlaidConfigurationCreate = {
         plaid_client_id: formData.plaid_client_id,
         plaid_secret: formData.plaid_secret,
@@ -183,7 +179,7 @@ export const SecretsSection: React.FC = () => {
       logger.error('Failed to save configuration', 'PLAID_CONFIG', error);
       setError(error instanceof Error ? error.message : 'Failed to save configuration');
     } finally {
-      setIsSubmitting(false);
+      setSaveState('idle');
     }
   };
 
@@ -208,7 +204,7 @@ export const SecretsSection: React.FC = () => {
       });
 
       await PlaidConfigService.deleteConfiguration();
-      setSuccess('Plaid configuration deleted successfully!');
+      setSuccess('Plaid configuration deleted successfully! All bank connections have been disconnected and financial data removed.');
 
       // Reload data to reflect changes
       await loadData();
@@ -299,8 +295,20 @@ export const SecretsSection: React.FC = () => {
                   <AlertDialogHeader>
                     <AlertDialogTitle>Delete Plaid Configuration?</AlertDialogTitle>
                     <AlertDialogDescription>
-                      This action cannot be undone. This will permanently delete your Plaid
-                      configuration and disable Plaid features until a new configuration is added.
+                      <div className="space-y-2">
+                        <p>
+                          <strong>Warning:</strong> This action cannot be undone and will:
+                        </p>
+                        <ul className="list-disc list-inside space-y-1 text-sm">
+                          <li>Permanently delete your Plaid configuration</li>
+                          <li>Disconnect all connected bank accounts</li>
+                          <li>Delete all stored financial data (accounts, transactions, balances)</li>
+                          <li>Disable all Plaid-related features until reconfigured</li>
+                        </ul>
+                        <p className="text-sm text-muted-foreground mt-2">
+                          You will need to reconnect all your bank accounts and resync your financial data after adding a new configuration.
+                        </p>
+                      </div>
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>
@@ -378,39 +386,21 @@ export const SecretsSection: React.FC = () => {
                   />
                 </div>
 
-                {/* Validation Result */}
-                {validationResult && (
-                  <Alert variant={validationResult.is_valid ? 'default' : 'destructive'}>
-                    <AlertDescription>{validationResult.message}</AlertDescription>
-                  </Alert>
-                )}
 
                 <div className="flex gap-2">
                   <Button
-                    type="button"
-                    variant="outline"
-                    onClick={validateCredentials}
+                    type="submit"
                     disabled={
-                      isValidating ||
+                      saveState !== 'idle' ||
                       !formData.plaid_client_id ||
                       !formData.plaid_secret ||
                       !MicrosoftAuthService.isAuthenticated()
                     }
                   >
-                    {isValidating && <Spinner className="mr-2 h-4 w-4" />}
-                    Validate Credentials
-                  </Button>
-
-                  <Button
-                    type="submit"
-                    disabled={
-                      isSubmitting ||
-                      !validationResult?.is_valid ||
-                      !MicrosoftAuthService.isAuthenticated()
-                    }
-                  >
-                    {isSubmitting && <Spinner className="mr-2 h-4 w-4" />}
-                    Save Configuration
+                    {saveState !== 'idle' && <Spinner className="mr-2 h-4 w-4" />}
+                    {saveState === 'validating' && 'Validating...'}
+                    {saveState === 'saving' && 'Saving...'}
+                    {saveState === 'idle' && 'Save Configuration'}
                   </Button>
                 </div>
               </form>

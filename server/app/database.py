@@ -7,6 +7,7 @@ from azure.cosmos import CosmosClient, DatabaseProxy, ContainerProxy
 from azure.cosmos.exceptions import CosmosResourceNotFoundError, CosmosHttpResponseError
 
 from .config import settings
+from .constants import Containers
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +48,7 @@ class CosmosDBClient:
 
     def _initialize_containers(self) -> None:
         """Initialize container references."""
-        container_names = ["users", "accounts", "transactions", "plaid_tokens"]
+        container_names = [Containers.USERS, Containers.ACCOUNTS, Containers.TRANSACTIONS, Containers.PLAID_TOKENS]
 
         for container_name in container_names:
             try:
