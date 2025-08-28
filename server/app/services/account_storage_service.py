@@ -8,6 +8,7 @@ from datetime import datetime, timezone, timedelta
 from azure.cosmos.exceptions import CosmosResourceNotFoundError, CosmosHttpResponseError
 from ..database import cosmos_client
 from ..utils.logger import get_logger
+from ..constants import Containers
 from ..models.plaid import PlaidAccountWithBalance
 import json
 
@@ -37,7 +38,7 @@ class AccountStorageService:
             query = "SELECT * FROM c WHERE c.userId = @userId"
             parameters = [{"name": "@userId", "value": user_id}]
             
-            bank_documents = cosmos_client.query_items("banks", query, parameters, user_id)
+            bank_documents = cosmos_client.query_items(Containers.BANKS, query, parameters, user_id)
             
             all_accounts = []
             total_balance = 0.0

@@ -2,6 +2,7 @@ from typing import Dict, Any, List, Optional, Tuple
 from azure.cosmos.exceptions import CosmosResourceNotFoundError, CosmosHttpResponseError
 from ..database import cosmos_client
 from ..utils.logger import get_logger
+from ..constants import Containers, DocumentFields
 from datetime import datetime, timedelta, timezone
 import math
 import uuid
@@ -13,7 +14,7 @@ class TransactionStorageService:
     """Service for managing stored transaction data in CosmosDB."""
 
     def __init__(self):
-        self.container_name = "transactions"
+        self.container_name = Containers.TRANSACTIONS
 
     def store_transactions_batch(
         self,
@@ -453,8 +454,8 @@ class TransactionStorageService:
             doc_id = f"{user_id}_{item_id}"
             result = cosmos_client.get_item("plaid_tokens", doc_id, user_id)
             
-            if result and "transactions" in result:
-                return result["transactions"].get("last_cursor")
+            if result and DocumentFields.TRANSACTIONS in result:
+                return result[DocumentFields.TRANSACTIONS].get("last_cursor")
             
             return None
             

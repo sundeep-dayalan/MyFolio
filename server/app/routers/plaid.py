@@ -8,11 +8,12 @@ from typing import Dict, Any, Optional
 from ..services.plaid_service import PlaidService
 from ..dependencies import get_current_user_id
 from ..utils.logger import get_logger
+from ..constants import ApiRoutes, ApiTags
 from ..services.transaction_storage_service import transaction_storage_service
 
 logger = get_logger(__name__)
 
-router = APIRouter(prefix="/plaid", tags=["plaid"])
+router = APIRouter(prefix=ApiRoutes.PLAID_PREFIX, tags=[ApiTags.PLAID])
 
 
 class ExchangeTokenRequest(BaseModel):

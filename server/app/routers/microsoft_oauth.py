@@ -11,11 +11,12 @@ from ..services.auth_service import AuthService
 from ..services.user_service import UserService
 from ..exceptions import AuthenticationError, ValidationError
 from ..utils.logger import get_logger
+from ..constants import ApiRoutes, ApiTags
 from ..database import cosmos_client
 from ..config import settings
 
 logger = get_logger(__name__)
-router = APIRouter(prefix="/auth/oauth/microsoft", tags=["Microsoft OAuth Authentication"])
+router = APIRouter(prefix=ApiRoutes.AUTH_PREFIX, tags=[ApiTags.MICROSOFT_OAUTH])
 
 
 async def ensure_cosmos_connected():

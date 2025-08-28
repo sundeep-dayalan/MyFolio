@@ -52,6 +52,10 @@ from plaid.model.accounts_balance_get_request_options import (
     AccountsBalanceGetRequestOptions,
 )
 from ..utils.token_security import encrypt_access_token
+from ..constants import (
+    Containers, PlaidEnvironments, PlaidProducts, TransactionSyncStatus, 
+    PlaidLinkConfig, Currency, ConfigMessages, ErrorMessages, PlaidResponseFields, Status
+)
 
 logger = get_logger(__name__)
 
@@ -119,10 +123,7 @@ class PlaidService:
         credentials = await plaid_config_service.get_decrypted_credentials(user_id)
 
         if not credentials:
-            raise ValueError(
-                "Plaid credentials not configured. Admin must provide credentials via "
-                "/api/v1/plaid/configuration endpoint."
-            )
+            raise ValueError(ConfigMessages.CREDENTIALS_NOT_CONFIGURED)
 
         client_id, secret, environment = credentials
 
@@ -133,9 +134,9 @@ class PlaidService:
 
         # Map environment string to Plaid Environment enum
         environment_map = {
-            "sandbox": Environment.Sandbox,
-            "development": Environment.Sandbox,  # Use sandbox for development
-            "production": Environment.Production,
+            PlaidEnvironments.SANDBOX: Environment.Sandbox,
+            PlaidEnvironments.DEVELOPMENT: Environment.Sandbox,  # Use sandbox for development
+            PlaidEnvironments.PRODUCTION: Environment.Production,
         }
 
         plaid_environment = environment_map.get(
@@ -181,7 +182,7 @@ class PlaidService:
 
             # Build request params dynamically
             request_params = {
-                "products": [Products(p) for p in (products or ["transactions"])],
+                "products": [Products(p) for p in (products or [PlaidProducts.TRANSACTIONS])],
                 "client_name": settings.project_name,
                 "country_codes": [CountryCode("US")],
                 "language": "en",
@@ -207,7 +208,7 @@ class PlaidService:
                 )
 
             # Add transactions-specific configuration
-            if "transactions" in (products or []):
+            if PlaidProducts.TRANSACTIONS in (products or []):
                 request_params["transactions"] = {
                     "days_requested": transactions_days_requested
                 }
@@ -404,18 +405,18 @@ class PlaidService:
                         "accountCount": 0,
                         "totalBalance": 0.0,
                         "lastUpdated": now.isoformat(),
-                        "transactionSyncStatus": "inprogress"
+                        "transactionSyncStatus": TransactionSyncStatus.IN_PROGRESS
                     }
                 }
             )
 
             # Store in banks container instead of separate plaid_tokens
             try:
-                cosmos_client.create_item("banks", bank_data, user_id)
+                cosmos_client.create_item(Containers.BANKS, bank_data, user_id)
             except CosmosHttpResponseError as e:
                 if e.status_code == 409:  # Conflict - document exists, update it
                     cosmos_client.update_item(
-                        "banks", item_id, user_id, bank_data
+                        Containers.BANKS, item_id, user_id, bank_data
                     )
                 else:
                     raise
@@ -617,7 +618,7 @@ class PlaidService:
             query = "SELECT * FROM c WHERE c.userId = @userId"
             parameters = [{"name": "@userId", "value": user_id}]
             
-            bank_documents = cosmos_client.query_items("banks", query, parameters, user_id)
+            bank_documents = cosmos_client.query_items(Containers.BANKS, query, parameters, user_id)
             all_accounts = []
             total_balance = 0.0
             
@@ -661,7 +662,7 @@ class PlaidService:
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
             
-            cosmos_client.update_item("banks", item_id, user_id, update_data)
+            cosmos_client.update_item(Containers.BANKS, item_id, user_id, update_data)
             logger.info(f"Updated bank {item_id} with {len(accounts)} accounts, balance: ${total_balance:.2f}")
             return True
         except Exception as e:
@@ -676,7 +677,7 @@ class PlaidService:
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
 
-            cosmos_client.update_item("banks", item_id, user_id, update_data)
+            cosmos_client.update_item(Containers.BANKS, item_id, user_id, update_data)
             return True
         except Exception as e:
             logger.error(f"Failed to update token last_used for {item_id}: {e}")
@@ -720,7 +721,7 @@ class PlaidService:
                 )
 
             # Remove bank document from CosmosDB
-            cosmos_client.delete_item("banks", item_id, user_id)
+            cosmos_client.delete_item(Containers.BANKS, item_id, user_id)
 
             # Clean up transaction data
             transaction_storage_service.delete_item_transactions(user_id, item_id)
@@ -788,7 +789,7 @@ class PlaidService:
             deleted_count = 0
             for bank_doc in bank_docs:
                 try:
-                    cosmos_client.delete_item("banks", bank_doc["id"], user_id)
+                    cosmos_client.delete_item(Containers.BANKS, bank_doc["id"], user_id)
                     deleted_count += 1
                 except Exception as e:
                     logger.warning(
@@ -814,7 +815,7 @@ class PlaidService:
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
 
-            cosmos_client.update_item("banks", item_id, user_id, update_data)
+            cosmos_client.update_item(Containers.BANKS, item_id, user_id, update_data)
             logger.info(f"Updated sync status to '{status}' for item {item_id}")
             return True
         except Exception as e:
@@ -829,7 +830,7 @@ class PlaidService:
             logger.info(f"Starting initial transaction sync for item {item_id}")
 
             # Update status to in progress
-            self.update_transaction_sync_status(user_id, item_id, "syncing")
+            self.update_transaction_sync_status(user_id, item_id, TransactionSyncStatus.SYNCING)
 
             # Use transactions/sync for initial historical data
             cursor = None
@@ -898,7 +899,7 @@ class PlaidService:
                     break
 
             # Update sync status to complete
-            self.update_transaction_sync_status(user_id, item_id, "completed")
+            self.update_transaction_sync_status(user_id, item_id, TransactionSyncStatus.COMPLETED)
 
             result = {
                 "success": True,
@@ -914,7 +915,7 @@ class PlaidService:
 
         except Exception as e:
             logger.error(f"Failed to sync transactions for {item_id}: {e}")
-            self.update_transaction_sync_status(user_id, item_id, "error")
+            self.update_transaction_sync_status(user_id, item_id, TransactionSyncStatus.ERROR)
             raise Exception(f"Transaction sync failed: {e}")
 
     async def refresh_transactions(self, user_id: str, item_id: str) -> Dict[str, Any]:
@@ -1042,7 +1043,7 @@ class PlaidService:
                 "message": f"Force refresh completed - synced {sync_result['total']} transactions",
                 "item_id": item_id,
                 "institution_name": target_token.institution_name or "Unknown",
-                "status": "completed",
+                PlaidResponseFields.STATUS: Status.COMPLETED,
                 "async_operation": False,
             }
 
@@ -1064,7 +1065,7 @@ class PlaidService:
             )
 
             result = {
-                "transactions": transactions,
+                PlaidResponseFields.TRANSACTIONS: transactions,
                 "total_count": len(transactions),
                 "days_requested": days,
             }
@@ -1093,7 +1094,7 @@ class PlaidService:
             )
 
             result = {
-                "transactions": transactions,
+                PlaidResponseFields.TRANSACTIONS: transactions,
                 "account_id": account_id,
                 "total_count": len(transactions),
                 "days_requested": days,
@@ -1184,4 +1185,4 @@ class PlaidService:
                 f"❌ Background transaction sync failed for item {item_id}: {e}",
                 exc_info=True,
             )
-            self.update_transaction_sync_status(user_id, item_id, "error")
+            self.update_transaction_sync_status(user_id, item_id, TransactionSyncStatus.ERROR)

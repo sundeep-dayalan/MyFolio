@@ -18,11 +18,12 @@ from ..services.plaid_service import PlaidService
 from ..dependencies import get_current_user
 from ..models.user import UserResponse
 from ..utils.logger import get_logger
+from ..constants import ApiRoutes, ApiTags
 
 logger = get_logger(__name__)
 security = HTTPBearer()
 
-router = APIRouter(prefix="/plaid", tags=["plaid-configuration"])
+router = APIRouter(prefix=ApiRoutes.PLAID_PREFIX, tags=[ApiTags.PLAID_CONFIGURATION])
 
 
 def require_admin_user(

@@ -8,6 +8,7 @@ from azure.cosmos.exceptions import CosmosResourceNotFoundError, CosmosHttpRespo
 from ..models.user import UserCreate, UserUpdate, UserResponse, UserInDB
 from ..exceptions import UserNotFoundError, UserAlreadyExistsError, FirebaseError
 from ..utils.logger import get_logger
+from ..constants import Containers
 from ..utils.security import sanitize_input
 from ..database import cosmos_client
 
@@ -18,7 +19,7 @@ class UserService:
     """User service class using CosmosDB."""
 
     def __init__(self):
-        self.container_name = "users"
+        self.container_name = Containers.USERS
 
     async def create_user(self, user_data: UserCreate) -> UserResponse:
         """Create a new user."""

@@ -25,6 +25,7 @@ from ..models.plaid_config import (
     PlaidConfigurationStatus,
 )
 from ..utils.logger import get_logger
+from ..constants import Containers, PartitionKeys, DocumentFields, PlaidEnvironments, PlaidConfigFields, ConfigMessages, ErrorMessages, Security
 
 logger = get_logger(__name__)
 
@@ -33,7 +34,7 @@ class PlaidConfigurationService:
     """Service for managing Plaid configuration with Azure Key Vault encryption."""
 
     def __init__(self):
-        self.container_name = "configuration"
+        self.container_name = Containers.CONFIGURATION
         self.key_vault_url = settings.key_vault_url
         self.crypto_client = None
 
@@ -68,7 +69,7 @@ class PlaidConfigurationService:
             try:
                 container = database.create_container(
                     id=self.container_name,
-                    partition_key={"paths": ["/userId"], "kind": "Hash"},
+                    partition_key={"paths": [PartitionKeys.USER_ID_PATH], "kind": PartitionKeys.HASH_KIND},
                 )
                 logger.info(f"Created new container: {self.container_name}")
                 return container
@@ -163,14 +164,14 @@ class PlaidConfigurationService:
             if not client_id or not secret:
                 return PlaidValidationResult(
                     is_valid=False,
-                    message="Client ID and secret are required",
+                    message=ConfigMessages.CREDENTIALS_REQUIRED,
                     environment=None,
                 )
 
             if len(client_id) < 20 or len(secret) < 20:
                 return PlaidValidationResult(
                     is_valid=False,
-                    message="Client ID and secret appear to be too short",
+                    message=ConfigMessages.CREDENTIALS_TOO_SHORT,
                     environment=None,
                 )
 
@@ -178,13 +179,13 @@ class PlaidConfigurationService:
             from plaid.configuration import Environment
 
             environment_map = {
-                "sandbox": Environment.Sandbox,
-                "production": Environment.Production,
+                PlaidEnvironments.SANDBOX: Environment.Sandbox,
+                PlaidEnvironments.PRODUCTION: Environment.Production,
             }
             if not environment or environment.lower() not in environment_map:
                 return PlaidValidationResult(
                     is_valid=False,
-                    message="Environment must be either 'sandbox' or 'production'",
+                    message=ConfigMessages.ENVIRONMENT_REQUIRED,
                     environment=None,
                 )
 
@@ -274,13 +275,11 @@ class PlaidConfigurationService:
             # Check if configuration already exists for this user
             try:
                 existing_config = container.read_item(admin_user_id, admin_user_id)
-                if existing_config and existing_config.get("plaid"):
+                if existing_config and existing_config.get(DocumentFields.PLAID):
                     logger.error(
                         f"Plaid configuration already exists for user {admin_user_id}. Cannot update via POST."
                     )
-                    raise ValueError(
-                        "Plaid configuration already exists. Delete before creating a new one."
-                    )
+                    raise ValueError(ConfigMessages.CONFIG_ALREADY_EXISTS)
             except CosmosResourceNotFoundError:
                 pass  # Not found, safe to create
 
@@ -289,13 +288,13 @@ class PlaidConfigurationService:
 
             # Store configuration partitioned by userId
             config_doc = {
-                "id": admin_user_id,  # User ID as document ID
-                "userId": admin_user_id,  # Partition key
-                "plaid": {
-                    "plaid_client_id": config.plaid_client_id,
-                    "encrypted_plaid_secret": encrypted_secret,
+                DocumentFields.ID: admin_user_id,  # User ID as document ID
+                DocumentFields.USER_ID: admin_user_id,  # Partition key
+                DocumentFields.PLAID: {
+                    PlaidConfigFields.PLAID_CLIENT_ID: config.plaid_client_id,
+                    PlaidConfigFields.ENCRYPTED_PLAID_SECRET: encrypted_secret,
                     "is_active": True,
-                    "environment": config.environment,
+                    PlaidConfigFields.ENVIRONMENT: config.environment,
                     "updated_by": admin_user_id,
                     "updated_at": datetime.now(timezone.utc).isoformat(),
                     "created_at": datetime.now(timezone.utc).isoformat(),
@@ -326,17 +325,17 @@ class PlaidConfigurationService:
 
             try:
                 config_doc = container.read_item(user_id, user_id)
-                plaid_config = config_doc.get("plaid", {})
+                plaid_config = config_doc.get(DocumentFields.PLAID, {})
                 return PlaidConfigurationStatus(
                     is_configured=plaid_config.get("is_active", False),
-                    environment=plaid_config.get("environment", "sandbox")
+                    environment=plaid_config.get(PlaidConfigFields.ENVIRONMENT, PlaidEnvironments.SANDBOX)
                 )
             except CosmosResourceNotFoundError:
                 return PlaidConfigurationStatus(is_configured=False)
 
         except Exception as e:
             logger.error(f"Error getting Plaid configuration status: {e}")
-            return PlaidConfigurationStatus(is_configured=False, environment="sandbox")
+            return PlaidConfigurationStatus(is_configured=False, environment=PlaidEnvironments.SANDBOX)
 
     async def get_configuration(self, user_id: str) -> Optional[PlaidConfigurationResponse]:
         """Get Plaid configuration details for a specific user."""
@@ -345,7 +344,7 @@ class PlaidConfigurationService:
 
             try:
                 config_doc = container.read_item(user_id, user_id)
-                plaid_config = config_doc.get("plaid", {})
+                plaid_config = config_doc.get(DocumentFields.PLAID, {})
                 
                 if not plaid_config:
                     return None
@@ -355,7 +354,7 @@ class PlaidConfigurationService:
                     plaid_client_id=self._mask_client_id(
                         plaid_config.get("plaid_client_id", "")
                     ),
-                    environment=plaid_config.get("environment", "sandbox"),
+                    environment=plaid_config.get(PlaidConfigFields.ENVIRONMENT, PlaidEnvironments.SANDBOX),
                     last_updated=datetime.fromisoformat(plaid_config.get("updated_at")),
                     updated_by=plaid_config.get("updated_by"),
                 )
@@ -373,14 +372,14 @@ class PlaidConfigurationService:
 
             try:
                 config_doc = container.read_item(user_id, user_id)
-                plaid_config = config_doc.get("plaid", {})
+                plaid_config = config_doc.get(DocumentFields.PLAID, {})
 
                 if not plaid_config.get("is_active", False):
                     return None
 
-                client_id = plaid_config.get("plaid_client_id")
-                encrypted_secret = plaid_config.get("encrypted_plaid_secret")
-                environment = plaid_config.get("environment", "sandbox")
+                client_id = plaid_config.get(PlaidConfigFields.PLAID_CLIENT_ID)
+                encrypted_secret = plaid_config.get(PlaidConfigFields.ENCRYPTED_PLAID_SECRET)
+                environment = plaid_config.get(PlaidConfigFields.ENVIRONMENT, PlaidEnvironments.SANDBOX)
 
                 if not client_id or not encrypted_secret:
                     return None
@@ -407,8 +406,8 @@ class PlaidConfigurationService:
                 config_doc = container.read_item(admin_user_id, admin_user_id)
                 
                 # Remove plaid configuration but keep other configs
-                if "plaid" in config_doc:
-                    del config_doc["plaid"]
+                if DocumentFields.PLAID in config_doc:
+                    del config_doc[DocumentFields.PLAID]
                 
                 # If no other configs remain, delete the entire document
                 if len([k for k in config_doc.keys() if k not in ["id", "userId"]]) == 0:
