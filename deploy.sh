@@ -368,7 +368,7 @@ create_cosmos_db() {
         done
         
         # Check containers for both databases
-        local containers=("users" "accounts" "transactions" "plaid_tokens")
+        local containers=("users" "banks" "transactions" "configuration")
         for database in "${databases[@]}"; do
             for container in "${containers[@]}"; do
                 if ! az cosmosdb sql container show --account-name "$COSMOS_NAME" --database-name "$database" --resource-group "$RESOURCE_GROUP_NAME" --name "$container" >/dev/null 2>&1; then
