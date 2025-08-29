@@ -8,13 +8,15 @@ from typing import Optional
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     """Create a JWT access token."""
-    from ..services.jwt_key_service import jwt_key_service
+    from ..services.key_vault_service import jwt_key_service
+
     return jwt_key_service.create_access_token(data, expires_delta)
 
 
 def verify_token(token: str) -> Optional[dict]:
     """Verify and decode a JWT token."""
-    from ..services.jwt_key_service import jwt_key_service
+    from ..services.key_vault_service import jwt_key_service
+
     return jwt_key_service.verify_token(token)
 
 
