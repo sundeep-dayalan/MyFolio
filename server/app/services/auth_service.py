@@ -11,7 +11,7 @@ from ..constants.auth import Providers
 from ..models.user import MicrosoftUserInfo, Token, UserResponse, UserCreate, UserUpdate
 from ..exceptions import AuthenticationError
 from ..utils.logger import get_logger
-from ..utils.security import create_access_token, verify_token
+from ..utils.security import verify_token
 from ..config import settings
 from .user_service import UserService
 from .microsoft_entra_oauth_service import MicrosoftEntraOAuthService
