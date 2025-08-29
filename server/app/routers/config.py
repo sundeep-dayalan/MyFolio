@@ -6,7 +6,7 @@ from typing import Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
-from ..models.plaid_config import (
+from ..models.config import (
     PlaidConfigurationCreate,
     PlaidConfigurationResponse,
     PlaidValidationResult,
@@ -23,7 +23,9 @@ from ..constants import ApiRoutes, ApiTags
 logger = get_logger(__name__)
 security = HTTPBearer()
 
-router = APIRouter(prefix=ApiRoutes.CONFIGURATION_PREFIX, tags=[ApiTags.PLAID_CONFIGURATION])
+router = APIRouter(
+    prefix=ApiRoutes.CONFIGURATION_PREFIX, tags=[ApiTags.PLAID_CONFIGURATION]
+)
 
 
 @router.post("/plaid", response_model=PlaidConfigurationResponse)

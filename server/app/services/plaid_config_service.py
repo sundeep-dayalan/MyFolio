@@ -18,7 +18,7 @@ from plaid.model.item_public_token_exchange_request import (
 
 from ..config import settings
 from ..database import cosmos_client
-from ..models.plaid_config import (
+from ..models.config import (
     PlaidConfigurationCreate,
     PlaidConfigurationResponse,
     PlaidValidationResult,
