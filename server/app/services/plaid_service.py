@@ -287,7 +287,7 @@ class PlaidService:
             # Immediately sync account data so accounts are available right away
             try:
                 logger.info(f"🔄 Syncing account data immediately for item {item_id}")
-                await self.get_accounts_with_balances(user_id, use_cached_balance=False)
+                await self.get_accounts_with_balances(user_id, use_cached_db_data=False)
                 logger.info(f"✅ Account data synced successfully for item {item_id}")
             except Exception as e:
                 logger.error(f"❌ Failed to sync account data for item {item_id}: {e}")
@@ -572,18 +572,18 @@ class PlaidService:
         self,
         user_id: str,
         account_ids: Optional[List[str]] = None,
-        use_cached_balance: bool = True,
+        use_cached_db_data: bool = True,
     ) -> Dict[str, Any]:
         """
-        If use_cached_balance is True, fetch account data from bank documents.
-        If use_cached_balance is False, fetch from Plaid API and update bank documents.
+        If use_cached_db_data is True, fetch account data from bank documents.
+        If use_cached_db_data is False, fetch from Plaid API and update bank documents.
         """
         try:
             logger.info(
-                f"Getting accounts with balances for user {user_id}, use_cached_balance={use_cached_balance}"
+                f"Getting accounts with balances for user {user_id}, use_cached_db_data={use_cached_db_data}"
             )
 
-            if use_cached_balance:
+            if use_cached_db_data:
                 # Fetch from bank documents
                 cached_data = self._get_cached_accounts_from_banks(user_id)
                 if cached_data and cached_data["accounts"]:
