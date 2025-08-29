@@ -17,7 +17,7 @@ from ..utils.logger import get_logger
 logger = get_logger(__name__)
 
 
-class KeyVaultService:
+class JwtKeyService:
     """Service for JWT operations using Azure Key Vault cryptographic keys."""
 
     def __init__(self):
@@ -190,4 +190,4 @@ class KeyVaultService:
             return None
 
 
-key_vault_service = KeyVaultService()
+key_vault_service = JwtKeyService()

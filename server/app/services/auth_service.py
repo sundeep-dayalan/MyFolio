@@ -166,27 +166,3 @@ class AuthService:
         except Exception as e:
             logger.warning(f"Token verification failed: {str(e)}")
             return None
-
-    def _create_user_token(self, user: UserResponse) -> str:
-        """Create JWT access token for user."""
-        token_data = {
-            "sub": user.id,
-            "email": user.email,
-            "name": user.name,
-            "type": "access_token",
-        }
-
-        return create_access_token(
-            data=token_data,
-            expires_delta=timedelta(minutes=settings.access_token_expire_minutes),
-        )
-
-    async def refresh_token(self, current_user: UserResponse) -> Token:
-        """Create a new access token for the current user."""
-        access_token = self._create_user_token(current_user)
-
-        return Token(
-            access_token=access_token,
-            token_type="bearer",
-            expires_in=settings.access_token_expire_minutes * 60,
-        )
