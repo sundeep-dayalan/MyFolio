@@ -299,7 +299,9 @@ class PlaidService:
                 await self._sync_transactions_for_stored_item(user_id, item_id)
                 logger.info(f"✅ Transaction sync completed for item {item_id}")
             except Exception as e:
-                logger.error(f"❌ Background transaction sync failed for item {item_id}: {e}")
+                logger.error(
+                    f"❌ Background transaction sync failed for item {item_id}: {e}"
+                )
                 # Don't fail the exchange if transaction sync fails
 
             logger.info(
@@ -374,13 +376,7 @@ class PlaidService:
                 return fallback_info
             except Exception as e2:
                 logger.error(f"Failed to get even basic institution info: {e2}")
-                return {
-                    "institution_id": None,
-                    "name": "Unknown Bank",
-                    "products": [],
-                    "country_codes": ["US"],
-                    "plaid_institution_data": {},
-                }
+                raise Exception(f"Failed to get institution info: {e2}")
 
     def _convert_plaid_object(self, obj) -> Dict[str, Any]:
         """Convert Plaid API objects to JSON-serializable dictionaries."""
