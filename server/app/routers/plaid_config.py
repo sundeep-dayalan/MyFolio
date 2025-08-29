@@ -23,26 +23,13 @@ from ..constants import ApiRoutes, ApiTags
 logger = get_logger(__name__)
 security = HTTPBearer()
 
-router = APIRouter(prefix=ApiRoutes.PLAID_PREFIX, tags=[ApiTags.PLAID_CONFIGURATION])
+router = APIRouter(prefix=ApiRoutes.CONFIGURATION_PREFIX, tags=[ApiTags.PLAID_CONFIGURATION])
 
 
-def require_admin_user(
-    current_user: UserResponse = Depends(get_current_user),
-) -> UserResponse:
-    """Require admin user for Plaid configuration operations."""
-    # For now, all authenticated users are considered admins
-    # In production, you might want to add role-based access control
-    if not current_user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required"
-        )
-    return current_user
-
-
-@router.post("/configuration", response_model=PlaidConfigurationResponse)
+@router.post("/plaid", response_model=PlaidConfigurationResponse)
 async def store_plaid_configuration(
     config: PlaidConfigurationCreate,
-    current_user: UserResponse = Depends(require_admin_user),
+    current_user: UserResponse = Depends(get_current_user),
 ):
     """
     Store Plaid API credentials securely.
@@ -87,7 +74,7 @@ async def store_plaid_configuration(
         )
 
 
-@router.get("/configuration/status", response_model=PlaidConfigurationStatus)
+@router.get("/plaid/status", response_model=PlaidConfigurationStatus)
 async def get_plaid_configuration_status(
     current_user: UserResponse = Depends(get_current_user),
 ):
@@ -98,7 +85,9 @@ async def get_plaid_configuration_status(
     Used by frontend to show/hide Plaid features.
     """
     try:
-        status_result = await plaid_config_service.get_configuration_status(current_user.id)
+        status_result = await plaid_config_service.get_configuration_status(
+            current_user.id
+        )
         return status_result
 
     except Exception as e:
@@ -107,9 +96,9 @@ async def get_plaid_configuration_status(
         return PlaidConfigurationStatus(is_configured=False)
 
 
-@router.get("/configuration", response_model=PlaidConfigurationResponse)
+@router.get("/plaid", response_model=PlaidConfigurationResponse)
 async def get_plaid_configuration(
-    current_user: UserResponse = Depends(require_admin_user),
+    current_user: UserResponse = Depends(get_current_user),
 ):
     """
     Get Plaid configuration details for the current user.
@@ -138,10 +127,10 @@ async def get_plaid_configuration(
         )
 
 
-@router.post("/configuration/validate", response_model=PlaidValidationResult)
+@router.post("/plaid/validate", response_model=PlaidValidationResult)
 async def validate_plaid_credentials(
     credentials: PlaidConfigurationValidate,
-    current_user: UserResponse = Depends(require_admin_user),
+    current_user: UserResponse = Depends(get_current_user),
 ):
     """
     Validate Plaid credentials without storing them.
@@ -170,9 +159,9 @@ async def validate_plaid_credentials(
         )
 
 
-@router.delete("/configuration")
+@router.delete("/plaid")
 async def delete_plaid_configuration(
-    current_user: UserResponse = Depends(require_admin_user),
+    current_user: UserResponse = Depends(get_current_user),
 ):
     """
     Delete Plaid configuration and disconnect all user bank connections.
@@ -183,7 +172,7 @@ async def delete_plaid_configuration(
     try:
         # First, revoke all user bank connections and delete their data
         plaid_service = PlaidService()
-        
+
         # Get all users and revoke their connections
         # Since this is an admin operation, we need to clean up all user data
         try:
@@ -191,9 +180,13 @@ async def delete_plaid_configuration(
             # For a full system-wide cleanup, additional logic might be needed
             revoke_success = plaid_service.remove_all_user_data(current_user.id)
             if revoke_success:
-                logger.info(f"All user bank connections revoked during config deletion by: {current_user.id}")
+                logger.info(
+                    f"All user bank connections revoked during config deletion by: {current_user.id}"
+                )
         except Exception as revoke_error:
-            logger.error(f"Error revoking bank connections during config deletion: {revoke_error}")
+            logger.error(
+                f"Error revoking bank connections during config deletion: {revoke_error}"
+            )
             # Continue with config deletion even if revocation fails
 
         # Delete the Plaid configuration
@@ -205,7 +198,9 @@ async def delete_plaid_configuration(
             logger.info(f"Plaid configuration deleted by user: {current_user.id}")
             return {
                 "message": "Plaid configuration deleted successfully. All bank connections have been disconnected and related data removed.",
-                "revoked_connections": revoke_success if 'revoke_success' in locals() else False
+                "revoked_connections": (
+                    revoke_success if "revoke_success" in locals() else False
+                ),
             }
         else:
             raise HTTPException(

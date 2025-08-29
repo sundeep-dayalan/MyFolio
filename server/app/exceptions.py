@@ -56,8 +56,8 @@ class AuthenticationError(BaseCustomException):
         super().__init__(status_code=401, detail=detail)
 
 
-class FirebaseError(BaseCustomException):
-    """Firebase-specific error."""
+class DatabaseError(BaseCustomException):
+    """Database-specific error."""
 
     def __init__(self, detail: str, status_code: int = 500):
         super().__init__(status_code=status_code, detail=detail)

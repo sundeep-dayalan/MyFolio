@@ -1,4 +1,4 @@
-from typing import Tuple, List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional
 
 from plaid.api import plaid_api
 from plaid.model.transactions_sync_request import TransactionsSyncRequest
@@ -37,24 +37,29 @@ from ..config import settings
 from ..database import cosmos_client
 from ..utils.logger import get_logger
 from ..models.plaid import (
-    PlaidAccessToken,
-    PlaidTokenStatus,
-    PlaidEnvironment,
     PlaidAccountWithBalance,
     PlaidBalance,
+    BankDocument,
 )
 from .account_storage_service import account_storage_service
 from .transaction_storage_service import transaction_storage_service
 from .plaid_config_service import plaid_config_service
+from datetime import datetime, timezone
 import json
-from datetime import date, datetime, timezone
 from plaid.model.accounts_balance_get_request_options import (
     AccountsBalanceGetRequestOptions,
 )
-from ..utils.token_security import encrypt_access_token
 from ..constants import (
-    Containers, PlaidEnvironments, PlaidProducts, TransactionSyncStatus, 
-    PlaidLinkConfig, Currency, ConfigMessages, ErrorMessages, PlaidResponseFields, Status
+    Containers,
+    PlaidEnvironments,
+    PlaidProducts,
+    TransactionSyncStatus,
+    PlaidLinkConfig,
+    Currency,
+    ConfigMessages,
+    ErrorMessages,
+    PlaidResponseFields,
+    Status,
 )
 
 logger = get_logger(__name__)
@@ -182,7 +187,9 @@ class PlaidService:
 
             # Build request params dynamically
             request_params = {
-                "products": [Products(p) for p in (products or [PlaidProducts.TRANSACTIONS])],
+                "products": [
+                    Products(p) for p in (products or [PlaidProducts.TRANSACTIONS])
+                ],
                 "client_name": settings.project_name,
                 "country_codes": [CountryCode("US")],
                 "language": "en",
@@ -254,7 +261,7 @@ class PlaidService:
 
     async def exchange_public_token(
         self, user_id: str, public_token: str
-    ) -> PlaidAccessToken:
+    ) -> BankDocument:
         """Exchange public token for access token and store it securely."""
         try:
             client = await self._get_client(user_id)
@@ -268,7 +275,9 @@ class PlaidService:
             item_id = response["item_id"]
 
             # Get institution info
-            institution_info = await self._get_institution_info_by_item(user_id, access_token)
+            institution_info = await self._get_institution_info_by_item(
+                user_id, access_token
+            )
 
             # Store the access token
             stored_token = self._store_access_token(
@@ -283,8 +292,17 @@ class PlaidService:
             except Exception as e:
                 logger.error(f"❌ Failed to sync account data for item {item_id}: {e}")
                 # Don't fail the entire exchange if account sync fails
-                
-            # Note: Transaction sync is handled separately and shouldn't block the main flow
+
+            # Start transaction sync in the background (non-blocking)
+            try:
+                logger.info(f"🚀 Starting transaction sync for item {item_id}")
+                await self._sync_transactions_for_stored_item(user_id, item_id)
+                logger.info(f"✅ Transaction sync completed for item {item_id}")
+            except Exception as e:
+                logger.error(
+                    f"❌ Background transaction sync failed for item {item_id}: {e}"
+                )
+                # Don't fail the exchange if transaction sync fails
 
             logger.info(
                 f"Successfully exchanged and stored token for user {user_id}, item_id: {item_id}"
@@ -298,14 +316,17 @@ class PlaidService:
             logger.error(f"Failed to exchange public token for user {user_id}: {e}")
             raise Exception(f"Failed to exchange public token: {e}")
 
-    async def _get_institution_info_by_item(self, user_id: str, access_token: str) -> Dict[str, Any]:
+    async def _get_institution_info_by_item(
+        self, user_id: str, access_token: str
+    ) -> Dict[str, Any]:
         """Get institution information using item access token."""
         try:
             client = await self._get_client(user_id)
             # Get item info first
             request = ItemGetRequest(access_token=access_token)
             item_response = client.item_get(request)
-            institution_id = item_response["item"]["institution_id"]
+            plaid_institution_data = item_response["item"]
+            institution_id = plaid_institution_data["institution_id"]
 
             logger.info(f"Got institution_id: {institution_id}")
 
@@ -321,25 +342,78 @@ class PlaidService:
                 "name": institution["name"],
                 "products": institution["products"],
                 "country_codes": institution["country_codes"],
+                "plaid_institution_data": plaid_institution_data,
             }
 
             logger.info(f"Retrieved institution info: {institution['name']}")
+            logger.debug(f"Full institution_info: {institution_info}")
             return institution_info
 
         except Exception as e:
             logger.error(f"Failed to get institution info: {e}")
-            # Return minimal info as fallback
+            logger.error(f"Exception type: {type(e).__name__}")
+            logger.error(f"Exception details: {str(e)}")
+            # Return minimal info as fallback but still try to get plaid_institution_data
             try:
                 request = ItemGetRequest(access_token=access_token)
-                item_response = self.client.item_get(request)
-                institution_id = item_response["item"]["institution_id"]
-                return {
+                client = await self._get_client(user_id)
+                item_response = client.item_get(request)
+                plaid_institution_data = item_response["item"]
+                institution_id = plaid_institution_data["institution_id"]
+                fallback_info = {
                     "institution_id": institution_id,
                     "name": f"Bank {institution_id}",
+                    "products": [],
+                    "country_codes": ["US"],
+                    "plaid_institution_data": plaid_institution_data,
                 }
+                logger.info(
+                    f"Using fallback institution info with plaid_institution_data: {bool(plaid_institution_data)}"
+                )
+                logger.debug(
+                    f"Fallback plaid_institution_data: {plaid_institution_data}"
+                )
+                return fallback_info
             except Exception as e2:
                 logger.error(f"Failed to get even basic institution info: {e2}")
-                return {"institution_id": None, "name": "Unknown Bank"}
+                raise Exception(f"Failed to get institution info: {e2}")
+
+    def _convert_plaid_object(self, obj) -> Dict[str, Any]:
+        """Convert Plaid API objects to JSON-serializable dictionaries."""
+        try:
+            if obj is None:
+                return None
+            elif isinstance(obj, datetime):
+                return obj.isoformat()
+            elif hasattr(obj, "value"):  # Enum objects
+                return obj.value
+            elif isinstance(obj, (str, int, float, bool)):
+                return obj
+            elif isinstance(obj, (list, tuple)):
+                return [self._convert_plaid_object(item) for item in obj]
+            elif isinstance(obj, dict):
+                # Process dict recursively to handle nested datetime objects
+                result = {}
+                for key, value in obj.items():
+                    result[key] = self._convert_plaid_object(value)
+                return result
+            elif hasattr(obj, "to_dict"):
+                # For Plaid objects with to_dict method
+                return self._convert_plaid_object(obj.to_dict())
+            elif hasattr(obj, "__dict__"):
+                # Convert object attributes to dict, handling nested objects
+                result = {}
+                for key, value in obj.__dict__.items():
+                    if not key.startswith("_"):  # Skip private attributes
+                        result[key] = self._convert_plaid_object(value)
+                return result
+            else:
+                # For any other type, convert to string
+                return str(obj)
+        except Exception as e:
+            logger.error(f"Failed to convert Plaid object {type(obj)}: {e}")
+            # Return string representation as fallback
+            return str(obj)
 
     def _store_access_token(
         self,
@@ -347,8 +421,8 @@ class PlaidService:
         access_token: str,
         item_id: str,
         institution_info: Dict[str, Any] = None,
-    ) -> PlaidAccessToken:
-        """Store bank data with token and accounts in single document."""
+    ) -> BankDocument:
+        """Store bank data using optimized BankDocument structure."""
         try:
             logger.info(f"Storing bank data for user {user_id}, item_id: {item_id}")
 
@@ -357,66 +431,89 @@ class PlaidService:
                 logger.error("CosmosDB not connected - cannot store bank data")
                 raise Exception("CosmosDB connection required for bank data storage")
 
-            # Encrypt the access token for production storage
-            logger.debug(f"Encrypting access token: {access_token} for secure storage")
-            encrypted_token = encrypt_access_token(access_token)
-            logger.debug(f"After encryption: {encrypted_token} for secure storage")
+            # Encrypt the access token
+            encrypted_token = TokenEncryption.encrypt_token(access_token)
 
-            # Create PlaidAccessToken model
+            # Prepare timestamps
             now = datetime.now(timezone.utc)
+            iso_timestamp = now.isoformat()
+
+            # Clean and prepare Plaid data
             institution_info = institution_info or {}
+            logger.debug(f"Institution info before storage: {institution_info}")
 
-            # Clean metadata - convert any enum objects to strings
-            clean_metadata = {}
-            for key, value in institution_info.items():
-                if hasattr(value, "value"):  # Enum object
-                    clean_metadata[key] = value.value
-                elif isinstance(value, list):
-                    clean_metadata[key] = [
-                        item.value if hasattr(item, "value") else item for item in value
-                    ]
+            def ensure_serializable(data):
+                """Convert Plaid objects to JSON-serializable format."""
+                if data is None:
+                    return None
+                elif hasattr(data, "value"):  # Enum objects
+                    return data.value
+                elif isinstance(data, datetime):
+                    return data.isoformat()
+                elif isinstance(data, (str, int, float, bool)):
+                    return data
+                elif isinstance(data, list):
+                    return [ensure_serializable(item) for item in data]
+                elif isinstance(data, dict):
+                    return {k: ensure_serializable(v) for k, v in data.items()}
+                elif hasattr(data, "__dict__"):  # Complex Plaid objects
+                    try:
+                        # Try to extract attributes safely
+                        obj_dict = {}
+                        for k, v in data.__dict__.items():
+                            if not k.startswith("_"):  # Skip private attributes
+                                obj_dict[k] = ensure_serializable(v)
+                        return obj_dict
+                    except Exception:
+                        # If extraction fails, try to convert to string
+                        return str(data)
                 else:
-                    clean_metadata[key] = value
+                    # For any other type, convert to string
+                    return str(data)
 
-            plaid_token = PlaidAccessToken(
-                user_id=user_id,
-                access_token=encrypted_token,
-                item_id=item_id,
-                institution_id=institution_info.get("institution_id"),
-                institution_name=institution_info.get("name"),
-                status=PlaidTokenStatus.ACTIVE,
-                environment=PlaidEnvironment(self.environment),
-                created_at=now,
-                updated_at=now,
-                last_used_at=now,
-                metadata=clean_metadata,  # Store cleaned institution info in metadata
+            # Create optimized BankDocument
+            bank_document = BankDocument(
+                id=item_id,
+                userId=user_id,
+                schemaVersion="2.0",
+                institutionId=institution_info.get("institution_id", "unknown"),
+                institutionName=institution_info.get("name", "Unknown Bank"),
+                status="active",
+                createdAt=iso_timestamp,
+                updatedAt=iso_timestamp,
+                lastUsedAt=iso_timestamp,
+                environment=self.environment,
+                summary={
+                    "accountCount": 0,
+                    "totalBalance": 0.0,
+                    "lastSync": {"status": "pending", "timestamp": None, "error": None},
+                },
+                plaidData={
+                    "accessToken": encrypted_token,
+                    "itemId": item_id,
+                    "institutionId": institution_info.get("institution_id"),
+                    "institutionName": institution_info.get("name"),
+                    "products": ensure_serializable(
+                        institution_info.get("products", [])
+                    ),
+                    "countryCodes": ensure_serializable(
+                        institution_info.get("country_codes", [])
+                    ),
+                    "plaidInstitutionData": self._convert_plaid_object(
+                        institution_info.get("plaid_institution_data", {})
+                    ),
+                },
             )
+            logger.debug(f"Final plaidData before storage: {bank_document.plaidData}")
 
-            # Create bank document with token and account placeholders
-            bank_data = plaid_token.model_dump(mode="json")
-            
-            bank_data.update(
-                {
-                    "id": item_id,  # Document ID (unique within partition)
-                    "userId": user_id,  # Partition key
-                    "itemId": item_id,  # Bank identifier
-                    "accounts": [],  # Will be populated when accounts are fetched
-                    "metadata": {
-                        "accountCount": 0,
-                        "totalBalance": 0.0,
-                        "lastUpdated": now.isoformat(),
-                        "transactionSyncStatus": TransactionSyncStatus.IN_PROGRESS
-                    }
-                }
-            )
-
-            # Store in banks container instead of separate plaid_tokens
+            # Store document
+            document_dict = bank_document.model_dump()
             try:
-                cosmos_client.create_item(Containers.BANKS, bank_data, user_id)
+                cosmos_client.create_item(Containers.BANKS, document_dict, user_id)
             except CosmosHttpResponseError as e:
-                if e.status_code == 409:  # Conflict - document exists, update it
+                if e.status_code == 409:  # Document exists, update it
                     cosmos_client.update_item(
-                        Containers.BANKS, item_id, user_id, bank_data
+                        Containers.BANKS, item_id, user_id, document_dict
                     )
                 else:
                     raise
@@ -424,57 +521,52 @@ class PlaidService:
             logger.info(
                 f"Successfully stored bank data for user {user_id}, item_id: {item_id}"
             )
-            return plaid_token
+            return bank_document
 
         except Exception as e:
             logger.error(f"Failed to store bank data for user {user_id}: {e}")
             raise Exception(f"Failed to store bank data: {e}")
 
-    def get_user_access_tokens(self, user_id: str) -> List[PlaidAccessToken]:
-        """Retrieve all active access tokens for a user from banks container."""
+    def get_user_access_tokens(self, user_id: str) -> List[BankDocument]:
+        """Retrieve all active bank documents for a user."""
         try:
-            logger.info(f"Retrieving access tokens for user {user_id}")
+            logger.info(f"Retrieving bank documents for user {user_id}")
 
             if not cosmos_client.is_connected:
-                logger.error("CosmosDB not connected - cannot retrieve tokens")
-                raise Exception("CosmosDB connection required for token retrieval")
+                logger.error("CosmosDB not connected - cannot retrieve bank documents")
+                raise Exception("CosmosDB connection required for bank data retrieval")
 
-            # Query all banks for the user
+            # Query all active banks for the user
             query = "SELECT * FROM c WHERE c.userId = @userId AND c.status = @status"
             parameters = [
                 {"name": "@userId", "value": user_id},
-                {"name": "@status", "value": PlaidTokenStatus.ACTIVE.value},
+                {"name": "@status", "value": "active"},
             ]
 
             bank_documents = cosmos_client.query_items(
-                "banks", query, parameters, user_id
+                Containers.BANKS, query, parameters, user_id
             )
-            tokens = []
 
+            parsed_documents = []
             for bank_doc in bank_documents:
                 try:
-                    # Convert datetime strings back to datetime objects if needed
-                    for field in ["created_at", "updated_at", "last_used_at"]:
-                        if bank_doc.get(field) and isinstance(bank_doc[field], str):
-                            bank_doc[field] = datetime.fromisoformat(
-                                bank_doc[field].replace("Z", "+00:00")
-                            )
-
-                    # Extract token data from bank document
-                    token = PlaidAccessToken.model_validate(bank_doc)
-                    tokens.append(token)
+                    # Parse as BankDocument
+                    document = BankDocument.model_validate(bank_doc)
+                    parsed_documents.append(document)
                 except Exception as e:
                     logger.error(
-                        f"Failed to parse token data for document {bank_doc.get('id', 'unknown')}: {e}"
+                        f"Failed to parse bank document {bank_doc.get('id', 'unknown')}: {e}"
                     )
-                    continue  # Skip to the next item if one is corrupted
+                    continue
 
-            logger.info(f"Found {len(tokens)} active tokens for user {user_id}")
-            return tokens
+            logger.info(
+                f"Found {len(parsed_documents)} active bank documents for user {user_id}"
+            )
+            return parsed_documents
 
         except Exception as e:
-            logger.error(f"Failed to retrieve access tokens for user {user_id}: {e}")
-            raise Exception(f"Failed to retrieve access tokens: {e}")
+            logger.error(f"Failed to retrieve bank documents for user {user_id}: {e}")
+            raise Exception(f"Failed to retrieve bank documents: {e}")
 
     async def get_accounts_with_balances(
         self,
@@ -523,9 +615,9 @@ class PlaidService:
 
             for token in tokens:
                 try:
-                    from ..utils.token_security import decrypt_access_token
-
-                    decrypted_token = decrypt_access_token(token.access_token)
+                    decrypted_token = TokenEncryption.decrypt_token(
+                        token.plaidData["accessToken"]
+                    )
                     if account_ids:
                         options = AccountsBalanceGetRequestOptions(
                             account_ids=account_ids
@@ -540,10 +632,10 @@ class PlaidService:
                     client = await self._get_client(user_id)
                     response = client.accounts_balance_get(request)
                     accounts_data = response["accounts"]
-                    
+
                     bank_accounts = []
                     bank_total_balance = 0.0
-                    
+
                     for account in accounts_data:
                         balance_info = account["balances"]
                         balance = PlaidBalance(
@@ -573,9 +665,9 @@ class PlaidService:
                             subtype=account_subtype,
                             mask=account.get("mask"),
                             balances=balance,
-                            item_id=token.item_id,
-                            institution_name=token.institution_name,
-                            institution_id=token.institution_id,
+                            item_id=token.id,
+                            institution_name=token.institutionName,
+                            institution_id=token.institutionId,
                         )
                         account_dict = account_with_balance.model_dump()
                         bank_accounts.append(account_dict)
@@ -584,17 +676,17 @@ class PlaidService:
                             current_balance = float(balance.current)
                             bank_total_balance += current_balance
                             total_balance += current_balance
-                    
+
                     # Update this bank's document with accounts
-                    self._update_bank_accounts(user_id, token.item_id, bank_accounts, bank_total_balance)
-                    self._update_token_last_used(user_id, token.item_id)
-                    
-                except Exception as e:
-                    logger.error(
-                        f"Failed to get balances for token {token.item_id}: {e}"
+                    self._update_bank_accounts(
+                        user_id, token.id, bank_accounts, bank_total_balance
                     )
+                    self._update_token_last_used(user_id, token.id)
+
+                except Exception as e:
+                    logger.error(f"Failed to get balances for token {token.id}: {e}")
                     continue
-                    
+
             all_accounts.sort(key=lambda x: x["balances"]["current"] or 0, reverse=True)
             result = {
                 "accounts": all_accounts,
@@ -617,17 +709,21 @@ class PlaidService:
         try:
             query = "SELECT * FROM c WHERE c.userId = @userId"
             parameters = [{"name": "@userId", "value": user_id}]
-            
-            bank_documents = cosmos_client.query_items(Containers.BANKS, query, parameters, user_id)
+
+            bank_documents = cosmos_client.query_items(
+                Containers.BANKS, query, parameters, user_id
+            )
             all_accounts = []
             total_balance = 0.0
-            
-            logger.info(f"Found {len(bank_documents)} bank documents for user {user_id}")
-            
+
+            logger.info(
+                f"Found {len(bank_documents)} bank documents for user {user_id}"
+            )
+
             for bank_doc in bank_documents:
                 bank_accounts = bank_doc.get("accounts", [])
                 all_accounts.extend(bank_accounts)
-                
+
                 # Calculate balance from individual accounts instead of relying on stored metadata
                 bank_balance = 0.0
                 for account in bank_accounts:
@@ -635,12 +731,16 @@ class PlaidService:
                     current_balance = balances.get("current")
                     if current_balance is not None:
                         bank_balance += float(current_balance)
-                
-                logger.info(f"Bank {bank_doc.get('itemId', 'unknown')}: {len(bank_accounts)} accounts, balance: ${bank_balance:.2f}")
+
+                logger.info(
+                    f"Bank {bank_doc.get('id', 'unknown')}: {len(bank_accounts)} accounts, balance: ${bank_balance:.2f}"
+                )
                 total_balance += bank_balance
-                
-            logger.info(f"Total cached balance for user {user_id}: ${total_balance:.2f}")
-                
+
+            logger.info(
+                f"Total cached balance for user {user_id}: ${total_balance:.2f}"
+            )
+
             return {
                 "accounts": all_accounts,
                 "total_balance": round(total_balance, 2),
@@ -651,30 +751,44 @@ class PlaidService:
             logger.error(f"Failed to get cached accounts from banks: {e}")
             return {"accounts": [], "total_balance": 0.0, "account_count": 0}
 
-    def _update_bank_accounts(self, user_id: str, item_id: str, accounts: List[Dict], total_balance: float) -> bool:
-        """Update accounts and metadata for a specific bank document."""
+    def _update_bank_accounts(
+        self, user_id: str, item_id: str, accounts: List[Dict], total_balance: float
+    ) -> bool:
+        """Update accounts and summary data for a specific bank document using new schema."""
         try:
+            iso_timestamp = datetime.now(timezone.utc).isoformat()
+
+            # Use the new optimized schema fields
             update_data = {
+                # Store accounts directly (no nested structure needed)
                 "accounts": accounts,
-                "metadata.accountCount": len(accounts),
-                "metadata.totalBalance": round(total_balance, 2),
-                "metadata.lastUpdated": datetime.now(timezone.utc).isoformat(),
-                "updated_at": datetime.now(timezone.utc).isoformat(),
+                # Update summary object with new structure
+                "summary.accountCount": len(accounts),
+                "summary.totalBalance": round(total_balance, 2),
+                "summary.lastSync.status": "completed",
+                "summary.lastSync.timestamp": iso_timestamp,
+                "summary.lastSync.error": None,
+                # Update document timestamps
+                "updatedAt": iso_timestamp,
+                "lastUsedAt": iso_timestamp,
             }
-            
+
             cosmos_client.update_item(Containers.BANKS, item_id, user_id, update_data)
-            logger.info(f"Updated bank {item_id} with {len(accounts)} accounts, balance: ${total_balance:.2f}")
+            logger.info(
+                f"Updated bank {item_id} with {len(accounts)} accounts, balance: ${total_balance:.2f}"
+            )
             return True
         except Exception as e:
             logger.error(f"Failed to update bank accounts for {item_id}: {e}")
             return False
 
     def _update_token_last_used(self, user_id: str, item_id: str) -> bool:
-        """Update the last_used_at timestamp for a bank document."""
+        """Update the lastUsedAt timestamp for a bank document using new schema."""
         try:
+            iso_timestamp = datetime.now(timezone.utc).isoformat()
             update_data = {
-                "last_used_at": datetime.now(timezone.utc).isoformat(),
-                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "lastUsedAt": iso_timestamp,
+                "updatedAt": iso_timestamp,
             }
 
             cosmos_client.update_item(Containers.BANKS, item_id, user_id, update_data)
@@ -693,7 +807,7 @@ class PlaidService:
             token_to_revoke = None
 
             for token in tokens:
-                if token.item_id == item_id:
+                if token.id == item_id:
                     token_to_revoke = token
                     break
 
@@ -702,9 +816,9 @@ class PlaidService:
                 return False
 
             # Revoke with Plaid API
-            from ..utils.token_security import decrypt_access_token
-
-            decrypted_token = decrypt_access_token(token_to_revoke.access_token)
+            decrypted_token = TokenEncryption.decrypt_token(
+                token_to_revoke.plaidData["accessToken"]
+            )
             request = ItemRemoveRequest(access_token=decrypted_token)
 
             try:
@@ -749,10 +863,10 @@ class PlaidService:
             for token in tokens:
                 try:
                     # Revoke each item
-                    if self.revoke_item_access(user_id, token.item_id):
+                    if self.revoke_item_access(user_id, token.id):
                         success_count += 1
                 except Exception as e:
-                    logger.error(f"Failed to revoke item {token.item_id}: {e}")
+                    logger.error(f"Failed to revoke item {token.id}: {e}")
 
             # Clean up transaction data
             transaction_storage_service.delete_all_user_transactions(user_id)
@@ -782,9 +896,7 @@ class PlaidService:
             query = "SELECT c.id FROM c WHERE c.userId = @userId"
             parameters = [{"name": "@userId", "value": user_id}]
 
-            bank_docs = cosmos_client.query_items(
-                "banks", query, parameters, user_id
-            )
+            bank_docs = cosmos_client.query_items("banks", query, parameters, user_id)
 
             deleted_count = 0
             for bank_doc in bank_docs:
@@ -830,7 +942,9 @@ class PlaidService:
             logger.info(f"Starting initial transaction sync for item {item_id}")
 
             # Update status to in progress
-            self.update_transaction_sync_status(user_id, item_id, TransactionSyncStatus.SYNCING)
+            self.update_transaction_sync_status(
+                user_id, item_id, TransactionSyncStatus.SYNCING
+            )
 
             # Use transactions/sync for initial historical data
             cursor = None
@@ -841,15 +955,19 @@ class PlaidService:
             # Safety counter to prevent infinite loops
             max_iterations = 50
             iteration_count = 0
-            
+
             while True:
                 iteration_count += 1
                 if iteration_count > max_iterations:
-                    logger.error(f"Transaction sync exceeded {max_iterations} iterations for item {item_id}. Breaking loop.")
+                    logger.error(
+                        f"Transaction sync exceeded {max_iterations} iterations for item {item_id}. Breaking loop."
+                    )
                     break
-                    
-                logger.info(f"Transaction sync iteration {iteration_count} for item {item_id}")
-                
+
+                logger.info(
+                    f"Transaction sync iteration {iteration_count} for item {item_id}"
+                )
+
                 # Create request - omit cursor for initial sync when None
                 if cursor is not None:
                     request = TransactionsSyncRequest(
@@ -865,8 +983,10 @@ class PlaidService:
                 added = response.get("added", [])
                 modified = response.get("modified", [])
                 removed = response.get("removed", [])
-                
-                logger.info(f"Sync iteration {iteration_count}: added={len(added)}, modified={len(modified)}, removed={len(removed)}")
+
+                logger.info(
+                    f"Sync iteration {iteration_count}: added={len(added)}, modified={len(modified)}, removed={len(removed)}"
+                )
 
                 if added:
                     # Store added transactions
@@ -891,15 +1011,21 @@ class PlaidService:
 
                 cursor = response.get("next_cursor")
                 has_more = response.get("has_more", False)
-                
-                logger.info(f"Sync iteration {iteration_count}: cursor={cursor}, has_more={has_more}")
+
+                logger.info(
+                    f"Sync iteration {iteration_count}: cursor={cursor}, has_more={has_more}"
+                )
 
                 if not has_more:
-                    logger.info(f"Transaction sync completed for item {item_id} after {iteration_count} iterations")
+                    logger.info(
+                        f"Transaction sync completed for item {item_id} after {iteration_count} iterations"
+                    )
                     break
 
             # Update sync status to complete
-            self.update_transaction_sync_status(user_id, item_id, TransactionSyncStatus.COMPLETED)
+            self.update_transaction_sync_status(
+                user_id, item_id, TransactionSyncStatus.COMPLETED
+            )
 
             result = {
                 "success": True,
@@ -915,7 +1041,9 @@ class PlaidService:
 
         except Exception as e:
             logger.error(f"Failed to sync transactions for {item_id}: {e}")
-            self.update_transaction_sync_status(user_id, item_id, TransactionSyncStatus.ERROR)
+            self.update_transaction_sync_status(
+                user_id, item_id, TransactionSyncStatus.ERROR
+            )
             raise Exception(f"Transaction sync failed: {e}")
 
     async def refresh_transactions(self, user_id: str, item_id: str) -> Dict[str, Any]:
@@ -928,7 +1056,7 @@ class PlaidService:
             target_token = None
 
             for token in tokens:
-                if token.item_id == item_id:
+                if token.id == item_id:
                     target_token = token
                     break
 
@@ -936,9 +1064,9 @@ class PlaidService:
                 raise Exception(f"No token found for item {item_id}")
 
             # Decrypt token
-            from ..utils.token_security import decrypt_access_token
-
-            access_token = decrypt_access_token(target_token.access_token)
+            access_token = TokenEncryption.decrypt_token(
+                target_token.plaidData["accessToken"]
+            )
 
             # Get cursor from last sync
             cursor = transaction_storage_service.get_last_sync_cursor(user_id, item_id)
@@ -995,7 +1123,7 @@ class PlaidService:
                 "transactions_removed": removed_count,
                 "total_processed": added_count + modified_count + removed_count,
                 "item_id": item_id,
-                "institution_name": target_token.institution_name or "Unknown",
+                "institution_name": target_token.institutionName or "Unknown",
                 "message": f"Refreshed {added_count + modified_count + removed_count} transactions",
             }
 
@@ -1018,7 +1146,7 @@ class PlaidService:
             target_token = None
 
             for token in tokens:
-                if token.item_id == item_id:
+                if token.id == item_id:
                     target_token = token
                     break
 
@@ -1029,9 +1157,9 @@ class PlaidService:
             transaction_storage_service.clear_item_transactions(user_id, item_id)
 
             # Decrypt token
-            from ..utils.token_security import decrypt_access_token
-
-            access_token = decrypt_access_token(target_token.access_token)
+            access_token = TokenEncryption.decrypt_token(
+                target_token.plaidData["accessToken"]
+            )
 
             # Perform complete resync
             sync_result = await self.sync_all_transactions_for_item(
@@ -1042,7 +1170,7 @@ class PlaidService:
                 "success": True,
                 "message": f"Force refresh completed - synced {sync_result['total']} transactions",
                 "item_id": item_id,
-                "institution_name": target_token.institution_name or "Unknown",
+                "institution_name": target_token.institutionName or "Unknown",
                 PlaidResponseFields.STATUS: Status.COMPLETED,
                 "async_operation": False,
             }
@@ -1119,18 +1247,18 @@ class PlaidService:
                 # Get account count for this item
                 accounts = account_storage_service.get_user_accounts(user_id)
                 item_accounts = [
-                    acc for acc in accounts if acc.get("item_id") == token.item_id
+                    acc for acc in accounts if acc.get("item_id") == token.id
                 ]
 
                 items.append(
                     {
-                        "item_id": token.item_id,
-                        "institution_id": token.institution_id,
-                        "institution_name": token.institution_name or "Unknown",
+                        "item_id": token.id,
+                        "institution_id": token.institutionId,
+                        "institution_name": token.institutionName or "Unknown",
                         "status": token.status,
                         "accounts_count": len(item_accounts),
-                        "created_at": token.created_at,
-                        "last_used_at": token.last_used_at,
+                        "created_at": token.createdAt,
+                        "last_used_at": token.lastUsedAt,
                     }
                 )
 
@@ -1156,7 +1284,7 @@ class PlaidService:
 
             target_token = None
             for token in tokens:
-                if token.item_id == item_id:
+                if token.id == item_id:
                     target_token = token
                     break
 
@@ -1167,9 +1295,9 @@ class PlaidService:
             logger.info(f"✅ Found target token for item {item_id}")
 
             # Decrypt the access token
-            from ..utils.token_security import decrypt_access_token
-
-            access_token = decrypt_access_token(target_token.access_token)
+            access_token = TokenEncryption.decrypt_token(
+                target_token.plaidData["accessToken"]
+            )
             logger.info(f"✅ Successfully decrypted access token for item {item_id}")
 
             # Perform transaction sync
@@ -1185,4 +1313,6 @@ class PlaidService:
                 f"❌ Background transaction sync failed for item {item_id}: {e}",
                 exc_info=True,
             )
-            self.update_transaction_sync_status(user_id, item_id, TransactionSyncStatus.ERROR)
+            self.update_transaction_sync_status(
+                user_id, item_id, TransactionSyncStatus.ERROR
+            )

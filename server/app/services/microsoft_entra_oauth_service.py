@@ -185,11 +185,11 @@ class MicrosoftEntraOAuthService:
     async def revoke_token(self, token: Optional[str] = None) -> bool:
         """
         Revoke Microsoft OAuth token.
-        Microsoft doesn't have a direct token revocation endpoint like Google.
+        Microsoft doesn't have a direct token revocation endpoint.
         Tokens will expire naturally based on their configured lifetime.
         """
         try:
-            # Microsoft doesn't have a direct token revocation endpoint like Google
+            # Microsoft doesn't have a direct token revocation endpoint
             # Token expiration will handle security
             logger.info("Microsoft token marked for revocation (will expire naturally)")
             return True

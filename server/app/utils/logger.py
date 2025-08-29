@@ -75,7 +75,6 @@ def setup_logging() -> None:
     logging.config.dictConfig(logging_config)
 
     # Set third-party loggers to WARNING to reduce noise
-    logging.getLogger("google").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     
     # Disable verbose Azure SDK logging

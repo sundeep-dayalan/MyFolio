@@ -35,6 +35,7 @@ class UserUpdate(BaseModel):
     given_name: Optional[str] = Field(None, max_length=50)
     family_name: Optional[str] = Field(None, max_length=50)
     picture: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
 
 
 class UserResponse(UserBase):

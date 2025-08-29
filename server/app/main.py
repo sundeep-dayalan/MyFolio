@@ -8,10 +8,7 @@ A streamlined financial management API focused on:
 - Real-time account balances and transactions
 - Secure token management
 
-Recent changes in 2.0.3:
-- Removed Google OAuth completely
-- Clean Microsoft Entra ID only implementation
-- Supports both personal and organizational Microsoft accounts
+Clean Microsoft Entra ID implementation supporting both personal and organizational Microsoft accounts.
 """
 
 from contextlib import asynccontextmanager
@@ -29,7 +26,7 @@ from .middleware import (
     RateLimitMiddleware,
 )
 from .routers import plaid_router
-from .routers.microsoft_oauth import router as microsoft_oauth_router
+from .routers.auth import router as microsoft_oauth_router
 from .utils.logger import setup_logging, get_logger
 from .routers.plaid_config import router as plaid_config_router
 

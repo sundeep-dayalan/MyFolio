@@ -5,6 +5,7 @@ API-related constants.
 # API Route Prefixes
 class ApiRoutes:
     PLAID_PREFIX = "/plaid"
+    CONFIGURATION_PREFIX = "/configuration"
     AUTH_PREFIX = "/auth/oauth/microsoft"
 
 
