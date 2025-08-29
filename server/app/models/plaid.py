@@ -89,49 +89,51 @@ class PlaidAccountWithBalance(BaseModel):
         from_attributes = True
 
 
-class BankMetadata(BaseModel):
-    """Metadata for bank document."""
-    
-    accountCount: int = 0
-    totalBalance: float = 0.0
-    lastUpdated: str
-    transactionSyncStatus: str = "pending"
-
-    class Config:
-        from_attributes = True
-
-
 class BankDocument(BaseModel):
-    """Complete bank document model combining token and accounts."""
-    
-    # Document identifiers
-    id: str = Field(..., description="Document ID: item_id (unique within userId partition)")
+
+    # Core identifiers
+    id: str = Field(..., description="Plaid Item ID as document ID")
     userId: str = Field(..., description="User ID (partition key)")
-    itemId: str = Field(..., description="Plaid item ID (bank identifier)")
-    
-    # Token information
-    access_token: str = Field(..., description="Encrypted Plaid access token")
-    institution_id: Optional[str] = Field(None, description="Institution ID")
-    institution_name: Optional[str] = Field(None, description="Institution name")
-    status: PlaidTokenStatus = Field(default=PlaidTokenStatus.ACTIVE)
-    environment: PlaidEnvironment = Field(default=PlaidEnvironment.SANDBOX)
-    
-    # Timestamps
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
-    last_used_at: Optional[datetime] = None
-    
-    # Account data
-    accounts: List[Dict[str, Any]] = Field(default_factory=list, description="Account data with balances")
-    
-    # Metadata
-    metadata: BankMetadata = Field(default_factory=lambda: BankMetadata(lastUpdated=datetime.utcnow().isoformat()))
-    
-    # Additional metadata from institution
-    institution_metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    schemaVersion: str = Field(
+        default="2.0", description="Schema version for migrations"
+    )
+
+    # Institution information
+    institutionId: str = Field(..., description="Plaid institution ID")
+    institutionName: str = Field(..., description="Institution name")
+
+    # Item status & timestamps
+    status: str = Field(
+        default="active", description="Item status: active, error, disconnected"
+    )
+    createdAt: str = Field(..., description="ISO 8601 timestamp")
+    updatedAt: str = Field(..., description="ISO 8601 timestamp")
+    lastUsedAt: Optional[str] = Field(None, description="ISO 8601 timestamp")
+
+    # Environment
+    environment: str = Field(default="sandbox", description="Plaid environment")
+
+    # Summarized & computed data
+    summary: Dict[str, Any] = Field(
+        default_factory=lambda: {
+            "accountCount": 0,
+            "totalBalance": 0.0,
+            "lastSync": {"status": "pending", "timestamp": None, "error": None},
+        },
+        description="Computed summary data",
+    )
+
+    # Raw Plaid API data
+    plaidData: Dict[str, Any] = Field(
+        default_factory=dict, description="Raw Plaid API response data"
+    )
+
+    # Optional error tracking
+    lastError: Optional[Dict[str, Any]] = Field(
+        None, description="Last error information if any"
+    )
 
     class Config:
-        use_enum_values = True
         from_attributes = True
 
 
