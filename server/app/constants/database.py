@@ -2,12 +2,11 @@
 Database-related constants.
 """
 
+
 # Container Names
 class Containers:
     USERS = "users"
-    ACCOUNTS = "accounts"
     TRANSACTIONS = "transactions"
-    PLAID_TOKENS = "plaid_tokens"
     BANKS = "banks"
     CONFIGURATION = "configuration"
 
@@ -21,7 +20,7 @@ class DocumentFields:
     ACCOUNTS = "accounts"
     TRANSACTIONS = "transactions"
     METADATA = "metadata"
-    
+
 
 # Partition Key Configurations
 class PartitionKeys:
@@ -37,7 +36,7 @@ class QueryFields:
     USER_ID_PARAM = "@userId"
     STATUS_PARAM = "@status"
     ITEM_ID_PARAM = "@itemId"
-    
+
     # Metadata fields
     ACCOUNT_COUNT = "metadata.accountCount"
     TOTAL_BALANCE = "metadata.totalBalance"

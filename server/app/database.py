@@ -1,6 +1,7 @@
 """
 Database connection and setup for Azure CosmosDB.
 """
+
 import logging
 from typing import Optional
 from azure.cosmos import CosmosClient, DatabaseProxy, ContainerProxy
@@ -48,7 +49,7 @@ class CosmosDBClient:
 
     def _initialize_containers(self) -> None:
         """Initialize container references."""
-        container_names = [Containers.USERS, Containers.ACCOUNTS, Containers.TRANSACTIONS, Containers.PLAID_TOKENS]
+        container_names = [Containers.USERS, Containers.TRANSACTIONS]
 
         for container_name in container_names:
             try:
@@ -85,7 +86,7 @@ class CosmosDBClient:
     def is_connected(self) -> bool:
         """Check if CosmosDB is connected."""
         return self._database is not None
-    
+
     async def ensure_connected(self) -> None:
         """Ensure CosmosDB connection is established, connecting if needed."""
         if not self.is_connected:

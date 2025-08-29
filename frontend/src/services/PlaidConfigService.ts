@@ -63,7 +63,7 @@ export const PlaidConfigService = {
   async storeConfiguration(config: PlaidConfigurationCreate): Promise<PlaidConfigurationResponse> {
     try {
       const headers = await getAuthHeaders();
-      const response = await fetch(`${API_BASE}/plaid/configuration`, {
+      const response = await fetch(`${API_BASE}/configuration/plaid`, {
         method: 'POST',
         headers,
         body: JSON.stringify(config),
@@ -89,7 +89,7 @@ export const PlaidConfigService = {
     try {
       // Now requires authentication to get user-specific configuration status
       const headers = await getAuthHeaders();
-      const response = await fetch(`${API_BASE}/plaid/configuration/status`, {
+      const response = await fetch(`${API_BASE}/configuration/plaid/status`, {
         method: 'GET',
         headers,
       });
@@ -114,7 +114,7 @@ export const PlaidConfigService = {
   async getConfiguration(): Promise<PlaidConfigurationResponse> {
     try {
       const headers = await getAuthHeaders();
-      const response = await fetch(`${API_BASE}/plaid/configuration`, {
+      const response = await fetch(`${API_BASE}/configuration/plaid`, {
         method: 'GET',
         headers,
       });
@@ -139,7 +139,7 @@ export const PlaidConfigService = {
   ): Promise<PlaidValidationResult> {
     try {
       const headers = await getAuthHeaders();
-      const response = await fetch(`${API_BASE}/plaid/configuration/validate`, {
+      const response = await fetch(`${API_BASE}/configuration/plaid/validate`, {
         method: 'POST',
         headers,
         body: JSON.stringify(credentials),
@@ -171,7 +171,7 @@ export const PlaidConfigService = {
   async deleteConfiguration(): Promise<{ message: string }> {
     try {
       const headers = await getAuthHeaders();
-      const response = await fetch(`${API_BASE}/plaid/configuration`, {
+      const response = await fetch(`${API_BASE}/configuration/plaid`, {
         method: 'DELETE',
         headers,
       });
