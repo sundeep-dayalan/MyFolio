@@ -32,6 +32,9 @@ import base64
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from ..services.azure_key_vault_crypto_service import (
+    AzureKeyVaultCryptoService,
+)
 
 from ..config import settings
 from ..database import cosmos_client
@@ -280,7 +283,7 @@ class PlaidService:
             )
 
             # Store the access token
-            stored_token = self._store_access_token(
+            stored_token = await self._store_access_token(
                 user_id, access_token, item_id, institution_info
             )
 
@@ -415,7 +418,7 @@ class PlaidService:
             # Return string representation as fallback
             return str(obj)
 
-    def _store_access_token(
+    async def _store_access_token(
         self,
         user_id: str,
         access_token: str,
@@ -432,7 +435,7 @@ class PlaidService:
                 raise Exception("CosmosDB connection required for bank data storage")
 
             # Encrypt the access token
-            encrypted_token = TokenEncryption.encrypt_token(access_token)
+            encrypted_token = await AzureKeyVaultCryptoService.encrypt_secret(access_token)
 
             # Prepare timestamps
             now = datetime.now(timezone.utc)
@@ -489,7 +492,7 @@ class PlaidService:
                     "lastSync": {"status": "pending", "timestamp": None, "error": None},
                 },
                 plaidData={
-                    "accessToken": encrypted_token,
+                    "encryptedAccessToken": encrypted_token,
                     "itemId": item_id,
                     "institutionId": institution_info.get("institution_id"),
                     "institutionName": institution_info.get("name"),
@@ -615,8 +618,8 @@ class PlaidService:
 
             for token in tokens:
                 try:
-                    decrypted_token = TokenEncryption.decrypt_token(
-                        token.plaidData["accessToken"]
+                    decrypted_token = await AzureKeyVaultCryptoService.decrypt_secret(
+                        token.plaidData["encryptedAccessToken"]
                     )
                     if account_ids:
                         options = AccountsBalanceGetRequestOptions(
@@ -816,8 +819,8 @@ class PlaidService:
                 return False
 
             # Revoke with Plaid API
-            decrypted_token = TokenEncryption.decrypt_token(
-                token_to_revoke.plaidData["accessToken"]
+            decrypted_token = await AzureKeyVaultCryptoService.decrypt_secret(
+                token_to_revoke.plaidData["encryptedAccessToken"]
             )
             request = ItemRemoveRequest(access_token=decrypted_token)
 
@@ -1064,8 +1067,8 @@ class PlaidService:
                 raise Exception(f"No token found for item {item_id}")
 
             # Decrypt token
-            access_token = TokenEncryption.decrypt_token(
-                target_token.plaidData["accessToken"]
+            access_token = await AzureKeyVaultCryptoService.decrypt_secret(
+                target_token.plaidData["encryptedAccessToken"]
             )
 
             # Get cursor from last sync
@@ -1157,8 +1160,8 @@ class PlaidService:
             transaction_storage_service.clear_item_transactions(user_id, item_id)
 
             # Decrypt token
-            access_token = TokenEncryption.decrypt_token(
-                target_token.plaidData["accessToken"]
+            access_token = await AzureKeyVaultCryptoService.decrypt_secret(
+                target_token.plaidData["encryptedAccessToken"]
             )
 
             # Perform complete resync
@@ -1295,8 +1298,8 @@ class PlaidService:
             logger.info(f"✅ Found target token for item {item_id}")
 
             # Decrypt the access token
-            access_token = TokenEncryption.decrypt_token(
-                target_token.plaidData["accessToken"]
+            access_token = await AzureKeyVaultCryptoService.decrypt_secret(
+                target_token.plaidData["encryptedAccessToken"]
             )
             logger.info(f"✅ Successfully decrypted access token for item {item_id}")
 
