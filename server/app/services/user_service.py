@@ -1,12 +1,13 @@
 """
 User service for business logic using CosmosDB.
 """
+
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 from azure.cosmos.exceptions import CosmosResourceNotFoundError, CosmosHttpResponseError
 
 from ..models.user import UserCreate, UserUpdate, UserResponse, UserInDB
-from ..exceptions import UserNotFoundError, UserAlreadyExistsError, FirebaseError
+from ..exceptions import UserNotFoundError, UserAlreadyExistsError, DatabaseError
 from ..utils.logger import get_logger
 from ..constants import Containers
 from ..utils.security import sanitize_input
@@ -26,7 +27,7 @@ class UserService:
         try:
             # Ensure CosmosDB connection is established
             await cosmos_client.ensure_connected()
-            
+
             # Check if user already exists
             if await self.get_user_by_id(user_data.id):
                 raise UserAlreadyExistsError(user_data.id)
@@ -58,17 +59,17 @@ class UserService:
             raise
         except CosmosHttpResponseError as e:
             logger.error(f"CosmosDB error creating user {user_data.id}: {str(e)}")
-            raise FirebaseError(f"Failed to create user: {str(e)}")
+            raise DatabaseError(f"Failed to create user: {str(e)}")
         except Exception as e:
             logger.error(f"Error creating user {user_data.id}: {str(e)}")
-            raise FirebaseError(f"Failed to create user: {str(e)}")
+            raise DatabaseError(f"Failed to create user: {str(e)}")
 
     async def get_user_by_id(self, user_id: str) -> Optional[UserResponse]:
         """Get user by ID."""
         try:
             # Ensure CosmosDB connection is established
             await cosmos_client.ensure_connected()
-            
+
             user_doc = cosmos_client.get_item(self.container_name, user_id, user_id)
 
             if user_doc:
@@ -88,44 +89,83 @@ class UserService:
 
         except CosmosHttpResponseError as e:
             logger.error(f"CosmosDB error getting user {user_id}: {str(e)}")
-            raise FirebaseError(f"Failed to get user: {str(e)}")
+            raise DatabaseError(f"Failed to get user: {str(e)}")
         except Exception as e:
             logger.error(f"Error getting user {user_id}: {str(e)}")
-            raise FirebaseError(f"Failed to get user: {str(e)}")
+            raise DatabaseError(f"Failed to get user: {str(e)}")
 
-    async def get_user_by_email(self, email: str) -> Optional[UserResponse]:
-        """Get user by email."""
+    async def get_user_by_email_provider(
+        self, email: str, provider: str, provider_user_id: str
+    ) -> Optional[UserResponse]:
+        """Get user by combination of email, auth provider, and provider user id.
+
+        This will try common locations for the provider user id: `metadata.provider_user_id`
+        and `metadata.provider_data.<provider>_id` or `metadata.provider_data.<provider>Id`.
+        """
         try:
             # Ensure CosmosDB connection is established
             await cosmos_client.ensure_connected()
-            
-            query = "SELECT * FROM c WHERE c.email = @email"
-            parameters = [{"name": "@email", "value": email}]
 
-            results = cosmos_client.query_items(self.container_name, query, parameters)
+            # Sanitize inputs
+            email_s = sanitize_input(email) if isinstance(email, str) else email
+            provider_s = (
+                sanitize_input(provider) if isinstance(provider, str) else provider
+            )
+            pid_s = (
+                sanitize_input(provider_user_id)
+                if isinstance(provider_user_id, str)
+                else provider_user_id
+            )
 
-            if results:
-                user_doc = results[0]
-                # Convert datetime strings back to datetime objects for UserResponse
-                if isinstance(user_doc.get("created_at"), str):
-                    user_doc["created_at"] = datetime.fromisoformat(
-                        user_doc["created_at"]
-                    )
-                if isinstance(user_doc.get("updated_at"), str):
-                    user_doc["updated_at"] = datetime.fromisoformat(
-                        user_doc["updated_at"]
-                    )
+            parameters = [
+                {"name": "@email", "value": email_s},
+                {"name": "@provider", "value": provider_s},
+                {"name": "@pid", "value": pid_s},
+            ]
 
-                return UserResponse(**user_doc)
+            # First try direct provider_user_id stored on metadata
+            queries = [
+                (
+                    "SELECT * FROM c WHERE c.email = @email AND c.metadata.auth_provider = @provider AND c.metadata.provider_user_id = @pid",
+                    parameters,
+                )
+            ]
+
+            # Try common keys inside metadata.provider_data
+            key_variants = [f"{provider_s}_id", f"{provider_s}Id"]
+            for key in key_variants:
+                q = f"SELECT * FROM c WHERE c.email = @email AND c.metadata.auth_provider = @provider AND c.metadata.provider_data.{key} = @pid"
+                queries.append((q, parameters))
+
+            # Execute queries until we find a match
+            for query, params in queries:
+                results = cosmos_client.query_items(self.container_name, query, params)
+                if results:
+                    user_doc = results[0]
+                    # Convert datetime strings back to datetime objects for UserResponse
+                    if isinstance(user_doc.get("created_at"), str):
+                        user_doc["created_at"] = datetime.fromisoformat(
+                            user_doc["created_at"]
+                        )
+                    if isinstance(user_doc.get("updated_at"), str):
+                        user_doc["updated_at"] = datetime.fromisoformat(
+                            user_doc["updated_at"]
+                        )
+
+                    return UserResponse(**user_doc)
 
             return None
 
         except CosmosHttpResponseError as e:
-            logger.error(f"CosmosDB error getting user by email {email}: {str(e)}")
-            raise FirebaseError(f"Failed to get user: {str(e)}")
+            logger.error(
+                f"CosmosDB error getting user by email/provider {email}/{provider}: {str(e)}"
+            )
+            raise DatabaseError(f"Failed to get user: {str(e)}")
         except Exception as e:
-            logger.error(f"Error getting user by email {email}: {str(e)}")
-            raise FirebaseError(f"Failed to get user: {str(e)}")
+            logger.error(
+                f"Error getting user by email/provider {email}/{provider}: {str(e)}"
+            )
+            raise DatabaseError(f"Failed to get user: {str(e)}")
 
     async def update_user(self, user_id: str, user_data: UserUpdate) -> UserResponse:
         """Update user."""
@@ -160,10 +200,10 @@ class UserService:
             raise
         except CosmosHttpResponseError as e:
             logger.error(f"CosmosDB error updating user {user_id}: {str(e)}")
-            raise FirebaseError(f"Failed to update user: {str(e)}")
+            raise DatabaseError(f"Failed to update user: {str(e)}")
         except Exception as e:
             logger.error(f"Error updating user {user_id}: {str(e)}")
-            raise FirebaseError(f"Failed to update user: {str(e)}")
+            raise DatabaseError(f"Failed to update user: {str(e)}")
 
     async def delete_user(self, user_id: str) -> bool:
         """Delete user (soft delete by setting is_active to False)."""
@@ -190,10 +230,10 @@ class UserService:
             raise
         except CosmosHttpResponseError as e:
             logger.error(f"CosmosDB error deleting user {user_id}: {str(e)}")
-            raise FirebaseError(f"Failed to delete user: {str(e)}")
+            raise DatabaseError(f"Failed to delete user: {str(e)}")
         except Exception as e:
             logger.error(f"Error deleting user {user_id}: {str(e)}")
-            raise FirebaseError(f"Failed to delete user: {str(e)}")
+            raise DatabaseError(f"Failed to delete user: {str(e)}")
 
     async def get_users(self, skip: int = 0, limit: int = 100) -> List[UserResponse]:
         """Get list of users."""
@@ -267,10 +307,10 @@ class UserService:
 
             except Exception as fallback_error:
                 logger.error(f"Fallback query also failed: {str(fallback_error)}")
-                raise FirebaseError(f"Failed to get users: {str(e)}")
+                raise DatabaseError(f"Failed to get users: {str(e)}")
         except Exception as e:
             logger.error(f"Error getting users: {str(e)}")
-            raise FirebaseError(f"Failed to get users: {str(e)}")
+            raise DatabaseError(f"Failed to get users: {str(e)}")
 
     def _sanitize_user_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Sanitize user input data."""

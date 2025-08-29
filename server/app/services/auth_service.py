@@ -1,9 +1,12 @@
 """
 Authentication service for handling Microsoft Entra ID OAuth and JWT tokens.
 """
+
 import uuid
 from datetime import timedelta
 from typing import Optional, Tuple
+
+from ..constants.auth import Providers
 
 from ..models.user import MicrosoftUserInfo, Token, UserResponse, UserCreate, UserUpdate
 from ..exceptions import AuthenticationError
@@ -34,12 +37,12 @@ class AuthService:
         return {
             "auth_provider": provider,
             "provider_user_id": provider_user_id,
-            "provider_data": {
-                f"{provider}_id": provider_user_id
-            }
+            "provider_data": {f"{provider}_id": provider_user_id},
         }
 
-    def generate_microsoft_auth_url(self, state: Optional[str] = None) -> Tuple[str, str]:
+    def generate_microsoft_auth_url(
+        self, state: Optional[str] = None
+    ) -> Tuple[str, str]:
         """Generate Microsoft Entra ID OAuth authorization URL."""
         return self.microsoft_oauth.generate_auth_url(state)
 
@@ -58,32 +61,45 @@ class AuthService:
                 access_token = tokens.get("access_token")
                 if not access_token:
                     raise AuthenticationError("No valid token received from Microsoft")
-                
+
                 # Get user info from Microsoft Graph API
-                graph_user_data = await self.microsoft_oauth.get_user_info_from_access_token(access_token)
-                
+                graph_user_data = (
+                    await self.microsoft_oauth.get_user_info_from_access_token(
+                        access_token
+                    )
+                )
+
                 # Create MicrosoftUserInfo from Graph API response
                 microsoft_user_info = MicrosoftUserInfo(
                     sub=graph_user_data.get("id", ""),
                     oid=graph_user_data.get("id"),
-                    email=graph_user_data.get("mail") or graph_user_data.get("userPrincipalName", ""),
+                    email=graph_user_data.get("mail")
+                    or graph_user_data.get("userPrincipalName", ""),
                     name=graph_user_data.get("displayName", ""),
                     given_name=graph_user_data.get("givenName"),
                     family_name=graph_user_data.get("surname"),
                 )
             else:
                 # Use ID token for user info
-                microsoft_user_info = await self.microsoft_oauth.verify_and_get_user_info(id_token)
+                microsoft_user_info = (
+                    await self.microsoft_oauth.verify_and_get_user_info(id_token)
+                )
 
-            # Try to get user from database, fallback to mock user if CosmosDB is disabled
+            # Try to get user from database
             try:
-                user = await self.user_service.get_user_by_email(microsoft_user_info.email)
+                user = await self.user_service.get_user_by_email_provider(
+                    microsoft_user_info.email,
+                    Providers.Microsoft,
+                    microsoft_user_info.oid or microsoft_user_info.sub,
+                )
 
                 if not user:
                     # Create new user with unique UUID and store provider info in metadata
-                    provider_user_id = microsoft_user_info.oid or microsoft_user_info.sub
+                    provider_user_id = (
+                        microsoft_user_info.oid or microsoft_user_info.sub
+                    )
                     unique_user_id = self.generate_unique_user_id()
-                    
+
                     user_data = UserCreate(
                         id=unique_user_id,  # Use unique UUID
                         email=microsoft_user_info.email,
@@ -92,18 +108,23 @@ class AuthService:
                         family_name=microsoft_user_info.family_name,
                     )
                     user = await self.user_service.create_user(user_data)
-                    
+
                     # Update user with provider metadata
-                    provider_metadata = self.create_provider_metadata("microsoft", provider_user_id)
-                    await self.user_service.update_user(
-                        user.id, 
-                        UserUpdate(metadata=provider_metadata)
+                    provider_metadata = self.create_provider_metadata(
+                        "microsoft", provider_user_id
                     )
-                    
-                    logger.info(f"New user created from Microsoft OAuth with provider metadata: {user.id}")
+                    await self.user_service.update_user(
+                        user.id, UserUpdate(metadata=provider_metadata)
+                    )
+
+                    logger.info(
+                        f"New user created from Microsoft OAuth with provider metadata: {user.id}"
+                    )
 
             except Exception as db_error:
-                logger.error(f"Database error during user lookup/creation: {str(db_error)}")
+                logger.error(
+                    f"Database error during user lookup/creation: {str(db_error)}"
+                )
                 raise AuthenticationError("Database error during authentication")
 
             # Check if user is active
@@ -113,7 +134,9 @@ class AuthService:
             # Create application token
             token = self.microsoft_oauth.create_app_token(user)
 
-            logger.info(f"User authenticated successfully via Microsoft OAuth: {user.id}")
+            logger.info(
+                f"User authenticated successfully via Microsoft OAuth: {user.id}"
+            )
             return user, token
 
         except AuthenticationError:
@@ -121,7 +144,6 @@ class AuthService:
         except Exception as e:
             logger.error(f"Error during Microsoft OAuth callback: {str(e)}")
             raise AuthenticationError("Microsoft OAuth authentication failed")
-
 
     async def verify_access_token(self, token: str) -> Optional[UserResponse]:
         """Verify access token and return user if valid."""
@@ -144,7 +166,6 @@ class AuthService:
         except Exception as e:
             logger.warning(f"Token verification failed: {str(e)}")
             return None
-
 
     def _create_user_token(self, user: UserResponse) -> str:
         """Create JWT access token for user."""
