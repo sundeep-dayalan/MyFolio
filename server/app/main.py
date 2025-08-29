@@ -28,7 +28,7 @@ from .middleware import (
 from .routers import plaid_router
 from .routers.auth import router as microsoft_oauth_router
 from .utils.logger import setup_logging, get_logger
-from .routers.plaid_config import router as plaid_config_router
+from .routers.config import router as plaid_config_router
 
 # Setup logging
 setup_logging()
