@@ -62,6 +62,10 @@ async def store_plaid_configuration(
             config=config, admin_user_id=current_user.id
         )
 
+        # Reset Plaid client to use new credentials on next request
+        plaid_service = PlaidService()
+        plaid_service.reset_client(current_user.id)
+
         logger.info(f"Plaid configuration stored by user: {current_user.id}")
         return result
 
@@ -195,6 +199,9 @@ async def delete_plaid_configuration(
         success = await plaid_config_service.delete_configuration(
             admin_user_id=current_user.id
         )
+
+        # Reset Plaid client to clear cached credentials
+        plaid_service.reset_client(current_user.id)
 
         if success:
             logger.info(f"Plaid configuration deleted by user: {current_user.id}")

@@ -121,10 +121,11 @@ class PlaidService:
         )
         return self._client
 
-    def _reset_client(self):
-        """Reset client to force re-initialization with fresh credentials."""
+    def reset_client(self, user_id: str):
+        """Reset client for specific user to force re-initialization with fresh credentials."""
         self._client = None
         self._client_initialized = False
+        logger.info(f"Plaid client reset for user {user_id} - will reinitialize on next use")
 
     async def create_link_token(
         self,
