@@ -73,13 +73,13 @@ class PlaidService:
 
     def __init__(self):
         # Environment will be determined dynamically from stored configuration
-        self._client = None
-        self._client_initialized = False
+        self._clients = {}  # user_id -> client
+        self._clients_initialized = {}  # user_id -> bool
 
     async def _get_client(self, user_id: str) -> plaid_api.PlaidApi:
         """Get Plaid client with dynamic credentials (Just-In-Time initialization)."""
-        if self._client and self._client_initialized:
-            return self._client
+        if user_id in self._clients and self._clients_initialized.get(user_id, False):
+            return self._clients[user_id]
 
         # Get credentials and environment from secure storage
         credentials = await plaid_config_service.get_decrypted_credentials(user_id)
@@ -113,18 +113,21 @@ class PlaidService:
             },
         )
         api_client = ApiClient(config)
-        self._client = plaid_api.PlaidApi(api_client)
-        self._client_initialized = True
+        client = plaid_api.PlaidApi(api_client)
+        self._clients[user_id] = client
+        self._clients_initialized[user_id] = True
 
         logger.info(
-            f"Plaid client initialized with dynamic credentials for {environment} environment"
+            f"Plaid client initialized with dynamic credentials for {environment} environment for user {user_id}"
         )
-        return self._client
+        return client
 
     def reset_client(self, user_id: str):
         """Reset client for specific user to force re-initialization with fresh credentials."""
-        self._client = None
-        self._client_initialized = False
+        if user_id in self._clients:
+            del self._clients[user_id]
+        if user_id in self._clients_initialized:
+            del self._clients_initialized[user_id]
         logger.info(f"Plaid client reset for user {user_id} - will reinitialize on next use")
 
     async def create_link_token(
