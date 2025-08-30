@@ -9,11 +9,12 @@ from urllib.parse import urlencode
 import httpx
 import jwt
 
+from .az_key_vault_service import AzureKeyVaultService
+
 from ..settings import settings
 from ..models.user import MicrosoftUserInfo, UserResponse, Token
 from ..exceptions import AuthenticationError
 from ..utils.logger import get_logger
-from ..utils.security import create_access_token
 
 logger = get_logger(__name__)
 
@@ -175,7 +176,7 @@ class MicrosoftEntraOAuthService:
             "auth_method": "microsoft_entra",
         }
 
-        access_token = create_access_token(
+        access_token = AzureKeyVaultService.create_access_token(
             data=token_data,
             expires_delta=timedelta(minutes=settings.access_token_expire_minutes),
         )

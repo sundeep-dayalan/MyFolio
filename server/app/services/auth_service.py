@@ -6,12 +6,13 @@ import uuid
 from datetime import timedelta
 from typing import Optional, Tuple
 
+from .az_key_vault_service import AzureKeyVaultService
+
 from ..constants.auth import Providers
 
 from ..models.user import MicrosoftUserInfo, Token, UserResponse, UserCreate, UserUpdate
 from ..exceptions import AuthenticationError
 from ..utils.logger import get_logger
-from ..utils.security import verify_token
 from ..settings import settings
 from .user_service import UserService
 from .microsoft_entra_oauth_service import MicrosoftEntraOAuthService
@@ -148,7 +149,7 @@ class AuthService:
     async def verify_access_token(self, token: str) -> Optional[UserResponse]:
         """Verify access token and return user if valid."""
         try:
-            payload = verify_token(token)
+            payload = AzureKeyVaultService.verify_token(token)
             if not payload:
                 return None
 
