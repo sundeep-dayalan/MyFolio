@@ -14,8 +14,11 @@ Clean Microsoft Entra ID implementation supporting both personal and organizatio
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from fastapi import FastAPI
-from .cloud_config import get_secret_manager
 from starlette.middleware.sessions import SessionMiddleware
+
+from .exceptions import AzureKeyVaultError
+
+from .services.az_key_vault_service import AzureKeyVaultService
 
 from .settings import settings
 from .database import cosmos_client
@@ -33,6 +36,35 @@ from .routers.config import router as plaid_config_router
 # Setup logging
 setup_logging()
 logger = get_logger(__name__)
+
+
+def get_session_secret() -> str:
+    """
+    Get session secret for middleware initialization.
+    """
+    try:
+        # Initialize a new Key Vault service instance specifically for this call
+        kv_service = AzureKeyVaultService()
+
+        import asyncio
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            # Use the instance method instead of static method
+            if kv_service.secret_manager_client:
+                secret = kv_service.secret_manager_client.get_secret(
+                    "session-secret-key"
+                )
+                logger.info("Session secret retrieved from Azure Key Vault")
+                return secret.value
+            else:
+                raise AzureKeyVaultError("Key Vault client not initialized")
+        finally:
+            loop.close()
+    except Exception as e:
+        logger.error(f"Failed to retrieve session secret from Azure Key Vault: {e}")
+        raise AzureKeyVaultError("Failed to retrieve session secret from Key Vault")
 
 
 @asynccontextmanager
@@ -93,10 +125,7 @@ def create_app() -> FastAPI:
     app.middleware("http")(rate_limiter)
 
     # Add session middleware for OAuth state management
-    secret_manager = get_secret_manager()
-    session_secret = secret_manager.get_secret(
-        "session-secret-key", default="fallback-dev-secret-key"
-    )
+    session_secret = get_session_secret()
     app.add_middleware(
         SessionMiddleware,
         secret_key=session_secret,

@@ -1,54 +1,122 @@
 """
-JWT key service for Azure Key Vault-based JWT operations.
+Azure Key Vault cryptographic service for encryption and decryption operations.
+Provides reusable utilities for secure data handling using Azure Key Vault.
 """
 
+from azure.keyvault.keys.crypto import CryptographyClient, EncryptionAlgorithm, SignatureAlgorithm
+from azure.identity import DefaultAzureCredential
 from typing import Optional
 from datetime import datetime, timedelta
 import base64
 import json
 import hashlib
-from azure.keyvault.keys.crypto import CryptographyClient, SignatureAlgorithm
-from azure.identity import DefaultAzureCredential
-from jose import jwt, JWTError
 
+from ..constants.security import Security
+from ..exceptions import AzureKeyVaultError
 from ..settings import settings
 from ..utils.logger import get_logger
+from azure.keyvault.secrets import SecretClient
 
 logger = get_logger(__name__)
 
 
-class JwtKeyService:
-    """Service for JWT operations using Azure Key Vault cryptographic keys."""
+class AzureKeyVaultService:
+    """Service for Azure Key Vault-based encryption and decryption operations."""
 
     def __init__(self):
+        """
+        Initialize the Azure Key Vault crypto client.
+
+        """
         self.key_vault_url = settings.key_vault_url
         self.crypto_client = None
+        self.secret_manager_client = None
 
         if self.key_vault_url:
             try:
                 credential = DefaultAzureCredential()
                 self.crypto_client = CryptographyClient(
-                    f"{self.key_vault_url}/keys/secrets-encryption-key", credential
+                    f"{self.key_vault_url}/keys/{Security.SECRETS_ENCRYPTION_KEY}",
+                    credential,
+                )
+                logger.info(f"Azure Key Vault crypto client initialized successfully.")
+                self.secret_manager_client = SecretClient(
+                    vault_url=self.key_vault_url, credential=credential
                 )
                 logger.info(
-                    "Azure Key Vault JWT crypto client initialized successfully"
+                    f"Azure Key Vault secret manager client initialized successfully."
                 )
             except Exception as e:
-                logger.error(f"Failed to initialize JWT Key Vault client: {e}")
-                raise RuntimeError(f"Key Vault initialization failed: {e}")
-        else:
-            logger.error(
-                "Key Vault URL not configured. JWT operations require Key Vault."
-            )
-            raise RuntimeError("KEY_VAULT_URL environment variable is required.")
+                logger.warning(
+                    f"Failed to initialize Key Vault client for key {Security.SECRETS_ENCRYPTION_KEY}: {e}. Using development mode."
+                )
+                raise AzureKeyVaultError(
+                    "Failed to initialize Key Vault client for cryptography"
+                )
 
+        else:
+            logger.warning("Key Vault url is not configured.")
+            raise AzureKeyVaultError("Key Vault URL is not configured")
+
+    @staticmethod
+    async def encrypt_secret(secret: str) -> str:
+        """Encrypt secret using Azure Key Vault."""
+        # Use the global instance for static method
+        instance = get_azure_key_vault_service()
+        if not instance.crypto_client:
+            raise AzureKeyVaultError("Key Vault crypto client not available for encryption")
+
+        try:
+            # Encrypt using Key Vault cryptographic operation
+            result = instance.crypto_client.encrypt(
+                EncryptionAlgorithm.rsa_oaep, secret.encode()
+            )
+            # Return base64 encoded ciphertext
+            return base64.b64encode(result.ciphertext).decode()
+        except Exception as e:
+            logger.error(f"Failed to encrypt secret: {e}")
+            raise AzureKeyVaultError(f"Failed to encrypt secret: {e}")
+
+    @staticmethod
+    async def decrypt_secret(encrypted_secret: str) -> str:
+        """Decrypt secret using Azure Key Vault."""
+        # Use the global instance for static method
+        instance = get_azure_key_vault_service()
+        if not instance.crypto_client:
+            raise AzureKeyVaultError("Key Vault crypto client not available for decryption")
+
+        try:
+            # Decode base64 and decrypt using Key Vault
+            ciphertext = base64.b64decode(encrypted_secret.encode())
+            result = instance.crypto_client.decrypt(
+                EncryptionAlgorithm.rsa_oaep, ciphertext
+            )
+            return result.plaintext.decode()
+        except Exception as e:
+            logger.error(f"Failed to decrypt secret: {e}")
+            raise AzureKeyVaultError(f"Failed to decrypt secret: {e}")
+
+    @staticmethod
+    async def get_secret(secret_name: str) -> Optional[str]:
+        instance = get_azure_key_vault_service()
+        if not instance.secret_manager_client:
+            raise AzureKeyVaultError("Key Vault secret manager client not available")
+            
+        try:
+            secret = instance.secret_manager_client.get_secret(secret_name)
+            return secret.value
+        except Exception as e:
+            raise AzureKeyVaultError(f"Failed to retrieve secret '{secret_name}' from Key Vault: {e}")
+
+    @staticmethod
     def create_access_token(
-        self, data: dict, expires_delta: Optional[timedelta] = None
+        data: dict, expires_delta: Optional[timedelta] = None
     ) -> str:
         """Create a JWT access token using Key Vault."""
-        if not self.crypto_client:
-            raise RuntimeError(
-                "Key Vault not configured. JWT operations require Key Vault."
+        instance = get_azure_key_vault_service()
+        if not instance.crypto_client:
+            raise AzureKeyVaultError(
+                "Key Vault crypto client not available for JWT token creation"
             )
 
         to_encode = data.copy()
@@ -60,14 +128,18 @@ class JwtKeyService:
             )
 
         to_encode.update({"exp": expire})
-        return self._create_token_with_keyvault(to_encode)
+        try:
+            return instance._create_token_with_keyvault(to_encode)
+        except Exception as e:
+            raise AzureKeyVaultError(f"Failed to create JWT token: {e}")
 
-    def verify_token(self, token: str) -> Optional[dict]:
+    @staticmethod
+    def verify_token(token: str) -> Optional[dict]:
         """Verify and decode a JWT token using Key Vault only."""
-        if not self.crypto_client:
-            logger.error("Key Vault crypto client not available for token verification")
-            raise RuntimeError(
-                "Key Vault not configured. JWT operations require Key Vault."
+        instance = get_azure_key_vault_service()
+        if not instance.crypto_client:
+            raise AzureKeyVaultError(
+                "Key Vault crypto client not available for token verification"
             )
 
         try:
@@ -88,7 +160,7 @@ class JwtKeyService:
                     )
                     return None
 
-                result = self._verify_token_with_keyvault(token)
+                result = instance._verify_token_with_keyvault(token)
                 logger.debug(
                     f"Token verification result: {'SUCCESS' if result else 'FAILED'}"
                 )
@@ -100,7 +172,7 @@ class JwtKeyService:
                 return None
         except Exception as e:
             logger.error(f"Token verification failed: {e}")
-            return None
+            raise AzureKeyVaultError(f"JWT token verification failed: {e}")
 
     def _create_token_with_keyvault(self, payload: dict) -> str:
         """Create JWT token using Key Vault RSA signing."""
@@ -187,7 +259,16 @@ class JwtKeyService:
 
         except Exception as e:
             logger.error(f"JWT verification error: {e}")
-            return None
+            raise AzureKeyVaultError(f"JWT token verification error: {e}")
 
 
-key_vault_service = JwtKeyService()
+# Global service instance - lazy initialization
+azure_key_vault_crypto_service = None
+
+
+def get_azure_key_vault_service():
+    """Get or create the global Azure Key Vault service instance."""
+    global azure_key_vault_crypto_service
+    if azure_key_vault_crypto_service is None:
+        azure_key_vault_crypto_service = AzureKeyVaultService()
+    return azure_key_vault_crypto_service

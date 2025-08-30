@@ -32,8 +32,8 @@ import base64
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-from ..services.azure_key_vault_crypto_service import (
-    AzureKeyVaultCryptoService,
+from .az_key_vault_service import (
+    AzureKeyVaultService,
 )
 
 from ..settings import settings
@@ -435,9 +435,7 @@ class PlaidService:
                 raise Exception("CosmosDB connection required for bank data storage")
 
             # Encrypt the access token
-            encrypted_token = await AzureKeyVaultCryptoService.encrypt_secret(
-                access_token
-            )
+            encrypted_token = await AzureKeyVaultService.encrypt_secret(access_token)
 
             # Prepare timestamps
             now = datetime.now(timezone.utc)
@@ -620,7 +618,7 @@ class PlaidService:
 
             for token in tokens:
                 try:
-                    decrypted_token = await AzureKeyVaultCryptoService.decrypt_secret(
+                    decrypted_token = await AzureKeyVaultService.decrypt_secret(
                         token.plaidData["encryptedAccessToken"]
                     )
                     if account_ids:
@@ -821,7 +819,7 @@ class PlaidService:
                 return False
 
             # Revoke with Plaid API
-            decrypted_token = await AzureKeyVaultCryptoService.decrypt_secret(
+            decrypted_token = await AzureKeyVaultService.decrypt_secret(
                 token_to_revoke.plaidData["encryptedAccessToken"]
             )
             request = ItemRemoveRequest(access_token=decrypted_token)
@@ -1069,7 +1067,7 @@ class PlaidService:
                 raise Exception(f"No token found for item {item_id}")
 
             # Decrypt token
-            access_token = await AzureKeyVaultCryptoService.decrypt_secret(
+            access_token = await AzureKeyVaultService.decrypt_secret(
                 target_token.plaidData["encryptedAccessToken"]
             )
 
@@ -1162,7 +1160,7 @@ class PlaidService:
             transaction_storage_service.clear_item_transactions(user_id, item_id)
 
             # Decrypt token
-            access_token = await AzureKeyVaultCryptoService.decrypt_secret(
+            access_token = await AzureKeyVaultService.decrypt_secret(
                 target_token.plaidData["encryptedAccessToken"]
             )
 
@@ -1300,7 +1298,7 @@ class PlaidService:
             logger.info(f"✅ Found target token for item {item_id}")
 
             # Decrypt the access token
-            access_token = await AzureKeyVaultCryptoService.decrypt_secret(
+            access_token = await AzureKeyVaultService.decrypt_secret(
                 target_token.plaidData["encryptedAccessToken"]
             )
             logger.info(f"✅ Successfully decrypted access token for item {item_id}")

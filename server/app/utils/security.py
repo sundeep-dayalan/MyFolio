@@ -8,16 +8,16 @@ from typing import Optional
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     """Create a JWT access token."""
-    from ..services.jwt_key_service import key_vault_service
+    from ..services.az_key_vault_service import AzureKeyVaultService
 
-    return key_vault_service.create_access_token(data, expires_delta)
+    return AzureKeyVaultService.create_access_token(data, expires_delta)
 
 
 def verify_token(token: str) -> Optional[dict]:
     """Verify and decode a JWT token."""
-    from ..services.jwt_key_service import key_vault_service
+    from ..services.az_key_vault_service import AzureKeyVaultService
 
-    return key_vault_service.verify_token(token)
+    return AzureKeyVaultService.verify_token(token)
 
 
 def sanitize_input(input_string: str) -> str:

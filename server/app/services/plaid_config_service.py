@@ -36,7 +36,7 @@ from ..constants import (
     Security,
 )
 from plaid.configuration import Environment
-from ..services.azure_key_vault_crypto_service import AzureKeyVaultCryptoService
+from .az_key_vault_service import AzureKeyVaultService
 from plaid.model.link_token_create_request import (
     LinkTokenCreateRequest,
 )
@@ -231,7 +231,7 @@ class PlaidConfigurationService:
                 pass  # Not found, safe to create
 
             # Encrypt the secret using Key Vault
-            encrypted_secret = await AzureKeyVaultCryptoService.encrypt_secret(
+            encrypted_secret = await AzureKeyVaultService.encrypt_secret(
                 config.plaid_secret
             )
 
@@ -348,7 +348,7 @@ class PlaidConfigurationService:
                     return None
 
                 # Decrypt secret using Key Vault
-                decrypted_secret = await AzureKeyVaultCryptoService.decrypt_secret(
+                decrypted_secret = await AzureKeyVaultService.decrypt_secret(
                     encrypted_secret
                 )
 
