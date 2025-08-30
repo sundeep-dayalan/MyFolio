@@ -68,52 +68,6 @@ from ..constants import (
 logger = get_logger(__name__)
 
 
-class TokenEncryption:
-    """Utility class for encrypting/decrypting sensitive tokens."""
-
-    @staticmethod
-    def _get_key() -> bytes:
-        """Generate or retrieve encryption key from settings."""
-        # In production, this should be from environment variable or key management service
-        password = getattr(
-            settings, "token_encryption_key", "default-key-change-in-production"
-        ).encode()
-        salt = b"plaid_tokens_salt"  # In production, use a random salt per token
-        kdf = PBKDF2HMAC(
-            algorithm=hashes.SHA256(),
-            length=32,
-            salt=salt,
-            iterations=100000,
-        )
-        key = base64.urlsafe_b64encode(kdf.derive(password))
-        return key
-
-    @staticmethod
-    def encrypt_token(token: str) -> str:
-        """Encrypt a token for secure storage."""
-        try:
-            # f = Fernet(TokenEncryption._get_key())
-            # encrypted_token = f.encrypt(token.encode())
-            # return base64.urlsafe_b64encode(encrypted_token).decode()
-            return token  # For now removing encrpytion and decrypt
-        except Exception as e:
-            logger.error(f"Failed to encrypt token: {e}")
-            raise Exception("Token encryption failed")
-
-    @staticmethod
-    def decrypt_token(encrypted_token: str) -> str:
-        """Decrypt a token for use."""
-        try:
-            # f = Fernet(TokenEncryption._get_key())
-            # decoded_token = base64.urlsafe_b64decode(encrypted_token.encode())
-            # decrypted_token = f.decrypt(decoded_token)
-            # return decrypted_token.decode()
-            return encrypted_token  # For now removing encrpytion and decrypt
-        except Exception as e:
-            logger.error(f"Failed to decrypt token: {e}")
-            raise Exception("Token decryption failed")
-
-
 class PlaidService:
     """Production-ready service for interacting with the Plaid API with dynamic credentials."""
 
