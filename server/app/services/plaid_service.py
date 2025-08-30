@@ -36,7 +36,7 @@ from ..services.azure_key_vault_crypto_service import (
     AzureKeyVaultCryptoService,
 )
 
-from ..config import settings
+from ..settings import settings
 from ..database import cosmos_client
 from ..utils.logger import get_logger
 from ..models.plaid import (
@@ -435,7 +435,9 @@ class PlaidService:
                 raise Exception("CosmosDB connection required for bank data storage")
 
             # Encrypt the access token
-            encrypted_token = await AzureKeyVaultCryptoService.encrypt_secret(access_token)
+            encrypted_token = await AzureKeyVaultCryptoService.encrypt_secret(
+                access_token
+            )
 
             # Prepare timestamps
             now = datetime.now(timezone.utc)

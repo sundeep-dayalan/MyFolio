@@ -6,7 +6,7 @@ Provides reusable utilities for secure data handling using Azure Key Vault.
 from azure.keyvault.keys.crypto import CryptographyClient, EncryptionAlgorithm
 from azure.identity import DefaultAzureCredential
 
-from ..config import settings
+from ..settings import settings
 from ..utils.logger import get_logger
 
 logger = get_logger(__name__)

@@ -1,6 +1,7 @@
 """
 Error handling middleware.
 """
+
 import traceback
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
@@ -9,7 +10,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from ..exceptions import BaseCustomException
 from ..utils.logger import get_logger
-from ..config import settings
+from ..settings import settings
 
 logger = get_logger(__name__)
 

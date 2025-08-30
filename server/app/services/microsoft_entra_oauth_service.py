@@ -1,6 +1,7 @@
 """
 Microsoft Entra ID OAuth service for secure server-side authentication.
 """
+
 import secrets
 from datetime import timedelta
 from typing import Optional, Dict, Any, Tuple
@@ -8,7 +9,7 @@ from urllib.parse import urlencode
 import httpx
 import jwt
 
-from ..config import settings
+from ..settings import settings
 from ..models.user import MicrosoftUserInfo, UserResponse, Token
 from ..exceptions import AuthenticationError
 from ..utils.logger import get_logger
@@ -21,19 +22,17 @@ class MicrosoftEntraOAuthService:
     """Microsoft Entra ID OAuth service for secure authentication."""
 
     def __init__(self):
-        self.client_id = getattr(settings, 'azure_client_id', None)
-        self.client_secret = getattr(settings, 'azure_client_secret', None)
-        self.tenant_id = getattr(settings, 'azure_tenant_id', None)
-        self.redirect_uri = getattr(settings, 'azure_redirect_uri', 
-                                   f"http://localhost:8000/api/v1/auth/oauth/microsoft/callback")
-        
+        self.client_id = getattr(settings, "azure_client_id", None)
+        self.client_secret = getattr(settings, "azure_client_secret", None)
+        self.tenant_id = getattr(settings, "azure_tenant_id", None)
+        self.redirect_uri = getattr(
+            settings,
+            "azure_redirect_uri",
+            f"http://localhost:8000/api/v1/auth/oauth/microsoft/callback",
+        )
+
         # Microsoft Graph scopes for user profile information
-        self.scopes = [
-            "openid",
-            "profile", 
-            "email",
-            "User.Read"
-        ]
+        self.scopes = ["openid", "profile", "email", "User.Read"]
 
         # Microsoft Entra ID endpoints (supports both organizational and personal accounts)
         self.authority = "https://login.microsoftonline.com/common"
@@ -64,7 +63,9 @@ class MicrosoftEntraOAuthService:
 
         return auth_url, state
 
-    async def exchange_code_for_tokens(self, code: str, state: Optional[str] = None) -> Dict[str, Any]:
+    async def exchange_code_for_tokens(
+        self, code: str, state: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
         Exchange authorization code for access tokens.
         """
@@ -107,8 +108,8 @@ class MicrosoftEntraOAuthService:
             # Decode JWT without verification (not recommended for production)
             # In production, verify with Microsoft's public keys
             decoded_token = jwt.decode(
-                id_token_str, 
-                options={"verify_signature": False}  # Not secure - for demo only
+                id_token_str,
+                options={"verify_signature": False},  # Not secure - for demo only
             )
 
             # Extract user information from ID token
@@ -116,7 +117,8 @@ class MicrosoftEntraOAuthService:
                 oid=decoded_token.get("oid"),
                 sub=decoded_token.get("sub"),
                 tid=decoded_token.get("tid"),
-                email=decoded_token.get("email") or decoded_token.get("preferred_username"),
+                email=decoded_token.get("email")
+                or decoded_token.get("preferred_username"),
                 name=decoded_token.get("name", ""),
                 given_name=decoded_token.get("given_name"),
                 family_name=decoded_token.get("family_name"),
@@ -152,7 +154,9 @@ class MicrosoftEntraOAuthService:
                     raise AuthenticationError("Failed to get user information")
 
                 user_data = response.json()
-                logger.info(f"Retrieved user info for: {user_data.get('mail', user_data.get('userPrincipalName'))}")
+                logger.info(
+                    f"Retrieved user info for: {user_data.get('mail', user_data.get('userPrincipalName'))}"
+                )
                 return user_data
 
         except Exception as e:

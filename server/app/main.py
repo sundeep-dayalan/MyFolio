@@ -17,7 +17,7 @@ from fastapi import FastAPI
 from .cloud_config import get_secret_manager
 from starlette.middleware.sessions import SessionMiddleware
 
-from .config import settings
+from .settings import settings
 from .database import cosmos_client
 from .middleware import (
     add_cors_middleware,

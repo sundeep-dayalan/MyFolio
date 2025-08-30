@@ -11,7 +11,7 @@ from azure.keyvault.keys.crypto import CryptographyClient, SignatureAlgorithm
 from azure.identity import DefaultAzureCredential
 from jose import jwt, JWTError
 
-from ..config import settings
+from ..settings import settings
 from ..utils.logger import get_logger
 
 logger = get_logger(__name__)

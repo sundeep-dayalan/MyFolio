@@ -14,7 +14,7 @@ from ..exceptions import AuthenticationError, ValidationError
 from ..utils.logger import get_logger
 from ..constants import ApiRoutes, ApiTags
 from ..database import cosmos_client
-from ..config import settings
+from ..settings import settings
 
 logger = get_logger(__name__)
 router = APIRouter(prefix=ApiRoutes.AUTH_PREFIX, tags=[ApiTags.MICROSOFT_OAUTH])
