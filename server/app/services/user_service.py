@@ -94,7 +94,7 @@ class UserService:
             logger.error(f"Error getting user {user_id}: {str(e)}")
             raise DatabaseError(f"Failed to get user: {str(e)}")
 
-    async def get_user_by_email_provider(
+    async def get_user_by_email_and_auth_provider(
         self, email: str, provider: str, provider_user_id: str
     ) -> Optional[UserResponse]:
         """Get user by combination of email, auth provider, and provider user id.

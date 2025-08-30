@@ -32,8 +32,11 @@ import base64
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from .az_key_vault_service import (
+    AzureKeyVaultService,
+)
 
-from ..config import settings
+from ..settings import settings
 from ..database import cosmos_client
 from ..utils.logger import get_logger
 from ..models.plaid import (
@@ -65,64 +68,18 @@ from ..constants import (
 logger = get_logger(__name__)
 
 
-class TokenEncryption:
-    """Utility class for encrypting/decrypting sensitive tokens."""
-
-    @staticmethod
-    def _get_key() -> bytes:
-        """Generate or retrieve encryption key from settings."""
-        # In production, this should be from environment variable or key management service
-        password = getattr(
-            settings, "token_encryption_key", "default-key-change-in-production"
-        ).encode()
-        salt = b"plaid_tokens_salt"  # In production, use a random salt per token
-        kdf = PBKDF2HMAC(
-            algorithm=hashes.SHA256(),
-            length=32,
-            salt=salt,
-            iterations=100000,
-        )
-        key = base64.urlsafe_b64encode(kdf.derive(password))
-        return key
-
-    @staticmethod
-    def encrypt_token(token: str) -> str:
-        """Encrypt a token for secure storage."""
-        try:
-            # f = Fernet(TokenEncryption._get_key())
-            # encrypted_token = f.encrypt(token.encode())
-            # return base64.urlsafe_b64encode(encrypted_token).decode()
-            return token  # For now removing encrpytion and decrypt
-        except Exception as e:
-            logger.error(f"Failed to encrypt token: {e}")
-            raise Exception("Token encryption failed")
-
-    @staticmethod
-    def decrypt_token(encrypted_token: str) -> str:
-        """Decrypt a token for use."""
-        try:
-            # f = Fernet(TokenEncryption._get_key())
-            # decoded_token = base64.urlsafe_b64decode(encrypted_token.encode())
-            # decrypted_token = f.decrypt(decoded_token)
-            # return decrypted_token.decode()
-            return encrypted_token  # For now removing encrpytion and decrypt
-        except Exception as e:
-            logger.error(f"Failed to decrypt token: {e}")
-            raise Exception("Token decryption failed")
-
-
 class PlaidService:
     """Production-ready service for interacting with the Plaid API with dynamic credentials."""
 
     def __init__(self):
         # Environment will be determined dynamically from stored configuration
-        self._client = None
-        self._client_initialized = False
+        self._clients = {}  # user_id -> client
+        self._clients_initialized = {}  # user_id -> bool
 
     async def _get_client(self, user_id: str) -> plaid_api.PlaidApi:
         """Get Plaid client with dynamic credentials (Just-In-Time initialization)."""
-        if self._client and self._client_initialized:
-            return self._client
+        if user_id in self._clients and self._clients_initialized.get(user_id, False):
+            return self._clients[user_id]
 
         # Get credentials and environment from secure storage
         credentials = await plaid_config_service.get_decrypted_credentials(user_id)
@@ -156,18 +113,22 @@ class PlaidService:
             },
         )
         api_client = ApiClient(config)
-        self._client = plaid_api.PlaidApi(api_client)
-        self._client_initialized = True
+        client = plaid_api.PlaidApi(api_client)
+        self._clients[user_id] = client
+        self._clients_initialized[user_id] = True
 
         logger.info(
-            f"Plaid client initialized with dynamic credentials for {environment} environment"
+            f"Plaid client initialized with dynamic credentials for {environment} environment for user {user_id}"
         )
-        return self._client
+        return client
 
-    def _reset_client(self):
-        """Reset client to force re-initialization with fresh credentials."""
-        self._client = None
-        self._client_initialized = False
+    def reset_client(self, user_id: str):
+        """Reset client for specific user to force re-initialization with fresh credentials."""
+        if user_id in self._clients:
+            del self._clients[user_id]
+        if user_id in self._clients_initialized:
+            del self._clients_initialized[user_id]
+        logger.info(f"Plaid client reset for user {user_id} - will reinitialize on next use")
 
     async def create_link_token(
         self,
@@ -280,14 +241,14 @@ class PlaidService:
             )
 
             # Store the access token
-            stored_token = self._store_access_token(
+            stored_token = await self._store_access_token(
                 user_id, access_token, item_id, institution_info
             )
 
             # Immediately sync account data so accounts are available right away
             try:
                 logger.info(f"🔄 Syncing account data immediately for item {item_id}")
-                await self.get_accounts_with_balances(user_id, use_cached_balance=False)
+                await self.get_accounts_with_balances(user_id, use_cached_db_data=False)
                 logger.info(f"✅ Account data synced successfully for item {item_id}")
             except Exception as e:
                 logger.error(f"❌ Failed to sync account data for item {item_id}: {e}")
@@ -415,7 +376,7 @@ class PlaidService:
             # Return string representation as fallback
             return str(obj)
 
-    def _store_access_token(
+    async def _store_access_token(
         self,
         user_id: str,
         access_token: str,
@@ -432,7 +393,7 @@ class PlaidService:
                 raise Exception("CosmosDB connection required for bank data storage")
 
             # Encrypt the access token
-            encrypted_token = TokenEncryption.encrypt_token(access_token)
+            encrypted_token = await AzureKeyVaultService.encrypt_secret(access_token)
 
             # Prepare timestamps
             now = datetime.now(timezone.utc)
@@ -489,7 +450,7 @@ class PlaidService:
                     "lastSync": {"status": "pending", "timestamp": None, "error": None},
                 },
                 plaidData={
-                    "accessToken": encrypted_token,
+                    "encryptedAccessToken": encrypted_token,
                     "itemId": item_id,
                     "institutionId": institution_info.get("institution_id"),
                     "institutionName": institution_info.get("name"),
@@ -572,18 +533,18 @@ class PlaidService:
         self,
         user_id: str,
         account_ids: Optional[List[str]] = None,
-        use_cached_balance: bool = True,
+        use_cached_db_data: bool = True,
     ) -> Dict[str, Any]:
         """
-        If use_cached_balance is True, fetch account data from bank documents.
-        If use_cached_balance is False, fetch from Plaid API and update bank documents.
+        If use_cached_db_data is True, fetch account data from bank documents.
+        If use_cached_db_data is False, fetch from Plaid API and update bank documents.
         """
         try:
             logger.info(
-                f"Getting accounts with balances for user {user_id}, use_cached_balance={use_cached_balance}"
+                f"Getting accounts with balances for user {user_id}, use_cached_db_data={use_cached_db_data}"
             )
 
-            if use_cached_balance:
+            if use_cached_db_data:
                 # Fetch from bank documents
                 cached_data = self._get_cached_accounts_from_banks(user_id)
                 if cached_data and cached_data["accounts"]:
@@ -615,8 +576,8 @@ class PlaidService:
 
             for token in tokens:
                 try:
-                    decrypted_token = TokenEncryption.decrypt_token(
-                        token.plaidData["accessToken"]
+                    decrypted_token = await AzureKeyVaultService.decrypt_secret(
+                        token.plaidData["encryptedAccessToken"]
                     )
                     if account_ids:
                         options = AccountsBalanceGetRequestOptions(
@@ -816,8 +777,8 @@ class PlaidService:
                 return False
 
             # Revoke with Plaid API
-            decrypted_token = TokenEncryption.decrypt_token(
-                token_to_revoke.plaidData["accessToken"]
+            decrypted_token = await AzureKeyVaultService.decrypt_secret(
+                token_to_revoke.plaidData["encryptedAccessToken"]
             )
             request = ItemRemoveRequest(access_token=decrypted_token)
 
@@ -1064,8 +1025,8 @@ class PlaidService:
                 raise Exception(f"No token found for item {item_id}")
 
             # Decrypt token
-            access_token = TokenEncryption.decrypt_token(
-                target_token.plaidData["accessToken"]
+            access_token = await AzureKeyVaultService.decrypt_secret(
+                target_token.plaidData["encryptedAccessToken"]
             )
 
             # Get cursor from last sync
@@ -1157,8 +1118,8 @@ class PlaidService:
             transaction_storage_service.clear_item_transactions(user_id, item_id)
 
             # Decrypt token
-            access_token = TokenEncryption.decrypt_token(
-                target_token.plaidData["accessToken"]
+            access_token = await AzureKeyVaultService.decrypt_secret(
+                target_token.plaidData["encryptedAccessToken"]
             )
 
             # Perform complete resync
@@ -1295,8 +1256,8 @@ class PlaidService:
             logger.info(f"✅ Found target token for item {item_id}")
 
             # Decrypt the access token
-            access_token = TokenEncryption.decrypt_token(
-                target_token.plaidData["accessToken"]
+            access_token = await AzureKeyVaultService.decrypt_secret(
+                target_token.plaidData["encryptedAccessToken"]
             )
             logger.info(f"✅ Successfully decrypted access token for item {item_id}")
 

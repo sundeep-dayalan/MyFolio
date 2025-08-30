@@ -1,12 +1,12 @@
-import './index.css';
-import App from './App.tsx';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { BrowserRouter } from 'react-router-dom';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { AuthProvider } from './context/AuthContext.tsx';
+import { BrowserRouter } from 'react-router-dom';
+import App from './App.tsx';
 import { ThemeProvider } from './components/theme-provider.tsx';
 import { initializeLogging } from './config/logging';
+import { AuthProvider } from './context/AuthContext.tsx';
+import './index.css';
 
 // Initialize logging
 initializeLogging();
@@ -32,7 +32,7 @@ root.render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <ThemeProvider defaultTheme="system" storageKey="myfolio-ui-theme">
+        <ThemeProvider defaultTheme="light" storageKey="myfolio-ui-theme">
           <AuthProvider>
             <App />
           </AuthProvider>

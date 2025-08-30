@@ -7,7 +7,7 @@ from typing import Optional
 from azure.cosmos import CosmosClient, DatabaseProxy, ContainerProxy
 from azure.cosmos.exceptions import CosmosResourceNotFoundError, CosmosHttpResponseError
 
-from .config import settings
+from .settings import settings
 from .constants import Containers
 
 logger = logging.getLogger(__name__)

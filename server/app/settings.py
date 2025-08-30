@@ -8,8 +8,6 @@ from typing import Optional
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
 
-from .cloud_config import get_secret_manager
-
 
 class Settings(BaseSettings):
     """Application settings."""

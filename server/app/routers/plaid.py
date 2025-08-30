@@ -114,7 +114,7 @@ async def get_accounts(
     """Fetch all account balances for the current user from Cosmos DB only (never hits Plaid API)."""
     try:
         result = await plaid_service.get_accounts_with_balances(
-            user_id, use_cached_balance=True
+            user_id, use_cached_db_data=True
         )
         return result
     except Exception as e:
@@ -133,7 +133,7 @@ async def refresh_accounts(
     """Force refresh account balances from Plaid API, update Cosmos DB, and return latest."""
     try:
         result = await plaid_service.get_accounts_with_balances(
-            user_id, use_cached_balance=False
+            user_id, use_cached_db_data=False
         )
         return result
     except Exception as e:

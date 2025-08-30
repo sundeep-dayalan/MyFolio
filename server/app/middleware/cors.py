@@ -1,9 +1,10 @@
 """
 CORS middleware configuration.
 """
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from ..config import settings
+from ..settings import settings
 
 
 def add_cors_middleware(app: FastAPI) -> None:

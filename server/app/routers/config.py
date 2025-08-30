@@ -6,7 +6,7 @@ from typing import Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
-from ..models.plaid_config import (
+from ..models.config import (
     PlaidConfigurationCreate,
     PlaidConfigurationResponse,
     PlaidValidationResult,
@@ -23,7 +23,9 @@ from ..constants import ApiRoutes, ApiTags
 logger = get_logger(__name__)
 security = HTTPBearer()
 
-router = APIRouter(prefix=ApiRoutes.CONFIGURATION_PREFIX, tags=[ApiTags.PLAID_CONFIGURATION])
+router = APIRouter(
+    prefix=ApiRoutes.CONFIGURATION_PREFIX, tags=[ApiTags.PLAID_CONFIGURATION]
+)
 
 
 @router.post("/plaid", response_model=PlaidConfigurationResponse)
@@ -59,6 +61,10 @@ async def store_plaid_configuration(
         result = await plaid_config_service.store_configuration(
             config=config, admin_user_id=current_user.id
         )
+
+        # Reset Plaid client to use new credentials on next request
+        plaid_service = PlaidService()
+        plaid_service.reset_client(current_user.id)
 
         logger.info(f"Plaid configuration stored by user: {current_user.id}")
         return result
@@ -193,6 +199,9 @@ async def delete_plaid_configuration(
         success = await plaid_config_service.delete_configuration(
             admin_user_id=current_user.id
         )
+
+        # Reset Plaid client to clear cached credentials
+        plaid_service.reset_client(current_user.id)
 
         if success:
             logger.info(f"Plaid configuration deleted by user: {current_user.id}")

@@ -14,23 +14,11 @@ from ..exceptions import AuthenticationError, ValidationError
 from ..utils.logger import get_logger
 from ..constants import ApiRoutes, ApiTags
 from ..database import cosmos_client
-from ..config import settings
+from ..settings import settings
 
 logger = get_logger(__name__)
 router = APIRouter(prefix=ApiRoutes.AUTH_PREFIX, tags=[ApiTags.MICROSOFT_OAUTH])
 
-
-async def ensure_cosmos_connected():
-    """Ensure CosmosDB is connected, initializing if necessary."""
-    if not cosmos_client.is_connected:
-        logger.info("CosmosDB not connected, initializing...")
-        try:
-            await cosmos_client.connect()
-        except Exception as e:
-            logger.warning(
-                f"CosmosDB connection failed, continuing in offline mode: {str(e)}"
-            )
-            # Continue in offline mode - OAuth can still work without CosmosDB
 
 
 @router.get("")
@@ -44,9 +32,6 @@ async def microsoft_oauth_login(
     Redirects user to Microsoft's authorization server.
     """
     try:
-        # Ensure CosmosDB is connected
-        await ensure_cosmos_connected()
-
         # Initialize services
         user_service = UserService()
         auth_service = AuthService(user_service)
@@ -101,9 +86,6 @@ async def microsoft_oauth_callback(
             f"Processing Microsoft OAuth callback - code: {code[:10]}..., state: {state}"
         )
         logger.info(f"Frontend URL for redirect: '{settings.frontend_url}'")
-
-        # Ensure CosmosDB is connected
-        await ensure_cosmos_connected()
 
         # Initialize services
         user_service = UserService()

@@ -6,7 +6,7 @@ from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from .database import cosmos_client
-from .exceptions import DatabaseConnectionError, AuthenticationError
+from .exceptions import AuthenticationError
 from .services.user_service import UserService
 from .services.auth_service import AuthService
 
@@ -15,8 +15,6 @@ security = HTTPBearer(auto_error=False)
 
 async def get_cosmos_client():
     """Get CosmosDB client dependency."""
-    if not cosmos_client.is_connected:
-        raise DatabaseConnectionError("CosmosDB client not initialized")
     return cosmos_client
 
 
@@ -65,21 +63,6 @@ async def get_current_user(
         request.state.current_user = user
         return user
 
-    # Fallback to session-based authentication
-    session = request.session
-    if "user_id" in session:
-        # fetch user from DB once and cache
-        user = await auth_service.user_service.get_user_by_id(session["user_id"])
-        if not user:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid session user",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-
-        request.state.current_user = user
-        return user
-
     # If neither method works, raise authentication error
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -89,32 +72,39 @@ async def get_current_user(
 
 
 async def get_current_user_id(
-    current_user=Depends(get_current_user),
+    request: Request,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
 ) -> str:
-    """Get current user id by reusing the cached user object from get_current_user.
+    """Get current user id directly from JWT token without database lookup.
 
-    This function intentionally depends on `get_current_user` (resolved by FastAPI)
-    so that the user lookup is performed once per request and cached on
-    `request.state.current_user`.
+    This is optimized for cases where you only need the user ID and don't need
+    the full user object, avoiding unnecessary database calls.
     """
-    # FastAPI will inject the result of get_current_user here. If something
-    # else depends on get_current_user_id directly, get_current_user will run
-    # first and cache the user on request.state.
-    # We accept either a full user object or a dict-like with an 'id' key.
-    user = current_user
-    if not user:
-        # Defensive fallback: raise unauthorized if dependency didn't provide user
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication credentials required",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    # Check if we already have user_id cached from a previous get_current_user call
+    existing_user = getattr(request.state, "current_user", None)
+    if existing_user:
+        try:
+            return existing_user.id
+        except Exception:
+            return existing_user.get("id") if isinstance(existing_user, dict) else None
 
-    # user may be a pydantic model with attribute 'id' or a dict
-    try:
-        return user.id
-    except Exception:
-        return user.get("id") if isinstance(user, dict) else None
+    # If credentials are provided, extract user_id directly from token
+    if credentials:
+        try:
+            from .services.az_key_vault_service import AzureKeyVaultService
+
+            payload = AzureKeyVaultService.verify_token(credentials.credentials)
+            if payload and payload.get("sub"):
+                return payload.get("sub")
+        except Exception:
+            pass
+
+    # If no method works, raise authentication error
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Authentication credentials required",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
 
 
 # Convenience functions for getting services
