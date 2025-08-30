@@ -33,13 +33,21 @@ class AuthService:
         return str(uuid.uuid4())
 
     @staticmethod
-    def create_provider_metadata(provider: str, provider_user_id: str) -> dict:
+    def create_provider_metadata(
+        provider: str, provider_user_id: str, raw_user_data: dict = None
+    ) -> dict:
         """Create provider metadata for storing OAuth provider information."""
-        return {
+        metadata = {
             "auth_provider": provider,
             "provider_user_id": provider_user_id,
             "provider_data": {f"{provider}_id": provider_user_id},
         }
+
+        # Include raw user data if provided
+        if raw_user_data:
+            metadata["raw_user_data"] = raw_user_data
+
+        return metadata
 
     def generate_microsoft_auth_url(
         self, state: Optional[str] = None
@@ -57,6 +65,8 @@ class AuthService:
 
             # Verify ID token and get user info
             id_token = tokens.get("id_token")
+            graph_user_data = None  # Initialize to handle both ID token and Graph API flows
+            
             if not id_token:
                 # Fallback to access token to get user info from Graph API
                 access_token = tokens.get("access_token")
@@ -85,10 +95,23 @@ class AuthService:
                 microsoft_user_info = (
                     await self.microsoft_oauth.verify_and_get_user_info(id_token)
                 )
+                
+                # Even with ID token, get raw user data from Graph API for storage
+                access_token = tokens.get("access_token")
+                if access_token:
+                    try:
+                        graph_user_data = (
+                            await self.microsoft_oauth.get_user_info_from_access_token(
+                                access_token
+                            )
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to get Graph user data for storage: {e}")
+                        graph_user_data = None
 
             # Try to get user from database
             try:
-                user = await self.user_service.get_user_by_email_provider(
+                user = await self.user_service.get_user_by_email_and_auth_provider(
                     microsoft_user_info.email,
                     Providers.Microsoft,
                     microsoft_user_info.oid or microsoft_user_info.sub,
@@ -112,7 +135,7 @@ class AuthService:
 
                     # Update user with provider metadata
                     provider_metadata = self.create_provider_metadata(
-                        "microsoft", provider_user_id
+                        Providers.Microsoft, provider_user_id, graph_user_data
                     )
                     await self.user_service.update_user(
                         user.id, UserUpdate(metadata=provider_metadata)

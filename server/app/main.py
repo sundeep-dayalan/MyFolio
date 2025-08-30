@@ -77,13 +77,11 @@ async def lifespan(app: FastAPI):
     if settings.environment != "test":
         try:
             await cosmos_client.connect()
+            logger.info("CosmosDB connected successfully at startup")
             logger.info("Application startup complete")
-
         except Exception as e:
-            logger.warning(f"CosmosDB connection failed: {e}")
-            logger.info(
-                "Starting application in offline mode - some features may not work"
-            )
+            logger.error(f"Failed to connect to CosmosDB at startup: {e}")
+            raise e  # Fail fast - prevent app from starting if DB unavailable
     else:
         logger.info("Skipping CosmosDB connection in test environment")
 

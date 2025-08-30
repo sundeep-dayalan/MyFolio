@@ -6,7 +6,7 @@ from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from .database import cosmos_client
-from .exceptions import DatabaseConnectionError, AuthenticationError
+from .exceptions import AuthenticationError
 from .services.user_service import UserService
 from .services.auth_service import AuthService
 
@@ -15,8 +15,6 @@ security = HTTPBearer(auto_error=False)
 
 async def get_cosmos_client():
     """Get CosmosDB client dependency."""
-    if not cosmos_client.is_connected:
-        raise DatabaseConnectionError("CosmosDB client not initialized")
     return cosmos_client
 
 
