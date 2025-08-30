@@ -122,3 +122,33 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* View Transitions API for animated theme toggler */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+::view-transition-old(root) {
+  z-index: 1;
+}
+
+::view-transition-new(root) {
+  z-index: 2147483646;
+}
+
+[data-theme] {
+  view-transition-name: root;
+}
+
+::view-transition-new(root) {
+  clip-path: circle(0 at var(--x, 50%) var(--y, 50%));
+  animation: reveal 0.6s ease-out;
+}
+
+@keyframes reveal {
+  to {
+    clip-path: circle(var(--r, 50px) at var(--x, 50%) var(--y, 50%));
+  }
+}
