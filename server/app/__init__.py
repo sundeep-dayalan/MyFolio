@@ -10,18 +10,17 @@ A streamlined production-ready FastAPI application for financial management:
 Optimized for production with unused endpoints and code removed.
 """
 
-from .main import app
-
 import azure.functions as func
+from .main import create_app
+
+azure_app = create_app()
 
 
 async def main(req: func.HttpRequest, context: func.Context) -> func.HttpResponse:
-    return await func.AsgiMiddleware(app).handle_async(req, context)
+    return await func.AsgiMiddleware(azure_app).handle_async(req, context)
 
 
 __version__ = "2.0.0"
 __author__ = "Sage Team"
 
-from .main import app
-
-__all__ = ["app"]
+__all__ = ["azure_app", "main"]
