@@ -128,7 +128,9 @@ class PlaidService:
             del self._clients[user_id]
         if user_id in self._clients_initialized:
             del self._clients_initialized[user_id]
-        logger.info(f"Plaid client reset for user {user_id} - will reinitialize on next use")
+        logger.info(
+            f"Plaid client reset for user {user_id} - will reinitialize on next use"
+        )
 
     async def create_link_token(
         self,
@@ -252,7 +254,10 @@ class PlaidService:
                 logger.info(f"✅ Account data synced successfully for item {item_id}")
             except Exception as e:
                 logger.error(f"❌ Failed to sync account data for item {item_id}: {e}")
-                # Don't fail the entire exchange if account sync fails
+                # Re-raise the exception so connection fails if we can't get account data
+                raise Exception(
+                    f"Bank connection failed - unable to fetch account data: {str(e)}"
+                )
 
             # Start transaction sync in the background (non-blocking)
             try:
@@ -579,16 +584,24 @@ class PlaidService:
                     decrypted_token = await AzureKeyVaultService.decrypt_secret(
                         token.plaidData["encryptedAccessToken"]
                     )
+
+                    # Set it to 90 days ago to ensure we get acceptable balance data (Only applicable for Capital One)
+                    min_last_updated = datetime.now(timezone.utc) - timedelta(days=90)
+
                     if account_ids:
                         options = AccountsBalanceGetRequestOptions(
-                            account_ids=account_ids
+                            account_ids=account_ids,
+                            min_last_updated_datetime=min_last_updated,
                         )
                         request = AccountsBalanceGetRequest(
                             access_token=decrypted_token, options=options
                         )
                     else:
+                        options = AccountsBalanceGetRequestOptions(
+                            min_last_updated_datetime=min_last_updated
+                        )
                         request = AccountsBalanceGetRequest(
-                            access_token=decrypted_token
+                            access_token=decrypted_token, options=options
                         )
                     client = await self._get_client(user_id)
                     response = client.accounts_balance_get(request)
@@ -646,7 +659,9 @@ class PlaidService:
 
                 except Exception as e:
                     logger.error(f"Failed to get balances for token {token.id}: {e}")
-                    continue
+                    raise Exception(
+                        f"Failed to fetch account balances from Plaid: {str(e)}"
+                    )
 
             all_accounts.sort(key=lambda x: x["balances"]["current"] or 0, reverse=True)
             result = {
