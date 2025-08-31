@@ -35,6 +35,7 @@ from .routers.auth import router as microsoft_oauth_router
 from .utils.logger import setup_logging, get_logger
 from .routers.config import router as plaid_config_router
 import os
+from . import azure_app
 
 # Setup logging
 setup_logging()
@@ -45,21 +46,32 @@ def get_session_secret() -> str:
     """
     Get session secret for middleware initialization.
     """
-
     try:
+        # Try environment variable first (for Azure Functions configuration)
+        session_secret = os.getenv("SESSION_SECRET_KEY")
+        if session_secret:
+            logger.info("Using session secret from environment variable")
+            return session_secret
+
+        # If no environment variable, must use Key Vault
         kv_service = AzureKeyVaultService()
         if kv_service.secret_manager_client:
             secret = kv_service.secret_manager_client.get_secret(
                 Security.SESSION_SECRET_KEY
             )
+            logger.info("Session secret retrieved from Azure Key Vault")
+            return secret.value
         else:
-            logger.error("Key Vault client not initialized")
+            logger.error(
+                "Key Vault client not initialized and no SESSION_SECRET_KEY environment variable"
+            )
             raise AzureKeyVaultError("Key Vault client not initialized")
-        logger.info("Session secret retrieved from Azure Key Vault")
-        return secret.value
-    except Exception as kv_error:
-        logger.warning(f"Key Vault retrieval failed: {kv_error}")
-        raise AzureKeyVaultError("Failed to retrieve session secret from Key Vault")
+
+    except Exception as e:
+        logger.error(f"Failed to retrieve session secret: {e}")
+        raise AzureKeyVaultError(
+            "Failed to retrieve session secret - no fallbacks allowed for security"
+        )
 
 
 @asynccontextmanager
@@ -218,7 +230,7 @@ try:
                 elif settings.environment == "test":
                     logger.info("Skipping CosmosDB connection in test environment")
 
-            return await func.AsgiMiddleware(app).handle_async(req, context)
+            return await func.AsgiMiddleware(azure_app).handle_async(req, context)
 
         except Exception as e:
             logger.error(f"Critical error in Azure Function main handler: {e}")
