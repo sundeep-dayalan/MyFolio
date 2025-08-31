@@ -35,7 +35,6 @@ from .routers.auth import router as microsoft_oauth_router
 from .utils.logger import setup_logging, get_logger
 from .routers.config import router as plaid_config_router
 import os
-from . import azure_app
 
 # Setup logging
 setup_logging()
@@ -229,6 +228,9 @@ try:
                     logger.info("CosmosDB already connected")
                 elif settings.environment == "test":
                     logger.info("Skipping CosmosDB connection in test environment")
+
+            # Import azure_app from __init__.py to use the Azure Function specific app
+            from . import azure_app
 
             return await func.AsgiMiddleware(azure_app).handle_async(req, context)
 
