@@ -16,6 +16,8 @@ from datetime import datetime, timezone
 from fastapi import FastAPI
 from starlette.middleware.sessions import SessionMiddleware
 
+from .constants import Security
+
 from .exceptions import AzureKeyVaultError
 
 from .services.az_key_vault_service import AzureKeyVaultService
@@ -32,6 +34,7 @@ from .routers import plaid_router
 from .routers.auth import router as microsoft_oauth_router
 from .utils.logger import setup_logging, get_logger
 from .routers.config import router as plaid_config_router
+import os
 
 # Setup logging
 setup_logging()
@@ -42,28 +45,20 @@ def get_session_secret() -> str:
     """
     Get session secret for middleware initialization.
     """
+
     try:
-        # Initialize a new Key Vault service instance specifically for this call
         kv_service = AzureKeyVaultService()
-
-        import asyncio
-
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            # Use the instance method instead of static method
-            if kv_service.secret_manager_client:
-                secret = kv_service.secret_manager_client.get_secret(
-                    "session-secret-key"
-                )
-                logger.info("Session secret retrieved from Azure Key Vault")
-                return secret.value
-            else:
-                raise AzureKeyVaultError("Key Vault client not initialized")
-        finally:
-            loop.close()
-    except Exception as e:
-        logger.error(f"Failed to retrieve session secret from Azure Key Vault: {e}")
+        if kv_service.secret_manager_client:
+            secret = kv_service.secret_manager_client.get_secret(
+                Security.SESSION_SECRET_KEY
+            )
+        else:
+            logger.error("Key Vault client not initialized")
+            raise AzureKeyVaultError("Key Vault client not initialized")
+        logger.info("Session secret retrieved from Azure Key Vault")
+        return secret.value
+    except Exception as kv_error:
+        logger.warning(f"Key Vault retrieval failed: {kv_error}")
         raise AzureKeyVaultError("Failed to retrieve session secret from Key Vault")
 
 
@@ -103,15 +98,17 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     """Create and configure FastAPI application."""
 
-    app = FastAPI(
-        title=settings.project_name,
-        version=settings.version,
-        description="A comprehensive financial management API with portfolio tracking, transaction management, and financial analytics.",
-        docs_url="/docs",
-        redoc_url="/redoc",
-        openapi_url="/openapi.json",
-        lifespan=lifespan,
-    )
+    # For Azure Functions, disable lifespan to avoid startup issues
+    app_kwargs = {
+        "title": settings.project_name,
+        "version": settings.version,
+        "description": "....",
+        "docs_url": "/docs",
+        "redoc_url": "/redoc",
+        "openapi_url": "/openapi.json",
+        "lifespan": None,  # For Azure Functions
+    }
+    app = FastAPI(**app_kwargs)
 
     # Add middleware
     add_cors_middleware(app)
@@ -181,7 +178,7 @@ def create_app() -> FastAPI:
     return app
 
 
-# Create the app instance
+# Create the app instance (with lifespan for local development)
 app = create_app()
 
 # --- Azure Functions support ---
@@ -193,30 +190,44 @@ try:
         Azure Functions entry point for HTTP requests.
         Wraps the FastAPI app with ASGI middleware.
         """
-        # Ensure CosmosDB connection is established for Azure Functions
-        logger.info(f"Azure Function called - Environment: {settings.environment}")
-        logger.info(f"CosmosDB is_connected: {cosmos_client.is_connected}")
+        try:
+            # Ensure CosmosDB connection is established for Azure Functions
+            logger.info(f"Azure Function called - Environment: {settings.environment}")
+            logger.info(f"Request path: {req.url}")
+            logger.info(f"CosmosDB is_connected: {cosmos_client.is_connected}")
 
-        if not cosmos_client.is_connected and settings.environment != "test":
-            try:
-                logger.info(
-                    "Attempting to establish CosmosDB connection in Azure Function"
-                )
-                await cosmos_client.connect()
-                logger.info("CosmosDB connection established in Azure Function")
-            except Exception as e:
-                logger.error(f"CosmosDB connection failed in Azure Function: {e}")
-                logger.error(
-                    f"CosmosDB settings - Endpoint: {settings.cosmos_db_endpoint}"
-                )
-                logger.error(f"CosmosDB settings - DB Name: {settings.cosmos_db_name}")
-        else:
-            if cosmos_client.is_connected:
-                logger.info("CosmosDB already connected")
-            elif settings.environment == "test":
-                logger.info("Skipping CosmosDB connection in test environment")
+            if not cosmos_client.is_connected:
+                try:
+                    logger.info(
+                        "Attempting to establish CosmosDB connection in Azure Function"
+                    )
+                    await cosmos_client.connect()
+                    logger.info("CosmosDB connection established in Azure Function")
+                except Exception as e:
+                    logger.error(f"CosmosDB connection failed in Azure Function: {e}")
+                    logger.error(
+                        f"CosmosDB settings - Endpoint: {settings.cosmos_db_endpoint}"
+                    )
+                    logger.error(
+                        f"CosmosDB settings - DB Name: {settings.cosmos_db_name}"
+                    )
+                    # Continue even if DB connection fails - some endpoints might still work
+            else:
+                if cosmos_client.is_connected:
+                    logger.info("CosmosDB already connected")
+                elif settings.environment == "test":
+                    logger.info("Skipping CosmosDB connection in test environment")
 
-        return await func.AsgiMiddleware(app).handle_async(req, context)
+            return await func.AsgiMiddleware(app).handle_async(req, context)
+
+        except Exception as e:
+            logger.error(f"Critical error in Azure Function main handler: {e}")
+            # Return a proper HTTP error response instead of letting the function fail
+            return func.HttpResponse(
+                body=f"Internal server error: {str(e)}",
+                status_code=500,
+                headers={"Content-Type": "text/plain"},
+            )
 
 except ImportError:
     # Not running in Azure Functions, ignore

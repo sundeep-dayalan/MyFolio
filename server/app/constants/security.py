@@ -2,20 +2,13 @@
 Security-related constants.
 """
 
+
 # Encryption and Security
 class Security:
-    # Token encryption
-    TOKEN_SALT = b"plaid_tokens_salt"  # In production, use random salt per token
-    DEFAULT_ENCRYPTION_KEY = "default-key-change-in-production"
-    PBKDF2_ITERATIONS = 100000
-    
     # Key Vault
     SECRETS_ENCRYPTION_KEY = "secrets-encryption-key"
-    
-    # Development mode warnings
-    DEV_MODE_WARNING = "Using development mode encryption (base64) - NOT SECURE for production"
-    KEY_VAULT_NOT_CONFIGURED = "Key Vault not configured, storing secret in plain text (DEV ONLY)"
-    
+    SESSION_SECRET_KEY = "session-secret-key"
+
 
 # Configuration Messages
 class ConfigMessages:
@@ -23,7 +16,9 @@ class ConfigMessages:
         "Plaid credentials not configured. Admin must provide credentials via "
         "/api/v1/plaid/configuration endpoint."
     )
-    CONFIG_ALREADY_EXISTS = "Plaid configuration already exists. Delete before creating a new one."
+    CONFIG_ALREADY_EXISTS = (
+        "Plaid configuration already exists. Delete before creating a new one."
+    )
     CREDENTIALS_REQUIRED = "Client ID and secret are required"
     CREDENTIALS_TOO_SHORT = "Client ID and secret appear to be too short"
     ENVIRONMENT_REQUIRED = "Environment must be either 'sandbox' or 'production'"
@@ -31,7 +26,7 @@ class ConfigMessages:
     CREDENTIALS_VALIDATED = "Credentials validated successfully with Plaid API"
 
 
-# Error Messages  
+# Error Messages
 class ErrorMessages:
     FAILED_TO_ENCRYPT = "Failed to encrypt secret"
     FAILED_TO_DECRYPT = "Failed to decrypt secret"
