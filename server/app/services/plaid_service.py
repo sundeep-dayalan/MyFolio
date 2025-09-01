@@ -1,3 +1,4 @@
+from inspect import _void
 from typing import List, Dict, Any, Optional
 
 from plaid.api import plaid_api
@@ -32,17 +33,35 @@ import base64
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+
+from ..exceptions import BankNotFoundError, DatabaseError, PlaidApiException
 from .az_key_vault_service import (
     AzureKeyVaultService,
 )
+from ..services.sync_update_service import sync_update_service
 
 from ..settings import settings
 from ..database import cosmos_client
 from ..utils.logger import get_logger
 from ..models.plaid import (
     PlaidAccountWithBalance,
+    PlaidAccountsGetResponse,
     PlaidBalance,
+    Account,
+    PlaidInstitution,
+    PlaidItemGetResponse,
+)
+
+from ..models.bank import (
+    BankStatus,
+    BankSummary,
     BankDocument,
+)
+from ..models.sync import (
+    SyncInfo,
+    SyncInitiatorType,
+    SyncStatus,
+    SyncType,
 )
 from .account_storage_service import account_storage_service
 from .transaction_storage_service import transaction_storage_service
@@ -64,6 +83,7 @@ from ..constants import (
     PlaidResponseFields,
     Status,
 )
+from plaid.exceptions import ApiException
 
 logger = get_logger(__name__)
 
@@ -97,7 +117,6 @@ class PlaidService:
         # Map environment string to Plaid Environment enum
         environment_map = {
             PlaidEnvironments.SANDBOX: Environment.Sandbox,
-            PlaidEnvironments.DEVELOPMENT: Environment.Sandbox,  # Use sandbox for development
             PlaidEnvironments.PRODUCTION: Environment.Production,
         }
 
@@ -237,38 +256,43 @@ class PlaidService:
             access_token = response["access_token"]
             item_id = response["item_id"]
 
-            # Get institution info
-            institution_info = await self._get_institution_info_by_item(
-                user_id, access_token
-            )
+            # # Get institution info
+            # institution_info = await self._get_institution_info_by_item(
+            #     user_id, access_token
+            # )
+
+            item_request = ItemGetRequest(access_token=access_token)
+            # Use .to_dict() for reliable Pydantic validation
+            item_response_dict = client.item_get(item_request).to_dict()
+            bank_info = PlaidItemGetResponse.model_validate(item_response_dict)
 
             # Store the access token
             stored_token = await self._store_access_token(
-                user_id, access_token, item_id, institution_info
+                user_id, access_token, item_id, bank_info
             )
 
             # Immediately sync account data so accounts are available right away
-            try:
-                logger.info(f"🔄 Syncing account data immediately for item {item_id}")
-                await self.get_accounts_with_balances(user_id, use_cached_db_data=False)
-                logger.info(f"✅ Account data synced successfully for item {item_id}")
-            except Exception as e:
-                logger.error(f"❌ Failed to sync account data for item {item_id}: {e}")
-                # Re-raise the exception so connection fails if we can't get account data
-                raise Exception(
-                    f"Bank connection failed - unable to fetch account data: {str(e)}"
-                )
+            # try:
+            #     logger.info(f"🔄 Syncing account data immediately for item {item_id}")
+            #     await self.get_accounts_with_balances(user_id, use_cached_db_data=False)
+            #     logger.info(f"✅ Account data synced successfully for item {item_id}")
+            # except Exception as e:
+            #     logger.error(f"❌ Failed to sync account data for item {item_id}: {e}")
+            #     # Re-raise the exception so connection fails if we can't get account data
+            #     raise Exception(
+            #         f"Bank connection failed - unable to fetch account data: {str(e)}"
+            #     )
 
-            # Start transaction sync in the background (non-blocking)
-            try:
-                logger.info(f"🚀 Starting transaction sync for item {item_id}")
-                await self._sync_transactions_for_stored_item(user_id, item_id)
-                logger.info(f"✅ Transaction sync completed for item {item_id}")
-            except Exception as e:
-                logger.error(
-                    f"❌ Background transaction sync failed for item {item_id}: {e}"
-                )
-                # Don't fail the exchange if transaction sync fails
+            # # Start transaction sync in the background (non-blocking)
+            # try:
+            #     logger.info(f"🚀 Starting transaction sync for item {item_id}")
+            #     await self._sync_transactions_for_stored_item(user_id, item_id)
+            #     logger.info(f"✅ Transaction sync completed for item {item_id}")
+            # except Exception as e:
+            #     logger.error(
+            #         f"❌ Background transaction sync failed for item {item_id}: {e}"
+            #     )
+            # Don't fail the exchange if transaction sync fails
 
             logger.info(
                 f"Successfully exchanged and stored token for user {user_id}, item_id: {item_id}"
@@ -285,64 +309,46 @@ class PlaidService:
     async def _get_institution_info_by_item(
         self, user_id: str, access_token: str
     ) -> Dict[str, Any]:
-        """Get institution information using item access token."""
+        """
+        Get institution information using item access token and return Pydantic models.
+        """
+        client = await self._get_client(user_id)
+        item_response_data = None
+        inst_response_data = None
+
         try:
-            client = await self._get_client(user_id)
-            # Get item info first
-            request = ItemGetRequest(access_token=access_token)
-            item_response = client.item_get(request)
-            plaid_institution_data = item_response["item"]
-            institution_id = plaid_institution_data["institution_id"]
+            # 1. Get Item data from Plaid
+            item_request = ItemGetRequest(access_token=access_token)
+            # Use .to_dict() for reliable Pydantic validation
+            item_response_dict = client.item_get(item_request).to_dict()
+            item_response_data = PlaidItemGetResponse.model_validate(item_response_dict)
+            institution_id = item_response_data.item.institution_id
+
+            if not institution_id:
+                raise ValueError("Institution ID not found in item response.")
 
             logger.info(f"Got institution_id: {institution_id}")
 
-            # Get institution details
+            # 2. Get Institution data from Plaid
             inst_request = InstitutionsGetByIdRequest(
                 institution_id=institution_id, country_codes=[CountryCode("US")]
             )
-            inst_response = client.institutions_get_by_id(inst_request)
-            institution = inst_response["institution"]
+            inst_response_dict = client.institutions_get_by_id(inst_request).to_dict()
+            inst_response_data = PlaidInstitution.model_validate(
+                inst_response_dict["institution"]
+            )
 
-            institution_info = {
-                "institution_id": institution_id,
-                "name": institution["name"],
-                "products": institution["products"],
-                "country_codes": institution["country_codes"],
-                "plaid_institution_data": plaid_institution_data,
+            logger.info(f"Retrieved institution info: {inst_response_data.name}")
+
+            return {
+                "item": item_response_data.item,
+                "institution": inst_response_data,
             }
 
-            logger.info(f"Retrieved institution info: {institution['name']}")
-            logger.debug(f"Full institution_info: {institution_info}")
-            return institution_info
+        except ApiException as e:
+            logger.error(f"Failed to get full institution info, creating fallback: {e}")
 
-        except Exception as e:
-            logger.error(f"Failed to get institution info: {e}")
-            logger.error(f"Exception type: {type(e).__name__}")
-            logger.error(f"Exception details: {str(e)}")
-            # Return minimal info as fallback but still try to get plaid_institution_data
-            try:
-                request = ItemGetRequest(access_token=access_token)
-                client = await self._get_client(user_id)
-                item_response = client.item_get(request)
-                plaid_institution_data = item_response["item"]
-                institution_id = plaid_institution_data["institution_id"]
-                fallback_info = {
-                    "institution_id": institution_id,
-                    "name": f"Bank {institution_id}",
-                    "products": [],
-                    "country_codes": ["US"],
-                    "plaid_institution_data": plaid_institution_data,
-                }
-                logger.info(
-                    f"Using fallback institution info with plaid_institution_data: {bool(plaid_institution_data)}"
-                )
-                logger.debug(
-                    f"Fallback plaid_institution_data: {plaid_institution_data}"
-                )
-                return fallback_info
-            except Exception as e2:
-                logger.error(f"Failed to get even basic institution info: {e2}")
-                raise Exception(f"Failed to get institution info: {e2}")
+            raise PlaidApiException(e)
 
     def _convert_plaid_object(self, obj) -> Dict[str, Any]:
         """Convert Plaid API objects to JSON-serializable dictionaries."""
@@ -386,94 +392,36 @@ class PlaidService:
         user_id: str,
         access_token: str,
         item_id: str,
-        institution_info: Dict[str, Any] = None,
+        bank_info: Dict[str, Any],
     ) -> BankDocument:
-        """Store bank data using optimized BankDocument structure."""
+        """Store bank data using the corrected BankDocument structure."""
         try:
             logger.info(f"Storing bank data for user {user_id}, item_id: {item_id}")
 
-            # Check if CosmosDB is connected
             if not cosmos_client.is_connected:
-                logger.error("CosmosDB not connected - cannot store bank data")
-                raise Exception("CosmosDB connection required for bank data storage")
+                raise DatabaseError("CosmosDB not connected - cannot store bank data")
 
             # Encrypt the access token
             encrypted_token = await AzureKeyVaultService.encrypt_secret(access_token)
 
-            # Prepare timestamps
-            now = datetime.now(timezone.utc)
-            iso_timestamp = now.isoformat()
+            # Prepare timestamp
+            now_iso = datetime.now(timezone.utc).isoformat()
 
-            # Clean and prepare Plaid data
-            institution_info = institution_info or {}
-            logger.debug(f"Institution info before storage: {institution_info}")
-
-            def ensure_serializable(data):
-                """Convert Plaid objects to JSON-serializable format."""
-                if data is None:
-                    return None
-                elif hasattr(data, "value"):  # Enum objects
-                    return data.value
-                elif isinstance(data, datetime):
-                    return data.isoformat()
-                elif isinstance(data, (str, int, float, bool)):
-                    return data
-                elif isinstance(data, list):
-                    return [ensure_serializable(item) for item in data]
-                elif isinstance(data, dict):
-                    return {k: ensure_serializable(v) for k, v in data.items()}
-                elif hasattr(data, "__dict__"):  # Complex Plaid objects
-                    try:
-                        # Try to extract attributes safely
-                        obj_dict = {}
-                        for k, v in data.__dict__.items():
-                            if not k.startswith("_"):  # Skip private attributes
-                                obj_dict[k] = ensure_serializable(v)
-                        return obj_dict
-                    except Exception:
-                        # If extraction fails, try to convert to string
-                        return str(data)
-                else:
-                    # For any other type, convert to string
-                    return str(data)
-
-            # Create optimized BankDocument
+            # Create BankDocument instance directly from validated data
+            # This will now pass validation because institution_info is guaranteed
+            # to have the correct structure.
             bank_document = BankDocument(
                 id=item_id,
                 userId=user_id,
-                schemaVersion="2.0",
-                institutionId=institution_info.get("institution_id", "unknown"),
-                institutionName=institution_info.get("name", "Unknown Bank"),
-                status="active",
-                createdAt=iso_timestamp,
-                updatedAt=iso_timestamp,
-                lastUsedAt=iso_timestamp,
+                bankInfo=bank_info,
+                encryptedAccessToken=encrypted_token,
+                status=BankStatus.ACTIVE,
+                createdAt=now_iso,
                 environment=self.environment,
-                summary={
-                    "accountCount": 0,
-                    "totalBalance": 0.0,
-                    "lastSync": {"status": "pending", "timestamp": None, "error": None},
-                },
-                plaidData={
-                    "encryptedAccessToken": encrypted_token,
-                    "itemId": item_id,
-                    "institutionId": institution_info.get("institution_id"),
-                    "institutionName": institution_info.get("name"),
-                    "products": ensure_serializable(
-                        institution_info.get("products", [])
-                    ),
-                    "countryCodes": ensure_serializable(
-                        institution_info.get("country_codes", [])
-                    ),
-                    "plaidInstitutionData": self._convert_plaid_object(
-                        institution_info.get("plaid_institution_data", {})
-                    ),
-                },
             )
-            logger.debug(f"Final plaidData before storage: {bank_document.plaidData}")
 
             # Store document
-            document_dict = bank_document.model_dump()
+            document_dict = bank_document.model_dump(mode="json")
             try:
                 cosmos_client.create_item(Containers.BANKS, document_dict, user_id)
             except CosmosHttpResponseError as e:
@@ -489,9 +437,13 @@ class PlaidService:
             )
             return bank_document
 
+        except (PlaidApiException, DatabaseError) as e:
+            logger.error(f"Specific error storing bank data for user {user_id}: {e}")
+            raise e  # Re-raise known exceptions
         except Exception as e:
-            logger.error(f"Failed to store bank data for user {user_id}: {e}")
-            raise Exception(f"Failed to store bank data: {e}")
+            logger.error(f"Generic error storing bank data for user {user_id}: {e}")
+            # Re-package as a DatabaseError to be handled upstream
+            raise DatabaseError(f"Failed to store bank data: {e}")
 
     def get_user_access_tokens(self, user_id: str) -> List[BankDocument]:
         """Retrieve all active bank documents for a user."""
@@ -533,6 +485,40 @@ class PlaidService:
         except Exception as e:
             logger.error(f"Failed to retrieve bank documents for user {user_id}: {e}")
             raise Exception(f"Failed to retrieve bank documents: {e}")
+
+    async def get_bank_access_token(self, user_id: str, item_id: str) -> Optional[str]:
+        """
+        Retrieve and decrypt the access token for a single, active bank document.
+        """
+        logger.info(f"Retrieving bank document for user {user_id}, item {item_id}")
+
+        # CHANGE: The generic try...except block is removed. We only handle
+        # the "not found" case specifically. Other errors will propagate.
+
+        query = "SELECT * FROM c WHERE c.id = @itemId AND c.userId = @userId AND c.status = @status"
+        parameters = [
+            {"name": "@itemId", "value": item_id},
+            {"name": "@userId", "value": user_id},
+            {"name": "@status", "value": "active"},
+        ]
+
+        bank_documents = cosmos_client.query_items(
+            Containers.BANKS, query, parameters, user_id
+        )
+
+        if not bank_documents:
+            # This is a specific, expected error, so we handle it.
+            raise BankNotFoundError(
+                f"Bank connection with item ID '{item_id}' not found."
+            )
+
+        bank_doc = bank_documents[0]
+        document = BankDocument.model_validate(bank_doc)
+
+        logger.info(f"Successfully retrieved access token for item {item_id}")
+
+        # Let any decryption errors propagate up naturally.
+        return await AzureKeyVaultService.decrypt_secret(document.encryptedAccessToken)
 
     async def get_accounts_with_balances(
         self,
@@ -652,9 +638,9 @@ class PlaidService:
                             total_balance += current_balance
 
                     # Update this bank's document with accounts
-                    self._update_bank_accounts(
-                        user_id, token.id, bank_accounts, bank_total_balance
-                    )
+                    # self._update_bank_accounts(
+                    #     user_id, token.id, bank_accounts, bank_total_balance
+                    # )
                     self._update_token_last_used(user_id, token.id)
 
                 except Exception as e:
@@ -679,6 +665,80 @@ class PlaidService:
                 f"Failed to get accounts with balances for user {user_id}: {e}"
             )
             raise Exception(f"Failed to get account balances: {e}")
+
+    async def sync_accounts_for_item(
+        self,
+        user_id: str,
+        item_id: str,
+        account_ids: Optional[List[str]] = None,
+    ) -> None:
+        """
+        Fetches the latest account and balance data from Plaid for a specific item
+        and updates the database with the new information.
+        """
+        logger.info(f"Starting account sync for user {user_id}, item {item_id}")
+
+        try:
+            await sync_update_service.update_sync_status(
+                user_id=user_id,
+                item_id=item_id,
+                sync_type=SyncType.ACCOUNTS,
+                status=SyncStatus.SYNCING,
+                initiator_type=SyncInitiatorType.USER,
+                initiator_id=user_id,
+            )
+            await cosmos_client.ensure_connected()
+            # 1. Preparation
+            access_token = await self.get_bank_access_token(user_id, item_id)
+
+            min_last_updated = datetime.now(timezone.utc) - timedelta(days=90)
+            options_args = {"min_last_updated_datetime": min_last_updated}
+            if account_ids:
+                options_args["account_ids"] = account_ids
+
+            options = AccountsBalanceGetRequestOptions(**options_args)
+            request = AccountsBalanceGetRequest(
+                access_token=access_token, options=options
+            )
+
+            # 2. Plaid API Call and Pydantic Parsing
+            client = await self._get_client(user_id)
+            api_response = client.accounts_balance_get(request)
+            response_data = api_response.to_dict()
+            plaid_data = PlaidAccountsGetResponse.model_validate(response_data)
+
+            # 3. Update Database
+            await self._update_bank_accounts(user_id, item_id, plaid_data.accounts)
+
+            await sync_update_service.update_sync_status(
+                user_id=user_id,
+                item_id=item_id,
+                sync_type=SyncType.ACCOUNTS,
+                status=SyncStatus.COMPLETED,
+                initiator_type=SyncInitiatorType.USER,
+                initiator_id=user_id,
+            )
+
+            sync_update_service
+
+            logger.info(
+                f"Successfully synced accounts for user {user_id}, item {item_id}"
+            )
+
+        except Exception as e:
+            await sync_update_service.update_sync_status(
+                user_id=user_id,
+                item_id=item_id,
+                sync_type=SyncType.ACCOUNTS,
+                status=SyncStatus.ERROR,
+                initiator_type=SyncInitiatorType.USER,
+                initiator_id=user_id,
+                error=e,
+            )
+            # Re-raise the exception to be handled by the main middleware
+            if isinstance(e, ApiException):
+                raise PlaidApiException(e)
+            raise e
 
     def _get_cached_accounts_from_banks(self, user_id: str) -> Dict[str, Any]:
         """Get cached account data from all bank documents for a user."""
@@ -727,36 +787,100 @@ class PlaidService:
             logger.error(f"Failed to get cached accounts from banks: {e}")
             return {"accounts": [], "total_balance": 0.0, "account_count": 0}
 
-    def _update_bank_accounts(
-        self, user_id: str, item_id: str, accounts: List[Dict], total_balance: float
-    ) -> bool:
-        """Update accounts and summary data for a specific bank document using new schema."""
-        try:
-            iso_timestamp = datetime.now(timezone.utc).isoformat()
+    # def _update_bank_accounts(
+    #     self, user_id: str, item_id: str, accounts: List[Dict], total_balance: float
+    # ) -> bool:
+    #     """Update accounts and summary data for a specific bank document using new schema."""
+    #     try:
+    #         iso_timestamp = datetime.now(timezone.utc).isoformat()
 
-            # Use the new optimized schema fields
+    #         # Use the new optimized schema fields
+    #         update_data = {
+    #             # Store accounts directly (no nested structure needed)
+    #             "accounts": accounts,
+    #             # Update summary object with new structure
+    #             "summary.accountCount": len(accounts),
+    #             "summary.totalBalance": round(total_balance, 2),
+    #             "summary.lastSync.status": "completed",
+    #             "summary.lastSync.timestamp": iso_timestamp,
+    #             "summary.lastSync.error": None,
+    #             # Update document timestamps
+    #             "updatedAt": iso_timestamp,
+    #             "lastUsedAt": iso_timestamp,
+    #         }
+
+    #         cosmos_client.update_item(Containers.BANKS, item_id, user_id, update_data)
+    #         logger.info(
+    #             f"Updated bank {item_id} with {len(accounts)} accounts, balance: ${total_balance:.2f}"
+    #         )
+    #         return True
+    #     except Exception as e:
+    #         logger.error(f"Failed to update bank accounts for {item_id}: {e}")
+    #         return False
+
+    async def _update_bank_accounts(
+        self,
+        user_id: str,
+        item_id: str,
+        new_accounts: List[Account],
+    ) -> bool:
+        """
+        Intelligently merges new account data into the bank document and updates
+        the summary fields for data consistency using the new Pydantic models.
+        """
+        try:
+            # 1. Fetch the existing bank document.
+            bank_document = cosmos_client.get_item(Containers.BANKS, item_id, user_id)
+            if not bank_document:
+                raise BankNotFoundError(
+                    f"Bank document not found for item_id: {item_id}"
+                )
+
+            # 2. Merge new accounts with existing ones.
+            existing_accounts = bank_document.get("accounts", [])
+            accounts_map = {acc["account_id"]: acc for acc in existing_accounts}
+
+            for account_model in new_accounts:
+                new_account_dict = account_model.model_dump(mode="json")
+                accounts_map[account_model.account_id] = new_account_dict
+
+            final_accounts_list = list(accounts_map.values())
+
+            # 3. Calculate summary metrics from the final list.
+            account_count = len(final_accounts_list)
+            total_balance = sum(
+                acc.get("balances", {}).get("current") or 0.0
+                for acc in final_accounts_list
+            )
+
+            # 4. Prepare the final, properly nested update payload.
+            # IMPROVED: Create a BankSummary instance for a more robust update.
+            new_summary = BankSummary(
+                account_count=account_count, total_balance=round(total_balance, 2)
+            )
+
             update_data = {
-                # Store accounts directly (no nested structure needed)
-                "accounts": accounts,
-                # Update summary object with new structure
-                "summary.accountCount": len(accounts),
-                "summary.totalBalance": round(total_balance, 2),
-                "summary.lastSync.status": "completed",
-                "summary.lastSync.timestamp": iso_timestamp,
-                "summary.lastSync.error": None,
-                # Update document timestamps
-                "updatedAt": iso_timestamp,
-                "lastUsedAt": iso_timestamp,
+                "accounts": final_accounts_list,
+                "summary": new_summary.model_dump(
+                    mode="json"
+                ),  # Update the whole summary object
+                "updatedAt": datetime.now(timezone.utc).isoformat(),
             }
 
             cosmos_client.update_item(Containers.BANKS, item_id, user_id, update_data)
+
             logger.info(
-                f"Updated bank {item_id} with {len(accounts)} accounts, balance: ${total_balance:.2f}"
+                f"Successfully updated bank accounts and summary for item {item_id}: "
+                f"Count={account_count}, Balance=${total_balance:.2f}."
             )
             return True
+
         except Exception as e:
-            logger.error(f"Failed to update bank accounts for {item_id}: {e}")
-            return False
+            logger.error(
+                f"Failed to intelligently update bank accounts for {item_id}: {e}",
+                exc_info=True,
+            )
+            raise DatabaseError(f"Failed to update account data in the database: {e}")
 
     def _update_token_last_used(self, user_id: str, item_id: str) -> bool:
         """Update the lastUsedAt timestamp for a bank document using new schema."""

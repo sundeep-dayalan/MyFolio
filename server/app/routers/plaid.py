@@ -73,7 +73,6 @@ async def create_link_token(
 @router.post("/exchange_public_token")
 async def exchange_public_token(
     request: ExchangeTokenRequest,
-    background_tasks: BackgroundTasks,
     user_id: str = Depends(get_current_user_id),
     plaid_service: PlaidService = Depends(get_plaid_service),
 ):
@@ -85,18 +84,6 @@ async def exchange_public_token(
 
         # Convert to dict for response
         result_dict = result.model_dump() if hasattr(result, "model_dump") else result
-
-        # Add the long-running sync as a background task
-        # The sync method will get the encrypted token from CosmosDB storage
-        if result_dict.get("item_id"):
-            logger.info(
-                f"Scheduling background task for initial transaction sync for item {result_dict['item_id']}"
-            )
-            background_tasks.add_task(
-                plaid_service._sync_transactions_for_stored_item,
-                user_id=user_id,
-                item_id=result_dict["item_id"],
-            )
 
         # Remove sensitive data from response
         if "access_token" in result_dict:
@@ -150,19 +137,6 @@ def get_accounts_data_info(
         # Return basic info about user's tokens
         tokens = plaid_service.get_user_access_tokens(user_id)
         return {"tokens_count": len(tokens), "user_id": user_id}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@router.get("/balance")
-async def get_balance_legacy(
-    user_id: str = Depends(get_current_user_id),
-    plaid_service: PlaidService = Depends(get_plaid_service),
-):
-    """Legacy endpoint - redirects to /accounts for backward compatibility."""
-    try:
-        result = await plaid_service.get_accounts_with_balances(user_id)
-        return {"accounts": result.get("accounts", [])}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
