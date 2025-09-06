@@ -137,16 +137,9 @@ export interface ForceRefreshTransactionsResponse {
   async_operation: boolean;
 }
 
-const getAuthHeaders = (): HeadersInit => {
-  const token = localStorage.getItem('authToken');
-
-  if (!token) {
-    throw new Error('Authentication token required. Please log in.');
-  }
-
+const getHeaders = (): HeadersInit => {
   return {
     'Content-Type': 'application/json',
-    Authorization: `Bearer ${token}`,
   };
 };
 
@@ -155,7 +148,8 @@ export const PlaidService = {
     try {
       const response = await fetch(`${API_BASE}/plaid/create_link_token`, {
         method: 'POST',
-        headers: getAuthHeaders(),
+        headers: getHeaders(),
+        credentials: 'include',
       });
 
       if (response.status === 401) {
@@ -179,7 +173,8 @@ export const PlaidService = {
     try {
       const response = await fetch(`${API_BASE}/plaid/exchange_public_token`, {
         method: 'POST',
-        headers: getAuthHeaders(),
+        headers: getHeaders(),
+        credentials: 'include',
         body: JSON.stringify({ public_token: publicToken }),
       });
 
@@ -204,7 +199,8 @@ export const PlaidService = {
     try {
       const response = await fetch(`${API_BASE}/plaid/accounts`, {
         method: 'GET',
-        headers: getAuthHeaders(),
+        headers: getHeaders(),
+        credentials: 'include',
       });
 
       if (response.status === 401) {
@@ -228,7 +224,8 @@ export const PlaidService = {
     try {
       const response = await fetch(`${API_BASE}/plaid/accounts/refresh`, {
         method: 'POST',
-        headers: getAuthHeaders(),
+        headers: getHeaders(),
+        credentials: 'include',
       });
 
       if (response.status === 401) {
@@ -252,7 +249,8 @@ export const PlaidService = {
     try {
       const response = await fetch(`${API_BASE}/plaid/accounts/data-info`, {
         method: 'GET',
-        headers: getAuthHeaders(),
+        headers: getHeaders(),
+        credentials: 'include',
       });
 
       if (response.status === 401) {
@@ -279,7 +277,8 @@ export const PlaidService = {
         `${API_BASE}/plaid/balance?access_token=${encodeURIComponent(accessToken)}`,
         {
           method: 'GET',
-          headers: getAuthHeaders(),
+          headers: getHeaders(),
+          credentials: 'include',
         },
       );
 
@@ -298,7 +297,8 @@ export const PlaidService = {
     try {
       const response = await fetch(`${API_BASE}/plaid/items`, {
         method: 'GET',
-        headers: getAuthHeaders(),
+        headers: getHeaders(),
+        credentials: 'include',
       });
 
       if (response.status === 401) {
@@ -322,7 +322,8 @@ export const PlaidService = {
     try {
       const response = await fetch(`${API_BASE}/plaid/items/${itemId}`, {
         method: 'DELETE',
-        headers: getAuthHeaders(),
+        headers: getHeaders(),
+        credentials: 'include',
       });
 
       if (response.status === 401) {
@@ -346,7 +347,8 @@ export const PlaidService = {
     try {
       const response = await fetch(`${API_BASE}/plaid/tokens/revoke-all`, {
         method: 'DELETE',
-        headers: getAuthHeaders(),
+        headers: getHeaders(),
+        credentials: 'include',
       });
 
       if (response.status === 401) {
@@ -370,7 +372,8 @@ export const PlaidService = {
     try {
       const response = await fetch(`${API_BASE}/plaid/transactions?days=${days}`, {
         method: 'GET',
-        headers: getAuthHeaders(),
+        headers: getHeaders(),
+        credentials: 'include',
       });
 
       if (response.status === 401) {
@@ -399,7 +402,8 @@ export const PlaidService = {
         `${API_BASE}/plaid/transactions/account/${accountId}?days=${days}`,
         {
           method: 'GET',
-          headers: getAuthHeaders(),
+          headers: getHeaders(),
+          credentials: 'include',
         },
       );
 
@@ -424,7 +428,8 @@ export const PlaidService = {
     try {
       const response = await fetch(`${API_BASE}/plaid/transactions/refresh/${itemId}`, {
         method: 'POST',
-        headers: getAuthHeaders(),
+        headers: getHeaders(),
+        credentials: 'include',
       });
 
       if (response.status === 401) {
@@ -448,7 +453,8 @@ export const PlaidService = {
     try {
       const response = await fetch(`${API_BASE}/plaid/transactions/force-refresh/${itemId}`, {
         method: 'POST',
-        headers: getAuthHeaders(),
+        headers: getHeaders(),
+        credentials: 'include',
       });
 
       if (response.status === 401) {

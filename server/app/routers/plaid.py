@@ -6,7 +6,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
 from typing import Dict, Any, Optional
 from ..services.plaid_service import PlaidService
-from ..dependencies import get_current_user_id
+from ..dependencies import get_current_user_id_from_session, get_plaid_service
 from ..utils.logger import get_logger
 from ..constants import ApiRoutes, ApiTags
 from ..services.transaction_storage_service import transaction_storage_service
@@ -57,7 +57,7 @@ def get_plaid_service() -> PlaidService:
 
 @router.post("/create_link_token")
 async def create_link_token(
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(get_current_user_id_from_session),
     plaid_service: PlaidService = Depends(get_plaid_service),
 ):
     """Create a Plaid link token for the current user."""
@@ -73,7 +73,7 @@ async def create_link_token(
 @router.post("/exchange_public_token")
 async def exchange_public_token(
     request: ExchangeTokenRequest,
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(get_current_user_id_from_session),
     plaid_service: PlaidService = Depends(get_plaid_service),
 ):
     """Exchange public token for an access token and store securely."""
@@ -95,7 +95,7 @@ async def exchange_public_token(
 
 @router.get("/accounts")
 async def get_accounts(
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(get_current_user_id_from_session),
     plaid_service: PlaidService = Depends(get_plaid_service),
 ):
     """Fetch all account balances for the current user from Cosmos DB only (never hits Plaid API)."""
@@ -114,7 +114,7 @@ async def get_accounts(
 
 @router.post("/accounts/refresh")
 async def refresh_accounts(
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(get_current_user_id_from_session),
     plaid_service: PlaidService = Depends(get_plaid_service),
 ):
     """Force refresh account balances from Plaid API, update Cosmos DB, and return latest."""
@@ -129,7 +129,7 @@ async def refresh_accounts(
 
 @router.get("/accounts/data-info")
 def get_accounts_data_info(
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(get_current_user_id_from_session),
     plaid_service: PlaidService = Depends(get_plaid_service),
 ):
     """Get information about stored account data (last updated, age, etc.)."""
@@ -143,7 +143,7 @@ def get_accounts_data_info(
 
 @router.get("/items")
 def get_plaid_items(
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(get_current_user_id_from_session),
     plaid_service: PlaidService = Depends(get_plaid_service),
 ):
     """Get summary of user's connected Plaid items (institutions)."""
@@ -157,7 +157,7 @@ def get_plaid_items(
 @router.delete("/items/{item_id}")
 async def revoke_plaid_item(
     item_id: str,
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(get_current_user_id_from_session),
     plaid_service: PlaidService = Depends(get_plaid_service),
 ):
     """Revoke access to a specific Plaid item."""
@@ -173,7 +173,7 @@ async def revoke_plaid_item(
 
 @router.delete("/tokens/revoke-all")
 def revoke_all_tokens(
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(get_current_user_id_from_session),
     plaid_service: PlaidService = Depends(get_plaid_service),
 ):
     """Revoke all tokens for the current user."""
@@ -194,7 +194,7 @@ def revoke_all_tokens(
 @router.get("/transactions")
 def get_transactions(
     days: int = 30,
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(get_current_user_id_from_session),
     plaid_service: PlaidService = Depends(get_plaid_service),
 ):
     """Fetch transactions for the current user across all accounts."""
@@ -209,7 +209,7 @@ def get_transactions(
 def get_transactions_by_account(
     account_id: str,
     days: int = 30,
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(get_current_user_id_from_session),
     plaid_service: PlaidService = Depends(get_plaid_service),
 ):
     """Fetch transactions for a specific account."""
@@ -227,7 +227,7 @@ def get_transactions_by_account(
 )
 async def refresh_transactions(
     item_id: str,
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(get_current_user_id_from_session),
     plaid_service: PlaidService = Depends(get_plaid_service),
 ):
     """
@@ -247,7 +247,7 @@ async def refresh_transactions(
 )
 async def force_refresh_transactions(
     item_id: str,
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(get_current_user_id_from_session),
     plaid_service: PlaidService = Depends(get_plaid_service),
 ):
     """
@@ -285,7 +285,7 @@ def get_transactions_paginated(
     searchTerm: Optional[str] = Query(
         None, description="Search term for name/merchant"
     ),
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(get_current_user_id_from_session),
 ):
     """Get paginated transactions from Firestore with filtering and sorting."""
     try:
@@ -348,7 +348,7 @@ def get_transactions_paginated(
 
 @router.get("/transactions/count")
 def get_transactions_count(
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(get_current_user_id_from_session),
 ):
     """Get total count of transactions for the current user."""
     try:

@@ -33,10 +33,9 @@ export interface AuthContextType {
   user: UserResponse | null;
   loading: boolean;
   login: () => void; // Updated to use server-side OAuth
-  logout: () => void;
+  logout: () => Promise<void>;
   isAuthenticated: boolean;
-  setUser: (userData: UserResponse, authToken: string) => void;
-  setToken: (token: string) => void;
+  setUser: React.Dispatch<React.SetStateAction<UserResponse | null>>;
 }
 
 // OAuth-specific types

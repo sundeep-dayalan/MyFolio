@@ -36,18 +36,9 @@ export interface PlaidValidationResult {
   environment: 'sandbox' | 'development' | 'production' | null;
 }
 
-const getAuthHeaders = async (): Promise<HeadersInit> => {
-  const token = MicrosoftAuthService.getAuthToken();
-
-  if (!token) {
-    logger.warn('No authentication token found', 'PLAID_CONFIG');
-    throw new Error('Authentication token required. Please log in.');
-  }
-
-  logger.info('Authentication token valid', 'PLAID_CONFIG');
+const getHeaders = (): HeadersInit => {
   return {
     'Content-Type': 'application/json',
-    Authorization: `Bearer ${token}`,
   };
 };
 
@@ -62,10 +53,11 @@ const handleAuthError = async (response: Response) => {
 export const PlaidConfigService = {
   async storeConfiguration(config: PlaidConfigurationCreate): Promise<PlaidConfigurationResponse> {
     try {
-      const headers = await getAuthHeaders();
+      const headers = getHeaders();
       const response = await fetch(`${API_BASE}/configuration/plaid`, {
         method: 'POST',
         headers,
+        credentials: 'include',
         body: JSON.stringify(config),
       });
 
@@ -88,10 +80,11 @@ export const PlaidConfigService = {
   async getConfigurationStatus(): Promise<PlaidConfigurationStatus> {
     try {
       // Now requires authentication to get user-specific configuration status
-      const headers = await getAuthHeaders();
+      const headers = getHeaders();
       const response = await fetch(`${API_BASE}/configuration/plaid/status`, {
         method: 'GET',
         headers,
+        credentials: 'include',
       });
 
       await handleAuthError(response);
@@ -113,10 +106,11 @@ export const PlaidConfigService = {
 
   async getConfiguration(): Promise<PlaidConfigurationResponse> {
     try {
-      const headers = await getAuthHeaders();
+      const headers = getHeaders();
       const response = await fetch(`${API_BASE}/configuration/plaid`, {
         method: 'GET',
         headers,
+        credentials: 'include',
       });
 
       await handleAuthError(response);
@@ -138,10 +132,11 @@ export const PlaidConfigService = {
     credentials: PlaidConfigurationValidate,
   ): Promise<PlaidValidationResult> {
     try {
-      const headers = await getAuthHeaders();
+      const headers = getHeaders();
       const response = await fetch(`${API_BASE}/configuration/plaid/validate`, {
         method: 'POST',
         headers,
+        credentials: 'include',
         body: JSON.stringify(credentials),
       });
 
@@ -170,10 +165,11 @@ export const PlaidConfigService = {
 
   async deleteConfiguration(): Promise<{ message: string }> {
     try {
-      const headers = await getAuthHeaders();
+      const headers = getHeaders();
       const response = await fetch(`${API_BASE}/configuration/plaid`, {
         method: 'DELETE',
         headers,
+        credentials: 'include',
       });
 
       await handleAuthError(response);

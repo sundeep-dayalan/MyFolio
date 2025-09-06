@@ -52,29 +52,19 @@ export interface PlaidTransactionsResponse {
   transactions: PlaidTransaction[];
 }
 
-const getAuthHeaders = async (): Promise<HeadersInit> => {
-  const token = AzureAuthService.getAuthToken();
-
-  if (!token) {
-    throw new Error('Authentication token required. Please log in.');
-  }
-
-  // Refresh token if needed
-  await AzureAuthService.refreshTokenIfNeeded();
-
+const getHeaders = (): HeadersInit => {
   return {
     'Content-Type': 'application/json',
-    Authorization: `Bearer ${token}`,
   };
 };
 
 export const AzurePlaidService = {
   async createLinkToken(products: string[] = ['transactions', 'accounts']): Promise<string> {
     try {
-      const headers = await getAuthHeaders();
       const response = await fetch(`${API_BASE}/plaid/create_link_token`, {
         method: 'POST',
-        headers,
+        headers: getHeaders(),
+        credentials: 'include',
         body: JSON.stringify({ products }),
       });
 
@@ -99,10 +89,11 @@ export const AzurePlaidService = {
 
   async exchangePublicToken(publicToken: string): Promise<{ item_id: string; accounts: PlaidAccount[] }> {
     try {
-      const headers = await getAuthHeaders();
+      const headers = getHeaders();
       const response = await fetch(`${API_BASE}/plaid/exchange_public_token`, {
         method: 'POST',
         headers,
+        credentials: 'include',
         body: JSON.stringify({ public_token: publicToken }),
       });
 
@@ -127,10 +118,11 @@ export const AzurePlaidService = {
 
   async getAccounts(): Promise<PlaidAccountsResponse> {
     try {
-      const headers = await getAuthHeaders();
+      const headers = getHeaders();
       const response = await fetch(`${API_BASE}/plaid/accounts`, {
         method: 'GET',
         headers,
+        credentials: 'include',
       });
 
       if (response.status === 401) {
@@ -159,7 +151,7 @@ export const AzurePlaidService = {
     offset: number = 0
   ): Promise<PlaidTransactionsResponse> {
     try {
-      const headers = await getAuthHeaders();
+      const headers = getHeaders();
       const params = new URLSearchParams({
         count: count.toString(),
         offset: offset.toString(),
@@ -171,6 +163,7 @@ export const AzurePlaidService = {
       const response = await fetch(`${API_BASE}/plaid/transactions?${params.toString()}`, {
         method: 'GET',
         headers,
+        credentials: 'include',
       });
 
       if (response.status === 401) {
@@ -216,10 +209,11 @@ export const AzurePlaidService = {
   // Health check method
   async checkConnection(): Promise<boolean> {
     try {
-      const headers = await getAuthHeaders();
+      const headers = getHeaders();
       const response = await fetch(`${API_BASE}/health`, {
         method: 'GET',
         headers,
+        credentials: 'include',
       });
       return response.ok;
     } catch (error) {

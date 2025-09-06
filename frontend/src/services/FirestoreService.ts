@@ -2,16 +2,9 @@ import { config } from '../config/env';
 
 const API_BASE = config.apiBaseUrl;
 
-const getAuthHeaders = (): HeadersInit => {
-  const token = localStorage.getItem('authToken');
-
-  if (!token) {
-    throw new Error('Authentication token required. Please log in.');
-  }
-
+const getHeaders = (): HeadersInit => {
   return {
     'Content-Type': 'application/json',
-    Authorization: `Bearer ${token}`,
   };
 };
 
@@ -93,7 +86,7 @@ class CosmosDBServiceClass {
   private async makeRequest<T>(endpoint: string, options?: RequestInit): Promise<T> {
     const response = await fetch(`${API_BASE}${endpoint}`, {
       headers: {
-        ...getAuthHeaders(),
+        ...getHeaders(),
         ...options?.headers,
       },
       credentials: 'include',

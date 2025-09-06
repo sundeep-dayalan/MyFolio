@@ -4,6 +4,7 @@ Application dependencies.
 
 from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from typing import Optional
 
 from .database import cosmos_client
 from .exceptions import AuthenticationError
@@ -32,7 +33,7 @@ def get_auth_service(
 
 async def get_current_user(
     request: Request,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     auth_service: AuthService = Depends(get_auth_service),
 ):
     """
@@ -62,6 +63,32 @@ async def get_current_user(
         # Cache for remainder of request
         request.state.current_user = user
         return user
+
+    # Fallback to session-based auth
+    try:
+        session_token = request.cookies.get("session")
+        
+        if session_token:
+            # Decode JWT token to get user data
+            from .services.az_key_vault_service import AzureKeyVaultService
+            
+            payload = AzureKeyVaultService.verify_token(session_token)
+            
+            if payload:
+                user_data = {
+                    "id": payload.get("sub"),
+                    "email": payload.get("email"),
+                    "name": payload.get("name"),
+                }
+                # Create a simple user object that matches UserResponse
+                from .models.user import UserResponse
+                user = UserResponse(**user_data)
+                
+                # Cache for remainder of request
+                request.state.current_user = user
+                return user
+    except Exception:
+        pass
 
     # If neither method works, raise authentication error
     raise HTTPException(
@@ -105,6 +132,38 @@ async def get_current_user_id(
         detail="Authentication credentials required",
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+
+async def get_current_user_id_from_session(request: Request) -> str:
+    """Get current user ID from session cookie.
+    
+    This is used for endpoints that have been migrated to use session cookies
+    instead of JWT Bearer tokens.
+    """
+    try:
+        session_token = request.cookies.get("session")
+        
+        if not session_token:
+            raise HTTPException(status_code=401, detail="No active session")
+
+        # Decode JWT token to get user ID
+        from .services.az_key_vault_service import AzureKeyVaultService
+        
+        payload = AzureKeyVaultService.verify_token(session_token)
+        
+        if not payload:
+            raise HTTPException(status_code=401, detail="Invalid or expired session")
+            
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Invalid session data")
+            
+        return user_id
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=401, detail="Session validation failed")
 
 
 # Convenience functions for getting services
