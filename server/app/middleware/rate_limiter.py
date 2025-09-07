@@ -108,7 +108,7 @@ class RateLimitMiddleware:
             # Plaid endpoints - moderate limits
             "/plaid/create_link_token": (100, 60),  # 10 link tokens per minute
             "/plaid/exchange_public_token": (5, 60),  # 5 exchanges per minute
-            "/plaid/accounts": (100, 60),  # 30 account fetches per minute
+            "/plaid/account": (100, 60),  # 30 account fetches per minute
             "/plaid/transactions": (100, 60),  # 20 transaction fetches per minute
             # General API endpoints
             "/api/v1/": (100, 60),  # 100 requests per minute for general API

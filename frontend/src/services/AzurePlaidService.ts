@@ -104,7 +104,9 @@ export const AzurePlaidService = {
     }
   },
 
-  async exchangePublicToken(publicToken: string): Promise<{ item_id: string; accounts: PlaidAccount[] }> {
+  async exchangePublicToken(
+    publicToken: string,
+  ): Promise<{ item_id: string; accounts: PlaidAccount[] }> {
     try {
       const headers = getHeaders();
       const response = await fetch(`${API_BASE}/plaid/exchange_public_token`, {
@@ -136,7 +138,7 @@ export const AzurePlaidService = {
   async getAccounts(): Promise<PlaidAccountsResponse> {
     try {
       const headers = getHeaders();
-      const response = await fetch(`${API_BASE}/plaid/accounts`, {
+      const response = await fetch(`${API_BASE}/plaid/account`, {
         method: 'GET',
         headers,
         credentials: 'include',
@@ -165,7 +167,7 @@ export const AzurePlaidService = {
     startDate?: string,
     endDate?: string,
     count: number = 500,
-    offset: number = 0
+    offset: number = 0,
   ): Promise<PlaidTransactionsResponse> {
     try {
       const headers = getHeaders();
@@ -205,7 +207,7 @@ export const AzurePlaidService = {
   async getTransactionsByDateRange(
     startDate: string,
     endDate: string,
-    count: number = 500
+    count: number = 500,
   ): Promise<PlaidTransactionsResponse> {
     return this.getTransactions(startDate, endDate, count, 0);
   },
@@ -213,7 +215,7 @@ export const AzurePlaidService = {
   async getRecentTransactions(days: number = 30): Promise<PlaidTransactionsResponse> {
     const endDate = new Date().toISOString().split('T')[0];
     const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-    
+
     return this.getTransactions(startDate, endDate);
   },
 

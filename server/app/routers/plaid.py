@@ -94,7 +94,7 @@ async def exchange_public_token(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.get("/accounts")
+@router.get("/account")
 async def get_accounts(
     user_id: str = Depends(get_current_user),
     plaid_service: PlaidService = Depends(get_plaid_service),
@@ -110,7 +110,7 @@ async def get_accounts(
         }
 
 
-@router.post("/accounts/refresh")
+@router.post("/account/refresh")
 async def refresh_accounts(
     user_id: str = Depends(get_current_user),
     plaid_service: PlaidService = Depends(get_plaid_service),
@@ -125,7 +125,7 @@ async def refresh_accounts(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.get("/accounts/data-info")
+@router.get("/account/data-info")
 def get_accounts_data_info(
     user_id: str = Depends(get_current_user),
     plaid_service: PlaidService = Depends(get_plaid_service),
@@ -139,28 +139,27 @@ def get_accounts_data_info(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.get("/items")
-def get_plaid_items(
+@router.get("/bank")
+async def get_plaid_items(
     user_id: str = Depends(get_current_user),
     plaid_service: PlaidService = Depends(get_plaid_service),
 ):
     """Get summary of user's connected Plaid items (institutions)."""
     try:
-        items = plaid_service.get_user_plaid_items(user_id)
-        return {"items": items}
+        return await plaid_service.get_banks(user_id)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.delete("/items/{item_id}")
+@router.delete("/bank/{bank_id}")
 async def revoke_plaid_item(
-    item_id: str,
+    bank_id: str,
     user_id: str = Depends(get_current_user),
     plaid_service: PlaidService = Depends(get_plaid_service),
 ):
     """Revoke access to a specific Plaid item."""
     try:
-        success = await plaid_service.revoke_item_access(user_id, item_id)
+        success = await plaid_service.revoke_item_access(user_id, bank_id)
         if success:
             return {"message": "Item revoked successfully"}
         else:
@@ -358,3 +357,22 @@ def get_transactions_count(
             f"Failed to get transaction count for user {user_id}: {e}", exc_info=True
         )
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# @router.get("/transactions/test")
+# async def get_transactions_count(
+#     user_id: str = Depends(get_current_user),
+#     plaid_service: PlaidService = Depends(get_plaid_service),
+# ):
+#     """Get total count of transactions for the current user."""
+#     try:
+#         count = await plaid_service.sync_transactions(
+#             "J8aRXNqzQzt3nBxDdkzvhJvGEyqm6kcdQEKva", user_id
+#         )
+#         return {"count": count}
+
+#     except Exception as e:
+#         logger.error(
+#             f"Failed to get transaction count for user {user_id}: {e}", exc_info=True
+#         )
+#         raise HTTPException(status_code=500, detail=str(e))

@@ -214,7 +214,7 @@ export const PlaidService = {
 
   async getAccounts(): Promise<PlaidAccountsResponse> {
     try {
-      const response = await fetch(`${API_BASE}/plaid/accounts`, {
+      const response = await fetch(`${API_BASE}/plaid/account`, {
         method: 'GET',
         headers: getHeaders(),
         credentials: 'include',
@@ -239,7 +239,7 @@ export const PlaidService = {
 
   async refreshAccounts(): Promise<PlaidAccountsResponse> {
     try {
-      const response = await fetch(`${API_BASE}/plaid/accounts/refresh`, {
+      const response = await fetch(`${API_BASE}/plaid/account/refresh`, {
         method: 'POST',
         headers: getHeaders(),
         credentials: 'include',
@@ -264,7 +264,7 @@ export const PlaidService = {
 
   async getAccountsDataInfo(): Promise<PlaidDataInfo> {
     try {
-      const response = await fetch(`${API_BASE}/plaid/accounts/data-info`, {
+      const response = await fetch(`${API_BASE}/plaid/account/data-info`, {
         method: 'GET',
         headers: getHeaders(),
         credentials: 'include',
@@ -312,7 +312,7 @@ export const PlaidService = {
 
   async getPlaidItems(): Promise<PlaidItemsResponse> {
     try {
-      const response = await fetch(`${API_BASE}/plaid/items`, {
+      const response = await fetch(`${API_BASE}/plaid/bank`, {
         method: 'GET',
         headers: getHeaders(),
         credentials: 'include',
@@ -337,7 +337,7 @@ export const PlaidService = {
 
   async revokeItem(itemId: string): Promise<{ message: string }> {
     try {
-      const response = await fetch(`${API_BASE}/plaid/items/${itemId}`, {
+      const response = await fetch(`${API_BASE}/plaid/bank/${itemId}`, {
         method: 'DELETE',
         headers: getHeaders(),
         credentials: 'include',

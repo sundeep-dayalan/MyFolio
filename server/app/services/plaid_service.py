@@ -76,8 +76,11 @@ from ..models.bank import (
     BankSummary,
     BankDocument,
     GetAccountsResponse,
+    GetBanksResponse,
     InstitutionDetail,
     PartialBankDocument,
+    PartialBankInfo,
+    PartialItem,
 )
 from ..models.sync import (
     SyncInfo,
@@ -289,6 +292,9 @@ class PlaidService:
             )
             background_tasks.add_task(
                 self.sync_accounts_in_background, item_id, user_id
+            )
+            background_tasks.add_task(
+                self.sync_transactions_in_background, item_id, user_id
             )
             logger.info(
                 f"Successfully exchanged and stored token for user {user_id}, item_id: {item_id}"
@@ -606,6 +612,23 @@ class PlaidService:
         finally:
             loop.close()
 
+    def sync_transactions_in_background(self, item_id: str, user_id: str) -> None:
+        """
+        Synchronous wrapper for sync_transactions to be used with background tasks.
+        FastAPI's background_tasks.add_task() expects synchronous functions.
+        """
+        try:
+            # Create a new event loop for the background task
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(self.sync_transactions(item_id, user_id))
+        except Exception as e:
+            logger.error(
+                f"Background transaction sync failed for user {user_id}, item {item_id}: {e}"
+            )
+        finally:
+            loop.close()
+
     async def get_accounts(self, user_id: str) -> GetAccountsResponse:
         """
         Get cached account data, grouped by institution.
@@ -914,39 +937,69 @@ class PlaidService:
             logger.error(f"Failed to delete all banks for user {user_id}: {e}")
             return False
 
-    def get_user_plaid_items(self, user_id: str) -> List[Dict[str, Any]]:
+    async def get_banks(self, user_id: str) -> GetBanksResponse:
         """Get summary of user's connected Plaid items."""
+        if not user_id or not isinstance(user_id, str):
+            raise ValueError("Valid user_id is required")
+
         try:
-            tokens = self.get_user_access_tokens(user_id)
-            items = []
+            await cosmos_client.ensure_connected()
 
-            for token in tokens:
-                # Get account count for this item
-                accounts = account_storage_service.get_user_accounts(user_id)
-                item_accounts = [
-                    acc for acc in accounts if acc.get("item_id") == token.id
-                ]
+            query = """
+                SELECT c.id, c.bankInfo, c.status, c.updatedAt
+                FROM c 
+                WHERE c.userId = @userId 
+                AND c.status = @status
+                """
+            parameters = [
+                {"name": "@userId", "value": user_id},
+                {"name": "@status", "value": BankStatus.ACTIVE},
+            ]
 
-                items.append(
-                    {
-                        "item_id": token.id,
-                        "institution_id": token.institutionId,
-                        "institution_name": token.institutionName or "Unknown",
-                        "status": token.status,
-                        "accounts_count": len(item_accounts),
-                        "created_at": token.createdAt,
-                        "last_used_at": token.lastUsedAt,
-                    }
+            bank_documents_raw = cosmos_client.query_items(
+                Containers.BANKS, query, parameters, user_id
+            )
+
+            if not bank_documents_raw:
+                logger.info(f"No active bank documents found for user {user_id}")
+                return GetBanksResponse(
+                    banks=[],
+                    banks_count=0,
                 )
 
-            logger.info(f"Retrieved {len(items)} Plaid items for user {user_id}")
-            return items
+            banks = []
+            for bank_doc_raw in bank_documents_raw:
+                try:
+                    partial_item = PartialItem(
+                        institution_id=bank_doc_raw["bankInfo"]["item"]["institution_id"],
+                        institution_name=bank_doc_raw["bankInfo"]["item"]["institution_name"],
+                    )
+                    partial_bank_info = PartialBankInfo(item=partial_item)
+                    banks.append(partial_bank_info)
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to parse bank document {bank_doc_raw.get('id', 'unknown')}: {e}"
+                    )
+                    continue
+
+            logger.info(
+                f"Banks retrieval complete for user {user_id}: "
+                f"Banks count: {len(banks)}"
+            )
+
+            return GetBanksResponse(
+                banks=banks,
+                banks_count=len(banks),
+            )
 
         except Exception as e:
-            logger.error(f"Failed to get Plaid items for user {user_id}: {e}")
-            raise Exception(f"Failed to get Plaid items: {e}")
+            logger.error(
+                f"Unexpected error getting banks for user {user_id}: {e}",
+                exc_info=True,
+            )
+            raise AccountFetchError(f"Failed to get banks: {e}")
 
-    async def sync_transactions_for_item(self, item_id: str, user_id: str) -> None:
+    async def sync_transactions(self, item_id: str, user_id: str) -> None:
         """
         Fetches incremental transaction updates for a Plaid item and stores them
         in the 'transactions' container.

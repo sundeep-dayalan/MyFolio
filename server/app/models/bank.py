@@ -84,6 +84,11 @@ class PartialBankDocument(BaseModel):
     syncs: SyncState = Field(default_factory=SyncState)
 
 
+class GetBanksResponse(BaseModel):
+    banks: List[PartialBankInfo]
+    banks_count: int = Field(description="The grand total number of banks.")
+
+
 class InstitutionDetail(BaseModel):
     """Represents a single financial institution and its associated accounts."""
 
