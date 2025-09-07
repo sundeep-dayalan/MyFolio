@@ -11,7 +11,9 @@ export interface PlaidItem {
 }
 
 export interface PlaidItemsResponse {
-  items: PlaidItem[];
+  items?: PlaidItem[];
+  banks?: PlaidItem[]; // Actual API response field
+  banks_count?: number;
 }
 
 export interface PlaidAccount {

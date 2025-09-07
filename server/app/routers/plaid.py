@@ -274,6 +274,9 @@ async def get_transactions_paginated(
     status: Optional[str] = Query(
         None, description="Filter by status: posted, pending, removed"
     ),
+    isPending: Optional[bool] = Query(
+        None, description="Filter by pending status (true for pending, false for posted)"
+    ),
     paymentChannel: Optional[str] = Query(
         None, description="Filter by payment channel: online, in store, other"
     ),
@@ -312,6 +315,7 @@ async def get_transactions_paginated(
             account_id=accountId,
             item_id=itemId,
             status=status,
+            is_pending=isPending,
             payment_channel=paymentChannel,
             date_from=dateFrom,
             date_to=dateTo,

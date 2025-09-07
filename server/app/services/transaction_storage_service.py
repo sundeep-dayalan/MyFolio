@@ -206,6 +206,7 @@ class TransactionStorageService:
         account_id: Optional[str] = None,
         item_id: Optional[str] = None,
         status: Optional[str] = None,
+        is_pending: Optional[bool] = None,
         payment_channel: Optional[str] = None,
         date_from: Optional[str] = None,
         date_to: Optional[str] = None,
@@ -272,6 +273,11 @@ class TransactionStorageService:
             # By default, exclude removed transactions if the field exists
             # Use IS_DEFINED to check if the field exists first
             conditions.append("(NOT IS_DEFINED(c._meta.isRemoved) OR c._meta.isRemoved = false)")
+
+        # Separate isPending filter (can be used in combination with status)
+        if is_pending is not None:
+            conditions.append("c.isPending = @isPending")
+            parameters.append({"name": "@isPending", "value": is_pending})
 
         if payment_channel:
             conditions.append("c.paymentChannel = @paymentChannel")

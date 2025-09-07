@@ -28,30 +28,28 @@ const TransactionsPage: React.FC = () => {
   // State for filtering and UI
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [selectedBank, setSelectedBank] = useState<string | null>(null);
-  const [transactionType, setTransactionType] = useState<'added' | 'modified' | 'removed' | 'all'>(
-    'added',
-  );
+  const [status, setStatus] = useState<'posted' | 'pending' | 'removed' | 'all'>('posted');
 
   // API calls for accounts and items
-  const { data: accountsData, isLoading: accountsLoading } = useAccountsQuery();
-  const { data: itemsData, isLoading: itemsLoading } = useItemsQuery();
+  const { data: accountsData, isLoading: accountsLoading, error: accountsError } = useAccountsQuery();
+  const { data: itemsData, isLoading: itemsLoading, error: itemsError } = useItemsQuery();
   const refreshTransactionsMutation = useRefreshTransactionsMutation();
   const forceRefreshTransactionsMutation = useForceRefreshTransactionsMutation();
 
-  // Derived data
-  const accounts = accountsData?.accounts || [];
-  const items = itemsData?.items || [];
+  // Derived data - Extract from actual API response structure
+  const accounts = accountsData?.institutions?.flatMap(inst => inst.accounts) || [];
+  const items = itemsData?.banks || itemsData?.items || [];
 
-  // Get unique institution names from accounts
+  // Get unique institution names from items data (since accounts don't have institution_name)
   const availableBanks = useMemo(() => {
     const uniqueInstitutions = new Set<string>();
-    accounts.forEach((account) => {
-      if (account.institution_name) {
-        uniqueInstitutions.add(account.institution_name);
+    items.forEach((item) => {
+      if (item.institution_name) {
+        uniqueInstitutions.add(item.institution_name);
       }
     });
     return Array.from(uniqueInstitutions).sort();
-  }, [accounts]);
+  }, [items]);
 
   // Map institution name to item_id
   const institutionToItemMap = useMemo(() => {
@@ -79,14 +77,47 @@ const TransactionsPage: React.FC = () => {
       pageSize: 20,
       sortBy: 'date',
       sortOrder: 'desc' as const,
-      transactionType: transactionType,
       filters: {
         ...(itemId && { itemId: itemId }),
+        ...(status !== 'all' && { status: status }),
       },
     };
 
+
     return request;
-  }, [selectedBank, institutionToItemMap, transactionType]);
+  }, [selectedBank, institutionToItemMap, status]);
+
+  // Debug logging
+  useEffect(() => {
+    console.log('TransactionsPage Debug:', {
+      accountsLength: accounts.length,
+      itemsLength: items.length,
+      availableBanks,
+      selectedBank,
+      initialRequest,
+      accountsLoading,
+      itemsLoading,
+      accountsData,
+      itemsData,
+      accountsError: accountsError?.message,
+      itemsError: itemsError?.message,
+      userAuthenticated: !!user,
+      userInfo: user ? { email: user.email, uid: user.uid } : null,
+    });
+    
+    if (accountsError) {
+      console.error('Accounts API Error:', accountsError);
+      if (accountsError.message.includes('401') || accountsError.message.includes('Authentication')) {
+        console.error('Authentication issue detected - user may need to log in again');
+      }
+    }
+    if (itemsError) {
+      console.error('Items API Error:', itemsError);
+      if (itemsError.message.includes('401') || itemsError.message.includes('Authentication')) {
+        console.error('Authentication issue detected - user may need to log in again');
+      }
+    }
+  }, [accounts, items, availableBanks, selectedBank, initialRequest, accountsLoading, itemsLoading, accountsData, itemsData, accountsError, itemsError, user]);
 
   // If no user is authenticated, redirect to login
   if (!user) {
@@ -227,20 +258,22 @@ const TransactionsPage: React.FC = () => {
               onForceRefreshBank={handleForceRefreshBank}
               isForceRefreshing={forceRefreshTransactionsMutation.isPending}
               errorMessage={errorMessage}
-              transactionType={transactionType}
-              onTransactionTypeChange={setTransactionType}
+              transactionType={status}
+              onTransactionTypeChange={setStatus}
             />
 
-            {/* Show empty state only if we have no accounts */}
-            <TransactionsEmptyState
-              isLoading={accountsLoading || itemsLoading}
-              hasError={!!errorMessage}
-              hasTransactions={accounts.length > 0}
-              onGoToAccounts={handleGoToAccounts}
-            />
+            {/* Show empty state only if we have no connected banks */}
+            {items.length === 0 && (
+              <TransactionsEmptyState
+                isLoading={accountsLoading || itemsLoading}
+                hasError={!!errorMessage}
+                hasTransactions={items.length > 0}
+                onGoToAccounts={handleGoToAccounts}
+              />
+            )}
 
             {/* Main data table */}
-            {accounts.length > 0 && selectedBank && (
+            {items.length > 0 && (
               <div className="px-4 lg:px-6">
                 <TransactionsDataTable columns={columns} initialRequest={initialRequest} />
               </div>

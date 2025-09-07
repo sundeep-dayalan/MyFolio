@@ -13,15 +13,26 @@ export interface PaginatedTransactionsRequest {
   pageSize: number;
   sortBy?: string;
   sortOrder?: 'asc' | 'desc';
-  transactionType?: 'added' | 'modified' | 'removed' | 'all'; // New field
   filters?: {
+    // Core Identity Filters
     accountId?: string;
     itemId?: string;
-    institutionName?: string;
-    category?: string;
+    
+    // State & Type Filters  
+    status?: 'posted' | 'pending' | 'removed';
+    isPending?: boolean;
+    paymentChannel?: 'online' | 'in store' | 'other';
+    
+    // Date & Financial Filters
     dateFrom?: string;
     dateTo?: string;
+    minAmount?: number;
+    maxAmount?: number;
+    currency?: string;
+    
+    // Content & Category Filters
     searchTerm?: string;
+    category?: string;
   };
 }
 
@@ -37,49 +48,61 @@ export interface PaginatedTransactionsResponse {
 }
 
 export interface Transaction {
-  transaction_id: string;
-  account_id: string;
-  amount: number;
-  iso_currency_code: string;
-  unofficial_currency_code: string | null;
-  category: string[] | null;
-  category_id: string;
-  date: string;
-  authorized_date: string | null;
-  name: string;
-  merchant_name: string | null;
-  payment_channel: string;
-  pending: boolean;
-  account_owner: string | null;
-  transaction_type: string;
-  check_number?: string | null;
-  merchant_entity_id?: string | null;
-  location: {
-    address: string | null;
-    city: string | null;
-    region: string | null;
-    postal_code: string | null;
-    country: string | null;
-    store_number?: string | null;
-  } | null;
-  payment_meta: {
-    reference_number: string | null;
-    ppd_id: string | null;
-    payee: string | null;
-  } | null;
-  // Additional fields added by our backend
-  institution_name: string;
-  institution_id: string;
-  account_name: string;
-  account_type: string;
-  account_subtype: string;
-  logo_url?: string;
-  personal_finance_category?: {
-    primary: string;
-    confidence_level: string;
-    detailed: string;
+  // Core Identifiers
+  id: string;
+  userId: string;
+  type: 'transaction';
+  
+  // Plaid-Specific Foreign Keys
+  plaidTransactionId: string;
+  plaidAccountId: string;
+  plaidItemId: string;
+  
+  // System Metadata
+  _meta: {
+    createdAt: string;
+    updatedAt: string;
+    isRemoved: boolean;
+    sourceSyncCursor: string;
   };
-  personal_finance_category_icon_url?: string;
+  
+  // Primary Transaction Data
+  description: string;
+  amount: number;
+  currency: string;
+  date: string;
+  authorizedDate?: string;
+  isPending: boolean;
+  
+  // Enrichment & Categorization Data
+  category: {
+    primary: string;
+    detailed: string;
+    confidence?: string;
+  };
+  paymentChannel: string;
+  location?: {
+    address?: string;
+    city?: string;
+    region?: string;
+    postal_code?: string;
+    country?: string;
+    lat?: number;
+    lon?: number;
+    store_number?: string;
+  };
+  counterparties: Array<{
+    name: string;
+    entityId?: string;
+    type: string;
+    website?: string;
+    logoUrl?: string;
+    confidenceLevel?: string;
+  }>;
+  
+  // Reconciliation & Auxiliary Data
+  pendingTransactionId?: string;
+  originalDescription?: string;
 }
 
 class CosmosDBServiceClass {
@@ -109,15 +132,15 @@ class CosmosDBServiceClass {
       pageSize: request.pageSize.toString(),
     });
 
-    // Add transaction type parameter (default to 'added')
-    queryParams.append('transactionType', request.transactionType || 'added');
-
+    // Pagination & Sorting Parameters
     if (request.sortBy) {
       queryParams.append('sortBy', request.sortBy);
     }
     if (request.sortOrder) {
       queryParams.append('sortOrder', request.sortOrder);
     }
+
+    // Core Identity Filters
     if (request.filters?.accountId) {
       queryParams.append('accountId', request.filters.accountId);
     }
@@ -125,20 +148,40 @@ class CosmosDBServiceClass {
       queryParams.append('itemId', request.filters.itemId);
     }
 
-    if (request.filters?.institutionName) {
-      queryParams.append('institutionName', request.filters.institutionName);
+    // State & Type Filters
+    if (request.filters?.status) {
+      queryParams.append('status', request.filters.status);
     }
-    if (request.filters?.category) {
-      queryParams.append('category', request.filters.category);
+    if (request.filters?.isPending !== undefined) {
+      queryParams.append('isPending', request.filters.isPending.toString());
     }
+    if (request.filters?.paymentChannel) {
+      queryParams.append('paymentChannel', request.filters.paymentChannel);
+    }
+
+    // Date & Financial Filters
     if (request.filters?.dateFrom) {
       queryParams.append('dateFrom', request.filters.dateFrom);
     }
     if (request.filters?.dateTo) {
       queryParams.append('dateTo', request.filters.dateTo);
     }
+    if (request.filters?.minAmount !== undefined) {
+      queryParams.append('minAmount', request.filters.minAmount.toString());
+    }
+    if (request.filters?.maxAmount !== undefined) {
+      queryParams.append('maxAmount', request.filters.maxAmount.toString());
+    }
+    if (request.filters?.currency) {
+      queryParams.append('currency', request.filters.currency);
+    }
+
+    // Content & Category Filters
     if (request.filters?.searchTerm) {
       queryParams.append('searchTerm', request.filters.searchTerm);
+    }
+    if (request.filters?.category) {
+      queryParams.append('category', request.filters.category);
     }
 
     return this.makeRequest<PaginatedTransactionsResponse>(
