@@ -65,8 +65,20 @@ class GetAccountsResponse(BaseModel):
 
 
 class PartialItem(BaseModel):
+    item_id: str
     institution_id: str
     institution_name: str
+    accounts: List[PartialAccountInfo] = []
+
+
+class PartialAccountInfo(BaseModel):
+    account_id: str
+    name: Optional[str] = None
+    official_name: Optional[str] = None
+    type: Optional[str] = None
+    subtype: Optional[str] = None
+    mask: Optional[str] = None
+    logo: Optional[str] = None
 
 
 class PartialBankInfo(BaseModel):

@@ -78,6 +78,7 @@ from ..models.bank import (
     GetAccountsResponse,
     GetBanksResponse,
     InstitutionDetail,
+    PartialAccountInfo,
     PartialBankDocument,
     PartialBankInfo,
     PartialItem,
@@ -946,7 +947,7 @@ class PlaidService:
             await cosmos_client.ensure_connected()
 
             query = """
-                SELECT c.id, c.bankInfo, c.status, c.updatedAt
+                SELECT c.id, c.bankInfo, c.status, c.updatedAt, c.accounts
                 FROM c 
                 WHERE c.userId = @userId 
                 AND c.status = @status
@@ -970,9 +971,30 @@ class PlaidService:
             banks = []
             for bank_doc_raw in bank_documents_raw:
                 try:
+                    # Extract accounts and convert to PartialAccountInfo
+                    accounts = []
+                    if "accounts" in bank_doc_raw and bank_doc_raw["accounts"]:
+                        for account_data in bank_doc_raw["accounts"]:
+                            partial_account = PartialAccountInfo(
+                                account_id=account_data.get("account_id", ""),
+                                name=account_data.get("name", ""),
+                                official_name=account_data.get("official_name", ""),
+                                type=account_data.get("type", ""),
+                                subtype=account_data.get("subtype", ""),
+                                mask=account_data.get("mask"),
+                                logo=account_data.get("logo")
+                            )
+                            accounts.append(partial_account)
+                    
                     partial_item = PartialItem(
-                        institution_id=bank_doc_raw["bankInfo"]["item"]["institution_id"],
-                        institution_name=bank_doc_raw["bankInfo"]["item"]["institution_name"],
+                        item_id=bank_doc_raw["bankInfo"]["item"]["item_id"],
+                        institution_id=bank_doc_raw["bankInfo"]["item"][
+                            "institution_id"
+                        ],
+                        institution_name=bank_doc_raw["bankInfo"]["item"][
+                            "institution_name"
+                        ],
+                        accounts=accounts
                     )
                     partial_bank_info = PartialBankInfo(item=partial_item)
                     banks.append(partial_bank_info)
