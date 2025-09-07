@@ -83,9 +83,32 @@ const AccountsPage: React.FC = () => {
 
   // Helper functions
   const getItemIdForBank = (bankName: string): string | null => {
-    if (!itemsData?.items) return null;
-    const item = itemsData.items.find((item) => item.institution_name === bankName);
-    return item?.item_id || null;
+    console.log('Looking for bank:', bankName);
+    console.log('ItemsData:', itemsData);
+    
+    // Handle the nested structure from the backend GetBanksResponse
+    if (itemsData?.banks) {
+      console.log('Using banks field from API response');
+      const banks = itemsData.banks.map(bankInfo => ({
+        institution_name: bankInfo.item.institution_name,
+        item_id: bankInfo.item.item_id
+      }));
+      console.log('Available banks:', banks);
+      const bank = banks.find(b => b.institution_name === bankName);
+      console.log('Found bank:', bank);
+      return bank?.item_id || null;
+    }
+    
+    // Fallback for legacy flat structure
+    if (itemsData?.items) {
+      console.log('Using legacy items field');
+      const item = itemsData.items.find((item) => item.institution_name === bankName);
+      console.log('Found item:', item);
+      return item?.item_id || null;
+    }
+    
+    console.warn('No items data found in either banks or items field:', itemsData);
+    return null;
   };
 
   const initializePlaidConnection = async () => {

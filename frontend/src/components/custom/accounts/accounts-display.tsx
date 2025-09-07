@@ -172,9 +172,15 @@ export function AccountsDisplay({ institutions, accounts, onUnlinkBank, getItemI
                         variant="outline"
                         size="sm"
                         onClick={() => {
+                          console.log('Unlink button clicked for:', institution.name);
                           const itemId = getItemIdForBank(institution.name);
+                          console.log('ItemId found:', itemId);
                           if (itemId) {
                             onUnlinkBank(institution.name, itemId);
+                          } else {
+                            console.error('No itemId found for bank:', institution.name);
+                            // Still call onUnlinkBank without itemId to show dialog
+                            onUnlinkBank(institution.name);
                           }
                         }}
                         disabled={isRevoking}
@@ -261,9 +267,15 @@ export function AccountsDisplay({ institutions, accounts, onUnlinkBank, getItemI
                         variant="outline"
                         size="sm"
                         onClick={() => {
+                          console.log('Unlink button clicked for:', bankName);
                           const itemId = getItemIdForBank(bankName);
+                          console.log('ItemId found:', itemId);
                           if (itemId) {
                             onUnlinkBank(bankName, itemId);
+                          } else {
+                            console.error('No itemId found for bank:', bankName);
+                            // Still call onUnlinkBank without itemId to show dialog
+                            onUnlinkBank(bankName);
                           }
                         }}
                         disabled={isRevoking}

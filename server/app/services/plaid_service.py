@@ -822,25 +822,10 @@ class PlaidService:
         """Revoke access to a Plaid item and remove from database."""
         try:
             logger.info(f"Revoking access for user {user_id}, item {item_id}")
+            await cosmos_client.ensure_connected()
 
-            # Get the token first
-            tokens = self.get_user_access_tokens(user_id)
-            token_to_revoke = None
-
-            for token in tokens:
-                if token.id == item_id:
-                    token_to_revoke = token
-                    break
-
-            if not token_to_revoke:
-                logger.warning(f"Token not found for item {item_id}")
-                return False
-
-            # Revoke with Plaid API
-            decrypted_token = await AzureKeyVaultService.decrypt_secret(
-                token_to_revoke.plaidData["encryptedAccessToken"]
-            )
-            request = ItemRemoveRequest(access_token=decrypted_token)
+            access_token = await self.get_bank_access_token(user_id, item_id)
+            request = ItemRemoveRequest(access_token=access_token)
 
             try:
                 client = await self._get_client(user_id)
@@ -859,7 +844,7 @@ class PlaidService:
             cosmos_client.delete_item(Containers.BANKS, item_id, user_id)
 
             # Clean up transaction data
-            transaction_storage_service.delete_item_transactions(user_id, item_id)
+            await transaction_storage_service.delete_item_transactions(user_id, item_id)
 
             logger.info(f"Successfully cleaned up all data for item {item_id}")
             return True
@@ -982,10 +967,10 @@ class PlaidService:
                                 type=account_data.get("type", ""),
                                 subtype=account_data.get("subtype", ""),
                                 mask=account_data.get("mask"),
-                                logo=account_data.get("logo")
+                                logo=account_data.get("logo"),
                             )
                             accounts.append(partial_account)
-                    
+
                     partial_item = PartialItem(
                         item_id=bank_doc_raw["bankInfo"]["item"]["item_id"],
                         institution_id=bank_doc_raw["bankInfo"]["item"][
@@ -994,7 +979,7 @@ class PlaidService:
                         institution_name=bank_doc_raw["bankInfo"]["item"][
                             "institution_name"
                         ],
-                        accounts=accounts
+                        accounts=accounts,
                     )
                     partial_bank_info = PartialBankInfo(item=partial_item)
                     banks.append(partial_bank_info)

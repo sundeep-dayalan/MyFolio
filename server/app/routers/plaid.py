@@ -275,7 +275,8 @@ async def get_transactions_paginated(
         None, description="Filter by status: posted, pending, removed"
     ),
     isPending: Optional[bool] = Query(
-        None, description="Filter by pending status (true for pending, false for posted)"
+        None,
+        description="Filter by pending status (true for pending, false for posted)",
     ),
     paymentChannel: Optional[str] = Query(
         None, description="Filter by payment channel: online, in store, other"
@@ -362,20 +363,25 @@ def get_transactions_count(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# @router.get("/transactions/test")
-# async def get_transactions_count(
-#     user_id: str = Depends(get_current_user),
-#     plaid_service: PlaidService = Depends(get_plaid_service),
-# ):
-#     """Get total count of transactions for the current user."""
-#     try:
-#         count = await plaid_service.sync_transactions(
-#             "J8aRXNqzQzt3nBxDdkzvhJvGEyqm6kcdQEKva", user_id
-#         )
-#         return {"count": count}
+@router.get("/transactions/test")
+async def get_transactions_count(
+    user_id: str = Depends(get_current_user),
+    plaid_service: PlaidService = Depends(get_plaid_service),
+):
+    """Get total count of transactions for the current user."""
+    try:
+        await cosmos_client.ensure_connected()
+        # count = await plaid_service.sync_transactions(
+        #     "J8aRXNqzQzt3nBxDdkzvhJvGEyqm6kcdQEKva", user_id
+        # )
+        # return {"count": count}
 
-#     except Exception as e:
-#         logger.error(
-#             f"Failed to get transaction count for user {user_id}: {e}", exc_info=True
-#         )
-#         raise HTTPException(status_code=500, detail=str(e))
+        await transaction_storage_service.delete_item_transactions(
+            user_id, "qLJQGxdEqbukrbpyQvlxS1K3vPQ5ZBTdByg4p"
+        )
+
+    except Exception as e:
+        logger.error(
+            f"Failed to get transaction count for user {user_id}: {e}", exc_info=True
+        )
+        raise HTTPException(status_code=500, detail=str(e))

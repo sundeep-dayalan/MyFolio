@@ -10,9 +10,18 @@ export interface PlaidItem {
   last_used_at: string | null;
 }
 
+export interface PlaidBankInfo {
+  item: {
+    item_id: string;
+    institution_id: string;
+    institution_name: string;
+    accounts: any[];
+  };
+}
+
 export interface PlaidItemsResponse {
-  items?: PlaidItem[];
-  banks?: PlaidItem[]; // Actual API response field
+  items?: PlaidItem[]; // Legacy field for backward compatibility
+  banks?: PlaidBankInfo[]; // Actual API response field with nested structure
   banks_count?: number;
 }
 
