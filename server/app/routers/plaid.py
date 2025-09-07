@@ -10,6 +10,7 @@ from ..dependencies import get_current_user, get_plaid_service
 from ..utils.logger import get_logger
 from ..constants import ApiRoutes, ApiTags
 from ..services.transaction_storage_service import transaction_storage_service
+from ..database import cosmos_client
 
 logger = get_logger(__name__)
 
@@ -49,10 +50,6 @@ class PaginatedTransactionsResponse(BaseModel):
     hasNextPage: bool
     hasPreviousPage: bool
     transactionType: str  # Added to show which type was queried
-
-
-def get_plaid_service() -> PlaidService:
-    return PlaidService()
 
 
 @router.post("/create_link_token")
@@ -99,7 +96,7 @@ async def get_accounts(
     user_id: str = Depends(get_current_user),
     plaid_service: PlaidService = Depends(get_plaid_service),
 ):
-    """Fetch all account balances for the current user from Cosmos DB only (never hits Plaid API)."""
+    """Fetch all account balances for the current user from Cosmos DB only."""
     try:
         result = await plaid_service.get_accounts(user_id)
         return result
@@ -259,55 +256,47 @@ async def force_refresh_transactions(
 
 
 @router.get("/transactions/paginated", response_model=PaginatedTransactionsResponse)
-def get_transactions_paginated(
-    page: int = Query(1, ge=1, description="Page number (1-indexed)"),
+async def get_transactions_paginated(
+    user_id: str = Depends(get_current_user),
+    # Pagination & Sorting Parameters
+    page: int = Query(1, ge=1, description="Page number, defaults to 1"),
     pageSize: int = Query(
-        20, ge=1, le=100, description="Number of transactions per page"
+        20, ge=1, le=100, description="Number of items per page, defaults to 20"
     ),
-    sortBy: str = Query("date", description="Field to sort by"),
-    sortOrder: str = Query("desc", regex="^(asc|desc)$", description="Sort order"),
-    transactionType: str = Query(
-        "added",
-        regex="^(added|modified|removed|all)$",
-        description="Type of transactions to fetch",
+    sortBy: str = Query("date", description="Field to sort by: date, amount"),
+    sortOrder: str = Query("desc", description="Sort order: asc or desc"),
+    # Core Identity Filters
+    accountId: Optional[str] = Query(None, description="Filter by specific account ID"),
+    itemId: Optional[str] = Query(
+        None, description="Filter by specific item ID (bank connection)"
     ),
-    accountId: Optional[str] = Query(None, description="Filter by account ID"),
-    itemId: Optional[str] = Query(None, description="Filter by item ID (bank)"),
-    institutionName: Optional[str] = Query(
-        None, description="Filter by institution name"
+    # State & Type Filters
+    status: Optional[str] = Query(
+        None, description="Filter by status: posted, pending, removed"
     ),
-    category: Optional[str] = Query(None, description="Filter by category"),
+    paymentChannel: Optional[str] = Query(
+        None, description="Filter by payment channel: online, in store, other"
+    ),
+    # Date & Financial Filters
     dateFrom: Optional[str] = Query(None, description="Start date filter (YYYY-MM-DD)"),
     dateTo: Optional[str] = Query(None, description="End date filter (YYYY-MM-DD)"),
-    searchTerm: Optional[str] = Query(
-        None, description="Search term for name/merchant"
+    minAmount: Optional[float] = Query(None, description="Minimum transaction amount"),
+    maxAmount: Optional[float] = Query(None, description="Maximum transaction amount"),
+    currency: Optional[str] = Query(
+        None, description="Filter by currency code (e.g., USD)"
     ),
-    user_id: str = Depends(get_current_user),
+    # Content & Category Filters
+    searchTerm: Optional[str] = Query(
+        None, description="Search term for description and counterparty names"
+    ),
+    category: Optional[str] = Query(
+        None, description="Filter by primary personal finance category"
+    ),
 ):
-    """Get paginated transactions from Firestore with filtering and sorting."""
+    """Get paginated transactions from Cosmos DB with comprehensive filtering and sorting."""
     try:
-        logger.info(
-            f"Getting paginated {transactionType} transactions for user {user_id}, page {page}"
-        )
-
-        # Build filters dictionary
-        filters = {}
-        if accountId:
-            filters["account_id"] = accountId
-        if itemId:
-            filters["item_id"] = itemId
-        if institutionName:
-            filters["institution_name"] = institutionName
-        if category:
-            filters["category"] = category
-        if dateFrom:
-            filters["date_from"] = dateFrom
-        if dateTo:
-            filters["date_to"] = dateTo
-        if searchTerm:
-            filters["search_term"] = searchTerm
-
-        # Get paginated transactions with transaction type
+        await cosmos_client.ensure_connected()
+        # Get paginated transactions with all filters
         (
             transactions,
             total_count,
@@ -320,8 +309,17 @@ def get_transactions_paginated(
             page_size=pageSize,
             sort_by=sortBy,
             sort_order=sortOrder,
-            filters=filters if filters else None,
-            transaction_type=transactionType,
+            account_id=accountId,
+            item_id=itemId,
+            status=status,
+            payment_channel=paymentChannel,
+            date_from=dateFrom,
+            date_to=dateTo,
+            min_amount=minAmount,
+            max_amount=maxAmount,
+            currency=currency,
+            search_term=searchTerm,
+            category=category,
         )
 
         return PaginatedTransactionsResponse(
@@ -332,7 +330,8 @@ def get_transactions_paginated(
             totalPages=total_pages,
             hasNextPage=has_next,
             hasPreviousPage=has_previous,
-            transactionType=transactionType,
+            # Use status as transaction type for backward compatibility
+            transactionType=status or "all",
         )
 
     except Exception as e:
