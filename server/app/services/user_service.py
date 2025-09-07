@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import List, Optional, Dict, Any
 from azure.cosmos.exceptions import CosmosResourceNotFoundError, CosmosHttpResponseError
 
-from ..models.user import UserCreate, UserUpdate, UserResponse, UserInDB
+from ..models.user import UserCreate, UserUpdate, UserResponse
 from ..exceptions import UserNotFoundError, UserAlreadyExistsError, DatabaseError
 from ..utils.logger import get_logger
 from ..constants import Containers

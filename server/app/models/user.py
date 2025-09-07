@@ -1,6 +1,7 @@
 """
 User-related Pydantic models.
 """
+
 from datetime import datetime
 from typing import Optional, Dict, Any
 from pydantic import BaseModel, Field, EmailStr, validator
@@ -51,12 +52,6 @@ class UserResponse(UserBase):
         from_attributes = True
 
 
-class UserInDB(UserResponse):
-    """User model as stored in database."""
-
-    pass
-
-
 # Auth-related models
 class TokenData(BaseModel):
     """Token data model."""
@@ -70,7 +65,6 @@ class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
     expires_in: int
-
 
 
 class MicrosoftUserInfo(BaseModel):
