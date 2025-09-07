@@ -2,7 +2,7 @@ import asyncio
 from inspect import _void
 from typing import List, Dict, Any, Optional, Tuple
 
-from fastapi import Depends
+from fastapi import BackgroundTasks, Depends
 from plaid.api import plaid_api
 from plaid.model.transactions_sync_request import TransactionsSyncRequest
 from plaid.model.transactions_get_request import TransactionsGetRequest
@@ -255,7 +255,7 @@ class PlaidService:
         return LinkTokenAccountFilters(**filter_params)
 
     async def exchange_public_token(
-        self, user_id: str, public_token: str
+        self, user_id: str, public_token: str, background_tasks: BackgroundTasks
     ) -> BankDocument:
         """Exchange public token for access token and store it securely."""
         try:
@@ -278,9 +278,9 @@ class PlaidService:
             stored_token = await self._store_access_token(
                 user_id, access_token, item_id, bank_info
             )
-
-            await self.sync_accounts_for_item(item_id, user_id)
-
+            background_tasks.add_task(
+                self.sync_accounts_in_background, item_id, user_id
+            )
             logger.info(
                 f"Successfully exchanged and stored token for user {user_id}, item_id: {item_id}"
             )
@@ -405,6 +405,7 @@ class PlaidService:
                 status=BankStatus.ACTIVE,
                 createdAt=now_iso,
                 environment=self.environment,
+                accounts=[],
             )
 
             # Store document
@@ -478,9 +479,6 @@ class PlaidService:
         Retrieve and decrypt the access token for a single, active bank document.
         """
         logger.info(f"Retrieving bank document for user {user_id}, item {item_id}")
-
-        # CHANGE: The generic try...except block is removed. We only handle
-        # the "not found" case specifically. Other errors will propagate.
 
         query = "SELECT * FROM c WHERE c.id = @itemId AND c.userId = @userId AND c.status = @status"
         parameters = [
@@ -582,6 +580,23 @@ class PlaidService:
                 raise PlaidApiException(e)
             raise e
 
+    def sync_accounts_in_background(self, item_id: str, user_id: str) -> None:
+        """
+        Synchronous wrapper for sync_accounts_for_item to be used with background tasks.
+        FastAPI's background_tasks.add_task() expects synchronous functions.
+        """
+        try:
+            # Create a new event loop for the background task
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(self.sync_accounts_for_item(item_id, user_id))
+        except Exception as e:
+            logger.error(
+                f"Background sync failed for user {user_id}, item {item_id}: {e}"
+            )
+        finally:
+            loop.close()
+
     async def get_accounts(self, user_id: str) -> GetAccountsResponse:
         """
         Get cached account data, grouped by institution.
@@ -613,10 +628,8 @@ class PlaidService:
                 logger.info(f"No active bank documents found for user {user_id}")
                 return GetAccountsResponse(
                     institutions=[],
-                    overall_total_balance=0.0,
-                    overall_account_count=0,
                     banks_count=0,
-                    last_updated=datetime.now(timezone.utc).isoformat(),
+                    accounts_count=0,
                 )
 
             bank_documents: List[PartialBankDocument] = []

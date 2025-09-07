@@ -73,13 +73,14 @@ async def create_link_token(
 @router.post("/exchange_public_token")
 async def exchange_public_token(
     request: ExchangeTokenRequest,
+    background_tasks: BackgroundTasks,
     user_id: str = Depends(get_current_user),
     plaid_service: PlaidService = Depends(get_plaid_service),
 ):
     """Exchange public token for an access token and store securely."""
     try:
         result = await plaid_service.exchange_public_token(
-            user_id, request.public_token
+            user_id, request.public_token, background_tasks
         )
 
         # Convert to dict for response
