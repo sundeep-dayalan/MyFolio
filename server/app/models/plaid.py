@@ -126,15 +126,17 @@ class PlaidWebhookRequest(BaseModel):
         from_attributes = True
 
 
+# https://plaid.com/docs/api/accounts/#accounts-get-response-accounts-type:~:text=and%20corresponding%20subtypes.-,Possible%20values,-%3A%20investment%2C
 class AccountType(str, Enum):
     INVESTMENT = "investment"
     CREDIT = "credit"
     DEPOSITORY = "depository"
     LOAN = "loan"
-    BROKERAGE = "brokerage"  # Legacy
+    BROKERAGE = "brokerage"
     OTHER = "other"
 
 
+# https://plaid.com/docs/api/accounts/#accounts-get-response-accounts-type:~:text=and%20corresponding%20subtypes.-,Possible%20values,-%3A%20401a%2C
 class AccountSubtype(str, Enum):
     """A comprehensive list of account subtypes based on Plaid documentation."""
 
@@ -223,6 +225,7 @@ class AccountSubtype(str, Enum):
     OTHER = "other"
 
 
+# https://plaid.com/docs/api/accounts/#accounts-get-response-accounts-type:~:text=via%20Database%20Auth.-,Possible%20values,-%3A%20automatically_verified%2C
 class VerificationStatus(str, Enum):
     AUTOMATICALLY_VERIFIED = "automatically_verified"
     PENDING_AUTOMATIC_VERIFICATION = "pending_automatic_verification"
@@ -281,7 +284,7 @@ class Account(BaseModel):
     name: str
     official_name: Optional[str] = None
     type: AccountType
-    subtype: Optional[AccountSubtype] = None  # Using Enum here is best practice
+    subtype: Optional[AccountSubtype] = None
     verification_status: Optional[VerificationStatus] = None
     verification_name: Optional[str] = None
     verification_insights: Optional[VerificationInsights] = None
@@ -356,6 +359,7 @@ class PlaidError(BaseModel):
     status: Optional[int] = None
 
 
+# https://plaid.com/docs/api/accounts/#accounts-get-response-accounts-type:~:text=fallback%20flow.-,Possible%20values%3A,-INSTANT_AUTH%2C%20INSTANT_MATCH
 class AuthMethod(str, Enum):
     """The method used to populate Auth data for the Item."""
 
@@ -370,6 +374,7 @@ class AuthMethod(str, Enum):
     INVESTMENTS_FALLBACK = "INVESTMENTS_FALLBACK"
 
 
+# https://plaid.com/docs/api/accounts/#accounts-get-response-item-available-products:~:text=resolving%20the%20error-,available_products,-JSON
 class PlaidProduct(str, Enum):
     """Represents a Plaid product."""
 
@@ -414,7 +419,6 @@ class PlaidProduct(str, Enum):
     # Payment & Transfer Products
     TRANSFER = "transfer"
     STANDING_ORDERS = "standing_orders"
-    DEPOSIT_SWITCH = "deposit_switch"
     PROCESSOR_PAYMENTS = "processor_payments"
     PAY_BY_BANK = "pay_by_bank"
     PROTECT_LINKED_BANK = "protect_linked_bank"
@@ -476,15 +480,33 @@ class PlaidItemGetResponse(BaseModel):
     status: Optional[PlaidItemStatus] = None
 
 
+# https://plaid.com/docs/api/institutions/#search-institutions:~:text=Minimum%3A%200-,country_codes,-required
 class CountryCode(str, Enum):
     """A list of the country codes supported by the institution."""
 
     US = "US"
     GB = "GB"
     ES = "ES"
+    NL = "NL"
+    FR = "FR"
+    IE = "IE"
     CA = "CA"
+    DE = "DE"
+    IT = "IT"
+    PL = "PL"
+    DK = "DK"
+    NO = "NO"
+    SE = "SE"
+    EE = "EE"
+    LT = "LT"
+    LV = "LV"
+    PT = "PT"
+    BE = "BE"
+    AT = "AT"
+    FI = "FI"
 
 
+# https://plaid.com/docs/api/institutions/#institutions-get-response-institutions-status-item-logins-status
 class HealthStatus(str, Enum):
     """The health status of a product, now deprecated in favor of the breakdown object."""
 
@@ -493,6 +515,7 @@ class HealthStatus(str, Enum):
     DOWN = "DOWN"
 
 
+# https://plaid.com/docs/api/institutions/#institutions-get-response-institutions-status-item-logins-breakdown-refresh-interval
 class RefreshInterval(str, Enum):
     """The refresh interval for subscription products."""
 
@@ -501,6 +524,7 @@ class RefreshInterval(str, Enum):
     STOPPED = "STOPPED"
 
 
+# https://plaid.com/docs/api/institutions/#institutions-get-response-institutions-status-health-incidents-incident-updates-status
 class IncidentStatus(str, Enum):
     """The status of a health incident."""
 
@@ -511,6 +535,7 @@ class IncidentStatus(str, Enum):
     UNKNOWN = "UNKNOWN"
 
 
+# https://plaid.com/docs/api/institutions/#institutions-get-response-institutions-payment-initiation-metadata-standing-order-metadata-valid-standing-order-intervals
 class StandingOrderInterval(str, Enum):
     """Valid standing order intervals supported by the institution."""
 
