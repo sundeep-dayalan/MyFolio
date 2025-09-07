@@ -33,10 +33,27 @@ export interface PlaidAccount {
   institution_id?: string;
 }
 
-export interface PlaidAccountsResponse {
-  accounts: PlaidAccount[];
+export interface InstitutionDetail {
+  name: string;
+  logo?: string;
+  status: string;
   total_balance: number;
   account_count: number;
+  accounts: PlaidAccount[];
+  last_account_sync?: {
+    last_sync?: string;
+    status?: string;
+  };
+}
+
+export interface PlaidAccountsResponse {
+  institutions: InstitutionDetail[];
+  accounts_count: number;
+  banks_count: number;
+  // Legacy fields for backward compatibility during transition
+  accounts?: PlaidAccount[];
+  total_balance?: number;
+  account_count?: number;
   last_updated?: string;
   from_stored?: boolean;
   refreshed?: boolean;

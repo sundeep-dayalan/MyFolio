@@ -1,5 +1,6 @@
+import asyncio
 from inspect import _void
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 
 from fastapi import Depends
 from plaid.api import plaid_api
@@ -37,7 +38,12 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 from ..dependencies import get_current_user
 
-from ..exceptions import BankNotFoundError, DatabaseError, PlaidApiException
+from ..exceptions import (
+    AccountFetchError,
+    BankNotFoundError,
+    DatabaseError,
+    PlaidApiException,
+)
 from .az_key_vault_service import (
     AzureKeyVaultService,
 )
@@ -47,6 +53,7 @@ from ..settings import settings
 from ..database import cosmos_client
 from ..utils.logger import get_logger
 from ..models.plaid import (
+    PlaidAccount,
     PlaidAccountWithBalance,
     PlaidAccountsGetResponse,
     PlaidBalance,
@@ -59,6 +66,9 @@ from ..models.bank import (
     BankStatus,
     BankSummary,
     BankDocument,
+    GetAccountsResponse,
+    InstitutionDetail,
+    PartialBankDocument,
 )
 from ..models.sync import (
     SyncInfo,
@@ -497,152 +507,6 @@ class PlaidService:
         # Let any decryption errors propagate up naturally.
         return await AzureKeyVaultService.decrypt_secret(document.encryptedAccessToken)
 
-    async def get_accounts_with_balances(
-        self,
-        user_id: str,
-        account_ids: Optional[List[str]] = None,
-        use_cached_db_data: bool = True,
-    ) -> Dict[str, Any]:
-        """
-        If use_cached_db_data is True, fetch account data from bank documents.
-        If use_cached_db_data is False, fetch from Plaid API and update bank documents.
-        """
-        try:
-            logger.info(
-                f"Getting accounts with balances for user {user_id}, use_cached_db_data={use_cached_db_data}"
-            )
-
-            if use_cached_db_data:
-                # Fetch from bank documents
-                cached_data = self._get_cached_accounts_from_banks(user_id)
-                if cached_data and cached_data["accounts"]:
-                    logger.info(f"Returning cached account data for user {user_id}")
-                    return cached_data
-                else:
-                    logger.warning(f"No cached account data found for user {user_id}")
-                    return {
-                        "accounts": [],
-                        "total_balance": 0.0,
-                        "account_count": 0,
-                        "last_updated": datetime.now(timezone.utc).isoformat(),
-                        "message": "No cached account data found. Please refresh.",
-                    }
-
-            # If not using cached balance, fetch from Plaid and update bank documents
-            tokens = self.get_user_access_tokens(user_id)
-            if not tokens:
-                logger.warning(f"No active tokens found for user {user_id}")
-                return {
-                    "accounts": [],
-                    "total_balance": 0.0,
-                    "account_count": 0,
-                    "last_updated": datetime.now(timezone.utc).isoformat(),
-                }
-
-            all_accounts = []
-            total_balance = 0.0
-
-            for token in tokens:
-                try:
-                    decrypted_token = await AzureKeyVaultService.decrypt_secret(
-                        token.plaidData["encryptedAccessToken"]
-                    )
-
-                    # Set it to 90 days ago to ensure we get acceptable balance data (Only applicable for Capital One)
-                    min_last_updated = datetime.now(timezone.utc) - timedelta(days=90)
-
-                    if account_ids:
-                        options = AccountsBalanceGetRequestOptions(
-                            account_ids=account_ids,
-                            min_last_updated_datetime=min_last_updated,
-                        )
-                        request = AccountsBalanceGetRequest(
-                            access_token=decrypted_token, options=options
-                        )
-                    else:
-                        options = AccountsBalanceGetRequestOptions(
-                            min_last_updated_datetime=min_last_updated
-                        )
-                        request = AccountsBalanceGetRequest(
-                            access_token=decrypted_token, options=options
-                        )
-                    client = await self._get_client(user_id)
-                    response = client.accounts_balance_get(request)
-                    accounts_data = response["accounts"]
-
-                    bank_accounts = []
-                    bank_total_balance = 0.0
-
-                    for account in accounts_data:
-                        balance_info = account["balances"]
-                        balance = PlaidBalance(
-                            available=balance_info.get("available"),
-                            current=balance_info.get("current", 0),
-                            limit=balance_info.get("limit"),
-                            iso_currency_code=balance_info.get(
-                                "iso_currency_code", "USD"
-                            ),
-                            unofficial_currency_code=balance_info.get(
-                                "unofficial_currency_code"
-                            ),
-                        )
-                        account_type = (
-                            account["type"].value
-                            if hasattr(account["type"], "value")
-                            else account["type"]
-                        )
-                        account_subtype = account.get("subtype")
-                        if account_subtype and hasattr(account_subtype, "value"):
-                            account_subtype = account_subtype.value
-                        account_with_balance = PlaidAccountWithBalance(
-                            account_id=account["account_id"],
-                            name=account["name"],
-                            official_name=account.get("official_name"),
-                            type=account_type,
-                            subtype=account_subtype,
-                            mask=account.get("mask"),
-                            balances=balance,
-                            item_id=token.id,
-                            institution_name=token.institutionName,
-                            institution_id=token.institutionId,
-                        )
-                        account_dict = account_with_balance.model_dump()
-                        bank_accounts.append(account_dict)
-                        all_accounts.append(account_dict)
-                        if balance.current is not None:
-                            current_balance = float(balance.current)
-                            bank_total_balance += current_balance
-                            total_balance += current_balance
-
-                    # Update this bank's document with accounts
-                    # self._update_bank_accounts(
-                    #     user_id, token.id, bank_accounts, bank_total_balance
-                    # )
-                    self._update_token_last_used(user_id, token.id)
-
-                except Exception as e:
-                    logger.error(f"Failed to get balances for token {token.id}: {e}")
-                    raise Exception(
-                        f"Failed to fetch account balances from Plaid: {str(e)}"
-                    )
-
-            all_accounts.sort(key=lambda x: x["balances"]["current"] or 0, reverse=True)
-            result = {
-                "accounts": all_accounts,
-                "total_balance": round(total_balance, 2),
-                "account_count": len(all_accounts),
-                "last_updated": datetime.now(timezone.utc).isoformat(),
-            }
-            logger.info(
-                f"Retrieved {len(all_accounts)} accounts with total balance ${total_balance:.2f} for user {user_id}"
-            )
-            return result
-        except Exception as e:
-            logger.error(
-                f"Failed to get accounts with balances for user {user_id}: {e}"
-            )
-            raise Exception(f"Failed to get account balances: {e}")
-
     async def sync_accounts_for_item(
         self,
         item_id: str,
@@ -718,52 +582,123 @@ class PlaidService:
                 raise PlaidApiException(e)
             raise e
 
-    def _get_cached_accounts_from_banks(self, user_id: str) -> Dict[str, Any]:
-        """Get cached account data from all bank documents for a user."""
-        try:
-            query = "SELECT * FROM c WHERE c.userId = @userId"
-            parameters = [{"name": "@userId", "value": user_id}]
+    async def get_accounts(self, user_id: str) -> GetAccountsResponse:
+        """
+        Get cached account data, grouped by institution.
+        This implementation is optimized for performance and concurrency.
+        """
+        if not user_id or not isinstance(user_id, str):
+            raise ValueError("Valid user_id is required")
 
-            bank_documents = cosmos_client.query_items(
+        try:
+            await cosmos_client.ensure_connected()
+
+            # Updated query to fetch institution details
+            query = """
+                SELECT c.id, c.accounts, c.updatedAt, c.status, c.bankInfo, c.syncs
+                FROM c 
+                WHERE c.userId = @userId 
+                AND c.status = @status
+                """
+            parameters = [
+                {"name": "@userId", "value": user_id},
+                {"name": "@status", "value": BankStatus.ACTIVE},
+            ]
+
+            bank_documents_raw = cosmos_client.query_items(
                 Containers.BANKS, query, parameters, user_id
             )
-            all_accounts = []
-            total_balance = 0.0
 
-            logger.info(
-                f"Found {len(bank_documents)} bank documents for user {user_id}"
-            )
-
-            for bank_doc in bank_documents:
-                bank_accounts = bank_doc.get("accounts", [])
-                all_accounts.extend(bank_accounts)
-
-                # Calculate balance from individual accounts instead of relying on stored metadata
-                bank_balance = 0.0
-                for account in bank_accounts:
-                    balances = account.get("balances", {})
-                    current_balance = balances.get("current")
-                    if current_balance is not None:
-                        bank_balance += float(current_balance)
-
-                logger.info(
-                    f"Bank {bank_doc.get('id', 'unknown')}: {len(bank_accounts)} accounts, balance: ${bank_balance:.2f}"
+            if not bank_documents_raw:
+                logger.info(f"No active bank documents found for user {user_id}")
+                return GetAccountsResponse(
+                    institutions=[],
+                    overall_total_balance=0.0,
+                    overall_account_count=0,
+                    banks_count=0,
+                    last_updated=datetime.now(timezone.utc).isoformat(),
                 )
-                total_balance += bank_balance
+
+            bank_documents: List[PartialBankDocument] = []
+            for bank_doc_raw in bank_documents_raw:
+                try:
+                    parsed_doc = PartialBankDocument.model_validate(bank_doc_raw)
+                    bank_documents.append(parsed_doc)
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to parse bank document {bank_doc_raw.get('id', 'unknown')}: {e}"
+                    )
+                    raise e
+
+            # Process all valid bank documents concurrently
+            tasks = [self._process_bank_document(doc) for doc in bank_documents]
+            results: List[Optional[InstitutionDetail]] = await asyncio.gather(*tasks)
+
+            # Aggregate successful results into the final response structure
+            institutions = [res for res in results if res is not None]
+            overall_account_count = sum(inst.account_count for inst in institutions)
 
             logger.info(
-                f"Total cached balance for user {user_id}: ${total_balance:.2f}"
+                f"Account aggregation complete for user {user_id}: "
+                f"Institutions processed: {len(institutions)}/{len(bank_documents)}, "
+                f"Total accounts: {overall_account_count}, "
             )
 
-            return {
-                "accounts": all_accounts,
-                "total_balance": round(total_balance, 2),
-                "account_count": len(all_accounts),
-                "last_updated": datetime.now(timezone.utc).isoformat(),
+            response_data = {
+                "institutions": institutions,
+                "accounts_count": overall_account_count,
+                "banks_count": len(institutions),
             }
+
+            return GetAccountsResponse.model_validate(response_data)
+
         except Exception as e:
-            logger.error(f"Failed to get cached accounts from banks: {e}")
-            return {"accounts": [], "total_balance": 0.0, "account_count": 0}
+            logger.error(
+                f"Unexpected error getting accounts for user {user_id}: {e}",
+                exc_info=True,
+            )
+            raise AccountFetchError(f"Failed to get accounts: {e}")
+
+    @staticmethod
+    async def _process_bank_document(
+        bank_doc: PartialBankDocument,
+    ) -> Optional[InstitutionDetail]:
+        """
+        Processes a single bank document and transforms it into a structured InstitutionDetail object.
+        Returns None if processing fails.
+        """
+        item_id = bank_doc.id
+        try:
+            valid_accounts: List[PlaidAccountWithBalance] = []
+            bank_balance = 0.0
+
+            for account in bank_doc.accounts or []:
+                if account.balances.current is not None:
+                    try:
+                        balance_value = float(account.balances.current)
+                        bank_balance += balance_value
+                        valid_accounts.append(account)
+                    except (ValueError, TypeError) as e:
+                        logger.warning(
+                            f"Invalid balance for account {account.account_id} in item {item_id}: {e}"
+                        )
+
+            # Find the first available logo from any account
+            logo = next((acc.logo for acc in valid_accounts if acc.logo), None)
+            return InstitutionDetail(
+                name=bank_doc.bankInfo.item.institution_name,
+                logo=logo,
+                status=bank_doc.status,
+                total_balance=round(bank_balance, 2),
+                account_count=len(valid_accounts),
+                accounts=valid_accounts,
+                last_account_sync=bank_doc.syncs.accounts,
+            )
+        except Exception as e:
+            logger.error(
+                f"Error processing bank document for item {item_id}: {e}", exc_info=True
+            )
+            return None
 
     # def _update_bank_accounts(
     #     self, user_id: str, item_id: str, accounts: List[Dict], total_balance: float

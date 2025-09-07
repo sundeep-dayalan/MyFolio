@@ -66,7 +66,8 @@ const AccountsPage: React.FC = () => {
 
   // Derived data
   const accounts = accountsData?.accounts || [];
-  const { data: itemsData } = useItemsQuery(accounts.length > 0);
+  const institutions = accountsData?.institutions || [];
+  const { data: itemsData } = useItemsQuery((accounts.length > 0) || (institutions.length > 0));
 
   const revokeItemMutation = useRevokeItemMutation();
   const revokeAllItemsMutation = useRevokeAllItemsMutation();
@@ -231,7 +232,7 @@ const AccountsPage: React.FC = () => {
               onConnectBank={initializePlaidConnection}
               onDisconnectAll={() => setShowConfirmDialog({ type: 'all' })}
               isConnecting={isConnecting}
-              hasAccounts={accounts.length > 0}
+              hasAccounts={(institutions.length > 0) || (accounts.length > 0)}
               isDisconnecting={revokeAllItemsMutation.isPending}
               errorMessage={errorMessage}
               onRefreshSuccess={() => {
@@ -240,19 +241,30 @@ const AccountsPage: React.FC = () => {
               }}
             />
 
-            {accountsData && accounts.length > 0 && (
+            {accountsData && ((institutions.length > 0) || (accounts.length > 0)) && (
               <AccountsSummary
-                totalAccounts={accountsData.account_count}
-                totalBalance={accountsData.total_balance}
+                totalAccounts={
+                  accountsData.accounts_count || 
+                  accountsData.account_count || 
+                  institutions.reduce((sum, inst) => sum + inst.account_count, 0) ||
+                  accounts.length
+                }
+                totalBalance={
+                  institutions.reduce((sum, inst) => sum + inst.total_balance, 0) ||
+                  accountsData.total_balance ||
+                  accounts.reduce((sum, acc) => sum + (acc.balances.current || 0), 0)
+                }
                 connectedBanks={
-                  Array.from(new Set(accounts.map((acc) => acc.institution_name).filter(Boolean)))
-                    .length ||
+                  accountsData.banks_count || 
+                  institutions.length ||
+                  Array.from(new Set(accounts.map((acc) => acc.institution_name).filter(Boolean))).length ||
                   Array.from(new Set(accounts.map((acc) => acc.name.split(' ')[0]))).length
                 }
               />
             )}
 
             <AccountsDisplay
+              institutions={institutions}
               accounts={accounts}
               onUnlinkBank={(bankName, itemId) =>
                 setShowConfirmDialog({ type: 'single', bankName, itemId })

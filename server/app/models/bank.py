@@ -4,7 +4,14 @@ from pydantic import BaseModel, Field
 from enum import Enum
 from typing import Optional, List, Literal, Dict, Any
 
-from .plaid import PlaidInstitution, PlaidItem, PlaidItemGetResponse, PlaidItemStatus
+from .plaid import (
+    PlaidAccount,
+    PlaidAccountWithBalance,
+    PlaidInstitution,
+    PlaidItem,
+    PlaidItemGetResponse,
+    PlaidItemStatus,
+)
 
 from .sync import SyncInfo, SyncState
 
@@ -32,6 +39,7 @@ class BankDocument(BaseModel):
     encryptedAccessToken: str = Field(
         ..., description="The encrypted Plaid access token"
     )
+    accounts: List[PlaidAccountWithBalance]
 
     class Config:
         from_attributes = True
@@ -44,3 +52,47 @@ class BankStatus(str, Enum):
     EXPIRED = "expired"
     REVOKED = "revoked"
     ERROR = "error"
+
+
+class GetAccountsResponse(BaseModel):
+    """
+    Defines the successful response structure, grouped by institution.
+    """
+
+    institutions: List[InstitutionDetail]
+    accounts_count: int = Field(description="The grand total number of accounts.")
+    banks_count: int = Field(description="The grand total number of banks.")
+
+
+class PartialItem(BaseModel):
+    institution_id: str
+    institution_name: str
+
+
+class PartialBankInfo(BaseModel):
+    item: PartialItem
+
+
+class PartialBankDocument(BaseModel):
+    """Model to safely parse the data fetched by our optimized query."""
+
+    id: str
+    bankInfo: PartialBankInfo
+    status: str
+    accounts: Optional[List[PlaidAccountWithBalance]] = []
+    updatedAt: Optional[str] = None
+    syncs: SyncState = Field(default_factory=SyncState)
+
+
+class InstitutionDetail(BaseModel):
+    """Represents a single financial institution and its associated accounts."""
+
+    name: str
+    logo: Optional[str] = None
+    status: str = Field(description="Connection status for this specific institution.")
+    total_balance: float = Field(
+        description="Sum of balances for accounts at this institution."
+    )
+    account_count: int = Field(description="Number of accounts at this institution.")
+    accounts: List[PlaidAccountWithBalance]
+    last_account_sync: SyncInfo = Field(default_factory=SyncInfo)

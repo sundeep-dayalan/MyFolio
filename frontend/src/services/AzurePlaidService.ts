@@ -19,8 +19,25 @@ export interface PlaidAccount {
   type: string;
 }
 
-export interface PlaidAccountsResponse {
+export interface InstitutionDetail {
+  name: string;
+  logo?: string;
+  status: string;
+  total_balance: number;
+  account_count: number;
   accounts: PlaidAccount[];
+  last_account_sync?: {
+    last_sync?: string;
+    status?: string;
+  };
+}
+
+export interface PlaidAccountsResponse {
+  institutions: InstitutionDetail[];
+  accounts_count: number;
+  banks_count: number;
+  // Legacy fields for backward compatibility during transition
+  accounts?: PlaidAccount[];
 }
 
 export interface PlaidTransaction {
@@ -203,7 +220,7 @@ export const AzurePlaidService = {
   // Legacy method for backward compatibility with existing PlaidService
   async getBalance(): Promise<PlaidAccount[]> {
     const accountsResponse = await this.getAccounts();
-    return accountsResponse.accounts;
+    return accountsResponse.accounts || [];
   },
 
   // Health check method
