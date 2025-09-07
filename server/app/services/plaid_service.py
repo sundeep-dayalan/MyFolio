@@ -291,11 +291,9 @@ class PlaidService:
             stored_token = await self._store_access_token(
                 user_id, access_token, item_id, bank_info
             )
+            # Chain the sync operations: accounts first, then transactions
             background_tasks.add_task(
-                self.sync_accounts_in_background, item_id, user_id
-            )
-            background_tasks.add_task(
-                self.sync_transactions_in_background, item_id, user_id
+                self.sync_accounts_in_background, item_id, user_id, True
             )
             logger.info(
                 f"Successfully exchanged and stored token for user {user_id}, item_id: {item_id}"
@@ -596,16 +594,33 @@ class PlaidService:
                 raise PlaidApiException(e)
             raise e
 
-    def sync_accounts_in_background(self, item_id: str, user_id: str) -> None:
+    def sync_accounts_in_background(
+        self, item_id: str, user_id: str, chain_transactions: bool = False
+    ) -> None:
         """
         Synchronous wrapper for sync_accounts_for_item to be used with background tasks.
         FastAPI's background_tasks.add_task() expects synchronous functions.
+
+        Args:
+            item_id: The bank item ID
+            user_id: The user ID
+            chain_transactions: If True, will also sync transactions after accounts sync completes
         """
         try:
             # Create a new event loop for the background task
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
+
+            # Run accounts sync
             loop.run_until_complete(self.sync_accounts_for_item(item_id, user_id))
+
+            # If chaining is requested, run transactions sync after accounts sync succeeds
+            if chain_transactions:
+                logger.info(
+                    f"Accounts sync completed, starting transactions sync for user {user_id}, item {item_id}"
+                )
+                loop.run_until_complete(self.sync_transactions(item_id, user_id))
+
         except Exception as e:
             logger.error(
                 f"Background sync failed for user {user_id}, item {item_id}: {e}"
