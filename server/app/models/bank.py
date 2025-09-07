@@ -20,7 +20,6 @@ class BankSummary(BaseModel):
     """Represents the aggregated summary for a single bank connection."""
 
     account_count: int = 0
-    total_balance: float = 0.0
 
 
 class BankDocument(BaseModel):
@@ -42,6 +41,7 @@ class BankDocument(BaseModel):
     accounts: List[PlaidAccountWithBalance]
 
     class Config:
+        extra = "ignore"
         from_attributes = True
 
 
@@ -90,9 +90,6 @@ class InstitutionDetail(BaseModel):
     name: str
     logo: Optional[str] = None
     status: str = Field(description="Connection status for this specific institution.")
-    total_balance: float = Field(
-        description="Sum of balances for accounts at this institution."
-    )
     account_count: int = Field(description="Number of accounts at this institution.")
     accounts: List[PlaidAccountWithBalance]
     last_account_sync: SyncInfo = Field(default_factory=SyncInfo)

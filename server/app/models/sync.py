@@ -43,6 +43,12 @@ class SyncInfo(BaseModel):
     )
 
 
+class TransactionSyncInfo(SyncInfo):
+    """Extended sync info specifically for transaction synchronization."""
+
+    next_cursor: Optional[str] = None
+
+
 class SyncType(str, Enum):
     ACCOUNTS = "accounts"
     TRANSACTIONS = "transactions"
@@ -52,9 +58,9 @@ class SyncState(BaseModel):
     """Tracks the state of various data synchronization processes for a bank item."""
 
     accounts: SyncInfo = Field(default_factory=SyncInfo, alias="last_account_sync")
-    transactions: SyncInfo = Field(
-        default_factory=SyncInfo, alias="last_transaction_sync"
+    transactions: TransactionSyncInfo = Field(
+        default_factory=TransactionSyncInfo, alias="last_transaction_sync"
     )
 
     class Config:
-        populate_by_name = True
+        pass

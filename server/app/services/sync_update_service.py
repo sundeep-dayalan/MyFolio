@@ -3,6 +3,7 @@ from typing import Optional
 from ..database import cosmos_client
 from ..models.sync import (
     SyncInfo,
+    TransactionSyncInfo,
     SyncStatus,
     SyncInitiatorType,
     SyncType,
@@ -25,6 +26,7 @@ class SyncUpdateService:
         initiator_type: Optional[SyncInitiatorType] = None,
         initiator_id: Optional[str] = None,
         error: Optional[Exception] = None,
+        next_cursor: Optional[str] = None,
     ) -> None:
         """
         Fetches a bank document and updates the status of a specific sync type
@@ -48,11 +50,21 @@ class SyncUpdateService:
 
             # 3. Create the new SyncInfo record for this update
             now = datetime.now(timezone.utc)
-            new_sync_record = SyncInfo(
-                status=status,
-                initiator_type=initiator_type,
-                initiator_id=initiator_id,
-            )
+            
+            # Create the appropriate sync record type based on sync_type
+            if sync_type == SyncType.TRANSACTIONS:
+                new_sync_record = TransactionSyncInfo(
+                    status=status,
+                    initiator_type=initiator_type,
+                    initiator_id=initiator_id,
+                    next_cursor=next_cursor,
+                )
+            else:
+                new_sync_record = SyncInfo(
+                    status=status,
+                    initiator_type=initiator_type,
+                    initiator_id=initiator_id,
+                )
 
             # Preserve start time if the sync was already in progress
             if status in [SyncStatus.COMPLETED, SyncStatus.ERROR]:

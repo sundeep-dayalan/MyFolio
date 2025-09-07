@@ -30,6 +30,7 @@ from plaid.configuration import Configuration
 from plaid.api_client import ApiClient
 from azure.cosmos.exceptions import CosmosResourceNotFoundError, CosmosHttpResponseError
 from datetime import datetime, timezone, timedelta
+from datetime import date as DateType
 import secrets
 import base64
 from cryptography.fernet import Fernet
@@ -53,6 +54,9 @@ from ..settings import settings
 from ..database import cosmos_client
 from ..utils.logger import get_logger
 from ..models.plaid import (
+    Counterparty,
+    Location,
+    PersonalFinanceCategory,
     PlaidAccount,
     PlaidAccountWithBalance,
     PlaidAccountsGetResponse,
@@ -60,6 +64,11 @@ from ..models.plaid import (
     Account,
     PlaidInstitution,
     PlaidItemGetResponse,
+    RemovedTransaction,
+    SystemMetadata,
+    Transaction,
+    TransactionDocument,
+    TransactionsUpdateResponse,
 )
 
 from ..models.bank import (
@@ -702,7 +711,6 @@ class PlaidService:
                 name=bank_doc.bankInfo.item.institution_name,
                 logo=logo,
                 status=bank_doc.status,
-                total_balance=round(bank_balance, 2),
                 account_count=len(valid_accounts),
                 accounts=valid_accounts,
                 last_account_sync=bank_doc.syncs.accounts,
@@ -712,37 +720,6 @@ class PlaidService:
                 f"Error processing bank document for item {item_id}: {e}", exc_info=True
             )
             return None
-
-    # def _update_bank_accounts(
-    #     self, user_id: str, item_id: str, accounts: List[Dict], total_balance: float
-    # ) -> bool:
-    #     """Update accounts and summary data for a specific bank document using new schema."""
-    #     try:
-    #         iso_timestamp = datetime.now(timezone.utc).isoformat()
-
-    #         # Use the new optimized schema fields
-    #         update_data = {
-    #             # Store accounts directly (no nested structure needed)
-    #             "accounts": accounts,
-    #             # Update summary object with new structure
-    #             "summary.accountCount": len(accounts),
-    #             "summary.totalBalance": round(total_balance, 2),
-    #             "summary.lastSync.status": "completed",
-    #             "summary.lastSync.timestamp": iso_timestamp,
-    #             "summary.lastSync.error": None,
-    #             # Update document timestamps
-    #             "updatedAt": iso_timestamp,
-    #             "lastUsedAt": iso_timestamp,
-    #         }
-
-    #         cosmos_client.update_item(Containers.BANKS, item_id, user_id, update_data)
-    #         logger.info(
-    #             f"Updated bank {item_id} with {len(accounts)} accounts, balance: ${total_balance:.2f}"
-    #         )
-    #         return True
-    #     except Exception as e:
-    #         logger.error(f"Failed to update bank accounts for {item_id}: {e}")
-    #         return False
 
     async def _update_bank_accounts(
         self,
@@ -774,16 +751,10 @@ class PlaidService:
 
             # 3. Calculate summary metrics from the final list.
             account_count = len(final_accounts_list)
-            total_balance = sum(
-                acc.get("balances", {}).get("current") or 0.0
-                for acc in final_accounts_list
-            )
 
             # 4. Prepare the final, properly nested update payload.
             # IMPROVED: Create a BankSummary instance for a more robust update.
-            new_summary = BankSummary(
-                account_count=account_count, total_balance=round(total_balance, 2)
-            )
+            new_summary = BankSummary(account_count=account_count)
 
             update_data = {
                 "accounts": final_accounts_list,
@@ -797,7 +768,7 @@ class PlaidService:
 
             logger.info(
                 f"Successfully updated bank accounts and summary for item {item_id}: "
-                f"Count={account_count}, Balance=${total_balance:.2f}."
+                f"Count={account_count}."
             )
             return True
 
@@ -943,326 +914,6 @@ class PlaidService:
             logger.error(f"Failed to delete all banks for user {user_id}: {e}")
             return False
 
-    def update_transaction_sync_status(
-        self, user_id: str, item_id: str, status: str
-    ) -> bool:
-        """Update transaction sync status for an item."""
-        try:
-            update_data = {
-                "metadata.transactionSyncStatus": status,
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            }
-
-            cosmos_client.update_item(Containers.BANKS, item_id, user_id, update_data)
-            logger.info(f"Updated sync status to '{status}' for item {item_id}")
-            return True
-        except Exception as e:
-            logger.error(f"Failed to update sync status for {item_id}: {e}")
-            return False
-
-    async def sync_all_transactions_for_item(
-        self, user_id: str, item_id: str, access_token: str
-    ) -> Dict[str, Any]:
-        """Initial full sync of transactions for a newly connected item."""
-        try:
-            logger.info(f"Starting initial transaction sync for item {item_id}")
-
-            # Update status to in progress
-            self.update_transaction_sync_status(
-                user_id, item_id, TransactionSyncStatus.SYNCING
-            )
-
-            # Use transactions/sync for initial historical data
-            cursor = None
-            added_count = 0
-            modified_count = 0
-            removed_count = 0
-
-            # Safety counter to prevent infinite loops
-            max_iterations = 50
-            iteration_count = 0
-
-            while True:
-                iteration_count += 1
-                if iteration_count > max_iterations:
-                    logger.error(
-                        f"Transaction sync exceeded {max_iterations} iterations for item {item_id}. Breaking loop."
-                    )
-                    break
-
-                logger.info(
-                    f"Transaction sync iteration {iteration_count} for item {item_id}"
-                )
-
-                # Create request - omit cursor for initial sync when None
-                if cursor is not None:
-                    request = TransactionsSyncRequest(
-                        access_token=access_token, cursor=cursor
-                    )
-                else:
-                    request = TransactionsSyncRequest(access_token=access_token)
-
-                client = await self._get_client(user_id)
-                response = client.transactions_sync(request)
-
-                # Process transactions
-                added = response.get("added", [])
-                modified = response.get("modified", [])
-                removed = response.get("removed", [])
-
-                logger.info(
-                    f"Sync iteration {iteration_count}: added={len(added)}, modified={len(modified)}, removed={len(removed)}"
-                )
-
-                if added:
-                    # Store added transactions
-                    transaction_storage_service.store_transactions(
-                        user_id, item_id, added, "added"
-                    )
-                    added_count += len(added)
-
-                if modified:
-                    # Store modified transactions
-                    transaction_storage_service.store_transactions(
-                        user_id, item_id, modified, "modified"
-                    )
-                    modified_count += len(modified)
-
-                if removed:
-                    # Handle removed transactions
-                    transaction_storage_service.handle_removed_transactions(
-                        user_id, item_id, removed
-                    )
-                    removed_count += len(removed)
-
-                cursor = response.get("next_cursor")
-                has_more = response.get("has_more", False)
-
-                logger.info(
-                    f"Sync iteration {iteration_count}: cursor={cursor}, has_more={has_more}"
-                )
-
-                if not has_more:
-                    logger.info(
-                        f"Transaction sync completed for item {item_id} after {iteration_count} iterations"
-                    )
-                    break
-
-            # Update sync status to complete
-            self.update_transaction_sync_status(
-                user_id, item_id, TransactionSyncStatus.COMPLETED
-            )
-
-            result = {
-                "success": True,
-                "item_id": item_id,
-                "added": added_count,
-                "modified": modified_count,
-                "removed": removed_count,
-                "total": added_count + modified_count + removed_count,
-            }
-
-            logger.info(f"Completed initial sync for {item_id}: {result}")
-            return result
-
-        except Exception as e:
-            logger.error(f"Failed to sync transactions for {item_id}: {e}")
-            self.update_transaction_sync_status(
-                user_id, item_id, TransactionSyncStatus.ERROR
-            )
-            raise Exception(f"Transaction sync failed: {e}")
-
-    async def refresh_transactions(self, user_id: str, item_id: str) -> Dict[str, Any]:
-        """Refresh transactions for a specific item using sync API."""
-        try:
-            logger.info(f"Refreshing transactions for item {item_id}")
-
-            # Get token for this item
-            tokens = self.get_user_access_tokens(user_id)
-            target_token = None
-
-            for token in tokens:
-                if token.id == item_id:
-                    target_token = token
-                    break
-
-            if not target_token:
-                raise Exception(f"No token found for item {item_id}")
-
-            # Decrypt token
-            access_token = await AzureKeyVaultService.decrypt_secret(
-                target_token.plaidData["encryptedAccessToken"]
-            )
-
-            # Get cursor from last sync
-            cursor = transaction_storage_service.get_last_sync_cursor(user_id, item_id)
-
-            # Create request - omit cursor if None
-            if cursor is not None:
-                request = TransactionsSyncRequest(
-                    access_token=access_token, cursor=cursor
-                )
-            else:
-                request = TransactionsSyncRequest(access_token=access_token)
-
-            client = await self._get_client(user_id)
-            response = client.transactions_sync(request)
-
-            # Process new transactions
-            added = response.get("added", [])
-            modified = response.get("modified", [])
-            removed = response.get("removed", [])
-
-            added_count = 0
-            modified_count = 0
-            removed_count = 0
-
-            if added:
-                transaction_storage_service.store_transactions(
-                    user_id, item_id, added, "added"
-                )
-                added_count = len(added)
-
-            if modified:
-                transaction_storage_service.store_transactions(
-                    user_id, item_id, modified, "modified"
-                )
-                modified_count = len(modified)
-
-            if removed:
-                transaction_storage_service.handle_removed_transactions(
-                    user_id, item_id, removed
-                )
-                removed_count = len(removed)
-
-            # Update cursor for next sync
-            new_cursor = response.get("next_cursor")
-            if new_cursor:
-                transaction_storage_service.update_sync_cursor(
-                    user_id, item_id, new_cursor
-                )
-
-            result = {
-                "success": True,
-                "transactions_added": added_count,
-                "transactions_modified": modified_count,
-                "transactions_removed": removed_count,
-                "total_processed": added_count + modified_count + removed_count,
-                "item_id": item_id,
-                "institution_name": target_token.institutionName or "Unknown",
-                "message": f"Refreshed {added_count + modified_count + removed_count} transactions",
-            }
-
-            logger.info(f"Transaction refresh completed for {item_id}: {result}")
-            return result
-
-        except Exception as e:
-            logger.error(f"Failed to refresh transactions for {item_id}: {e}")
-            raise Exception(f"Transaction refresh failed: {e}")
-
-    async def force_refresh_transactions(
-        self, user_id: str, item_id: str
-    ) -> Dict[str, Any]:
-        """Force refresh by clearing all data and performing complete resync."""
-        try:
-            logger.info(f"Force refreshing transactions for item {item_id}")
-
-            # Get token for this item
-            tokens = self.get_user_access_tokens(user_id)
-            target_token = None
-
-            for token in tokens:
-                if token.id == item_id:
-                    target_token = token
-                    break
-
-            if not target_token:
-                raise Exception(f"No token found for item {item_id}")
-
-            # Clear existing transaction data
-            transaction_storage_service.clear_item_transactions(user_id, item_id)
-
-            # Decrypt token
-            access_token = await AzureKeyVaultService.decrypt_secret(
-                target_token.plaidData["encryptedAccessToken"]
-            )
-
-            # Perform complete resync
-            sync_result = await self.sync_all_transactions_for_item(
-                user_id, item_id, access_token
-            )
-
-            result = {
-                "success": True,
-                "message": f"Force refresh completed - synced {sync_result['total']} transactions",
-                "item_id": item_id,
-                "institution_name": target_token.institutionName or "Unknown",
-                PlaidResponseFields.STATUS: Status.COMPLETED,
-                "async_operation": False,
-            }
-
-            logger.info(f"Force refresh completed for {item_id}: {result}")
-            return result
-
-        except Exception as e:
-            logger.error(f"Failed to force refresh transactions for {item_id}: {e}")
-            raise Exception(f"Force refresh failed: {e}")
-
-    def get_transactions(self, user_id: str, days: int = 30) -> Dict[str, Any]:
-        """Get transactions for user across all accounts."""
-        try:
-            logger.info(f"Getting transactions for user {user_id} - last {days} days")
-
-            # Get transactions from storage
-            transactions = transaction_storage_service.get_user_transactions(
-                user_id, days=days
-            )
-
-            result = {
-                PlaidResponseFields.TRANSACTIONS: transactions,
-                "total_count": len(transactions),
-                "days_requested": days,
-            }
-
-            logger.info(
-                f"Retrieved {len(transactions)} transactions for user {user_id}"
-            )
-            return result
-
-        except Exception as e:
-            logger.error(f"Failed to get transactions for user {user_id}: {e}")
-            raise Exception(f"Failed to get transactions: {e}")
-
-    def get_transactions_by_account(
-        self, user_id: str, account_id: str, days: int = 30
-    ) -> Dict[str, Any]:
-        """Get transactions for a specific account."""
-        try:
-            logger.info(
-                f"Getting transactions for account {account_id} - last {days} days"
-            )
-
-            # Get transactions from storage for specific account
-            transactions = transaction_storage_service.get_account_transactions(
-                user_id, account_id, days=days
-            )
-
-            result = {
-                PlaidResponseFields.TRANSACTIONS: transactions,
-                "account_id": account_id,
-                "total_count": len(transactions),
-                "days_requested": days,
-            }
-
-            logger.info(
-                f"Retrieved {len(transactions)} transactions for account {account_id}"
-            )
-            return result
-
-        except Exception as e:
-            logger.error(f"Failed to get transactions for account {account_id}: {e}")
-            raise Exception(f"Failed to get account transactions: {e}")
-
     def get_user_plaid_items(self, user_id: str) -> List[Dict[str, Any]]:
         """Get summary of user's connected Plaid items."""
         try:
@@ -1295,50 +946,264 @@ class PlaidService:
             logger.error(f"Failed to get Plaid items for user {user_id}: {e}")
             raise Exception(f"Failed to get Plaid items: {e}")
 
-    async def _sync_transactions_for_stored_item(
-        self, user_id: str, item_id: str
-    ) -> None:
-        """Background task to sync transactions for a newly stored item."""
+    async def sync_transactions_for_item(self, item_id: str, user_id: str) -> None:
+        """
+        Fetches incremental transaction updates for a Plaid item and stores them
+        in the 'transactions' container.
+
+        This process is idempotent and uses a cursor to only fetch new changes.
+        It handles added, modified, and removed (soft delete) transactions.
+        """
+        logger.info(
+            f"Starting transaction sync for user_id='{user_id}', item_id='{item_id}'"
+        )
+        await cosmos_client.ensure_connected()
+        current_cursor = None
         try:
+            # 1. SETUP: Fetch current state and set status to SYNCING
+            bank_doc_raw = cosmos_client.get_item(Containers.BANKS, item_id, user_id)
+            if not bank_doc_raw:
+                raise BankNotFoundError(
+                    f"Bank connection with item ID '{item_id}' not found."
+                )
+
+            bank_doc = BankDocument.model_validate(bank_doc_raw)
+            current_cursor = bank_doc.syncs.transactions.next_cursor
+
+            await sync_update_service.update_sync_status(
+                user_id=user_id,
+                item_id=item_id,
+                sync_type=SyncType.TRANSACTIONS,
+                status=SyncStatus.SYNCING,
+                initiator_type=SyncInitiatorType.SYSTEM,
+                initiator_id="PlaidService",
+            )
+
+            access_token = await self.get_bank_access_token(user_id, item_id)
+            client = await self._get_client(user_id)
+
+            # 2. PAGINATION LOOP: Fetch all available updates from Plaid
+            has_more = True
+            while has_more:
+                request = None
+                if current_cursor:
+                    logger.info(
+                        f"Fetching transaction sync page for item '{item_id}' with cursor '{current_cursor}'"
+                    )
+                    request = TransactionsSyncRequest(
+                        access_token=access_token,
+                        cursor=current_cursor,
+                        count=500,
+                    )
+                else:
+                    logger.info(
+                        f"Fetching initial transaction sync page for item '{item_id}'"
+                    )
+                    request = TransactionsSyncRequest(
+                        access_token=access_token,
+                        count=500,
+                    )
+
+                response = client.transactions_sync(request).to_dict()
+
+                added = response.get("added", [])
+                modified = response.get("modified", [])
+                removed = response.get("removed", [])
+
+                logger.info(
+                    f"Sync page for item '{item_id}': "
+                    f"{len(added)} added, {len(modified)} modified, {len(removed)} removed."
+                )
+                next_page_cursor = response.get("next_cursor")
+
+                # 3. PROCESS CHANGES: Transform and save to the database
+                if added or modified:
+                    docs_to_upsert = await self._transform_transactions(
+                        user_id=user_id,
+                        item_id=item_id,
+                        plaid_transactions=added + modified,
+                        sync_cursor=next_page_cursor,
+                    )
+                    if docs_to_upsert:
+                        await transaction_storage_service.upsert_transactions(
+                            docs_to_upsert
+                        )
+
+                if removed:
+                    transaction_ids_to_remove = [tx["transaction_id"] for tx in removed]
+                    if transaction_ids_to_remove:
+                        await transaction_storage_service.soft_delete_transactions(
+                            user_id=user_id,
+                            transaction_ids=transaction_ids_to_remove,
+                            sync_cursor=next_page_cursor,
+                        )
+
+                has_more = response["has_more"]
+                current_cursor = next_page_cursor
+
+            # 4. FINALIZE: Update sync status to COMPLETED
+            await sync_update_service.update_sync_status(
+                user_id=user_id,
+                item_id=item_id,
+                sync_type=SyncType.TRANSACTIONS,
+                status=SyncStatus.COMPLETED,
+                next_cursor=current_cursor,
+            )
             logger.info(
-                f"🚀 BACKGROUND TASK STARTED: Transaction sync for user {user_id}, item {item_id}"
-            )
-
-            # Get the token from storage
-            tokens = self.get_user_access_tokens(user_id)
-            logger.info(f"Retrieved {len(tokens)} tokens for user {user_id}")
-
-            target_token = None
-            for token in tokens:
-                if token.id == item_id:
-                    target_token = token
-                    break
-
-            if not target_token:
-                logger.error(f"❌ No stored token found for item {item_id}")
-                return
-
-            logger.info(f"✅ Found target token for item {item_id}")
-
-            # Decrypt the access token
-            access_token = await AzureKeyVaultService.decrypt_secret(
-                target_token.plaidData["encryptedAccessToken"]
-            )
-            logger.info(f"✅ Successfully decrypted access token for item {item_id}")
-
-            # Perform transaction sync
-            result = await self.sync_all_transactions_for_item(
-                user_id, item_id, access_token
-            )
-            logger.info(
-                f"🎉 Background transaction sync completed for item {item_id}: {result}"
+                f"Successfully completed transaction sync for item_id='{item_id}'"
             )
 
         except Exception as e:
-            logger.error(
-                f"❌ Background transaction sync failed for item {item_id}: {e}",
-                exc_info=True,
+            # 5. ERROR HANDLING: Log error and update sync status
+            error_message = str(e)
+            if isinstance(e, ApiException):
+                error_body = json.loads(e.body)
+                error_message = error_body.get("error_message", "Plaid API Error")
+                logger.error(
+                    f"Plaid API error during transaction sync for item '{item_id}': {e.body}",
+                    exc_info=True,
+                )
+            else:
+                logger.error(
+                    f"Error during transaction sync for item '{item_id}': {e}",
+                    exc_info=True,
+                )
+
+            await sync_update_service.update_sync_status(
+                user_id=user_id,
+                item_id=item_id,
+                sync_type=SyncType.TRANSACTIONS,
+                status=SyncStatus.ERROR,
+                error=error_message,
+                next_cursor=current_cursor,
             )
-            self.update_transaction_sync_status(
-                user_id, item_id, TransactionSyncStatus.ERROR
-            )
+            raise
+
+    async def _transform_transactions(
+        self,
+        user_id: str,
+        item_id: str,
+        plaid_transactions: List[
+            Transaction | TransactionsUpdateResponse | RemovedTransaction
+        ],
+        sync_cursor: str,
+    ) -> List[TransactionDocument]:
+        """
+        Transforms raw Plaid transaction objects into the TransactionDocument model.
+        This version is resilient to validation errors and uses a robust instantiation pattern.
+        """
+        transformed_docs = []
+
+        for tx_data in plaid_transactions:
+            tx_id = tx_data.get("transaction_id")
+            if not tx_id:
+                logger.warning("Skipping transaction with no ID.")
+                continue
+
+            try:
+                # --- Resilient Date Handling ---
+                raw_trans_date = tx_data["date"]
+                if isinstance(raw_trans_date, DateType):
+                    trans_date = raw_trans_date
+                elif isinstance(raw_trans_date, str):
+                    trans_date = DateType.fromisoformat(raw_trans_date)
+                else:
+                    raise TypeError(
+                        f"Unsupported type for 'date': {type(raw_trans_date)}"
+                    )
+
+                raw_auth_date = tx_data.get("authorized_date")
+                auth_date = None
+                if isinstance(raw_auth_date, DateType):
+                    auth_date = raw_auth_date
+                elif isinstance(raw_auth_date, str):
+                    auth_date = DateType.fromisoformat(raw_auth_date)
+
+                # --- Prepare a dictionary using the model's ALIASES (camelCase) ---
+                # This directly addresses the validation error by providing the keys Pydantic expects.
+                now_utc = datetime.now(timezone.utc)
+                doc_data = {
+                    "id": f"user-{user_id}-transaction-{tx_id}",
+                    "userId": user_id,
+                    "type": "transaction",
+                    "plaidTransactionId": tx_id,
+                    "plaidAccountId": tx_data["account_id"],
+                    "plaidItemId": item_id,
+                    "_meta": SystemMetadata(
+                        created_at=now_utc,
+                        updated_at=now_utc,
+                        is_removed=False,
+                        source_sync_cursor=sync_cursor,
+                    ),
+                    "description": tx_data.get("merchant_name") or tx_data.get("name"),
+                    "amount": tx_data["amount"],
+                    "currency": tx_data.get("iso_currency_code"),
+                    "date": trans_date,
+                    "authorizedDate": auth_date,
+                    "isPending": tx_data["pending"],
+                    "category": PersonalFinanceCategory.model_validate(
+                        tx_data.get("personal_finance_category") or {}
+                    ),
+                    "paymentChannel": tx_data["payment_channel"],
+                    "location": Location.model_validate(tx_data.get("location") or {}),
+                    "counterparties": [
+                        Counterparty.model_validate(c)
+                        for c in tx_data.get("counterparties", [])
+                    ],
+                    "pendingTransactionId": tx_data.get("pending_transaction_id"),
+                    "originalDescription": tx_data.get("original_description"),
+                    "_rawPlaidData": self._validate_transaction_data(tx_data),
+                }
+
+                # --- Instantiate the model using the standard constructor ---
+                # Pydantic will use the aliases to populate the correct fields.
+                doc = TransactionDocument(**doc_data)
+                transformed_docs.append(doc)
+
+            except (ValueError, TypeError, KeyError) as e:
+                logger.error(
+                    f"Skipping transaction {tx_id} due to data parsing/missing key error: {e}"
+                )
+                continue
+            except Exception as e:
+                logger.error(f"Pydantic validation failed for transaction {tx_id}: {e}")
+                continue
+
+        return transformed_docs
+
+    def _validate_transaction_data(
+        self, tx_data: Dict[str, Any]
+    ) -> Transaction | TransactionsUpdateResponse | RemovedTransaction:
+        """
+        Validates transaction data and returns the appropriate model type.
+        Tries Transaction first, then falls back to RemovedTransaction if needed.
+        """
+        try:
+            # First, try to validate as a full Transaction
+            return Transaction.model_validate(tx_data)
+        except Exception as transaction_error:
+            logger.debug(f"Failed to validate as Transaction: {transaction_error}")
+
+            try:
+                # If that fails, try as TransactionsUpdateResponse
+                return TransactionsUpdateResponse.model_validate(tx_data)
+            except Exception as update_error:
+                logger.debug(
+                    f"Failed to validate as TransactionsUpdateResponse: {update_error}"
+                )
+
+                try:
+                    # If that fails too, try as RemovedTransaction
+                    return RemovedTransaction.model_validate(tx_data)
+                except Exception as removed_error:
+                    logger.warning(
+                        f"Failed to validate transaction data as any known type. "
+                        f"Transaction: {transaction_error}, Update: {update_error}, Removed: {removed_error}. "
+                        f"Falling back to RemovedTransaction with available data."
+                    )
+
+                    # As a last resort, create a minimal RemovedTransaction
+                    return RemovedTransaction(
+                        transaction_id=tx_data.get("transaction_id", "unknown"),
+                        account_id=tx_data.get("account_id", "unknown"),
+                    )

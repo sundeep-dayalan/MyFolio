@@ -4,6 +4,7 @@ Plaid-related Pydantic models for data validation and serialization.
 
 from __future__ import annotations
 from datetime import datetime
+from datetime import date as DateType
 from pydantic import BaseModel, Field
 from enum import Enum
 from typing import Optional, List, Literal, Dict, Any
@@ -44,7 +45,9 @@ class PlaidAccessToken(BaseModel):
     metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
     class Config:
+        extra = "ignore"
         use_enum_values = True
+        arbitrary_types_allowed = True
 
 
 class PlaidAccount(BaseModel):
@@ -58,6 +61,7 @@ class PlaidAccount(BaseModel):
     mask: Optional[str] = None
 
     class Config:
+        extra = "ignore"
         from_attributes = True
 
 
@@ -72,6 +76,7 @@ class PlaidBalance(BaseModel):
     unofficial_currency_code: Optional[str] = None
 
     class Config:
+        extra = "ignore"
         from_attributes = True
 
 
@@ -91,6 +96,7 @@ class PlaidAccountWithBalance(BaseModel):
     logo: Optional[str] = None  # Institution logo URL
 
     class Config:
+        extra = "ignore"
         from_attributes = True
 
 
@@ -100,6 +106,7 @@ class LinkTokenRequest(BaseModel):
     user_id: Optional[str] = Field(None, description="Will be set from authentication")
 
     class Config:
+        extra = "ignore"
         from_attributes = True
 
 
@@ -109,6 +116,7 @@ class PublicTokenExchangeRequest(BaseModel):
     public_token: str = Field(..., description="Plaid public token from Link")
 
     class Config:
+        extra = "ignore"
         from_attributes = True
 
 
@@ -123,6 +131,7 @@ class PlaidWebhookRequest(BaseModel):
     removed_transactions: Optional[List[str]] = None
 
     class Config:
+        extra = "ignore"
         from_attributes = True
 
 
@@ -342,21 +351,6 @@ class PlaidAccountsGetResponse(BaseModel):
     accounts: List[Account]
     item: Item
     request_id: str
-
-
-class PlaidError(BaseModel):
-    """An error object returned by the Plaid API."""
-
-    display_message: Optional[str] = None
-    documentation_url: Optional[str] = None
-    error_code: str
-    error_message: str
-    error_type: str
-    request_id: str
-    suggested_action: Optional[str] = None
-    # Add other potential fields from the docs if needed
-    causes: Optional[List[Dict[str, Any]]] = None
-    status: Optional[int] = None
 
 
 # https://plaid.com/docs/api/accounts/#accounts-get-response-accounts-type:~:text=fallback%20flow.-,Possible%20values%3A,-INSTANT_AUTH%2C%20INSTANT_MATCH
@@ -653,3 +647,300 @@ class PlaidInstitution(BaseModel):
     # Nested objects for metadata
     payment_initiation_metadata: Optional[PaymentInitiationMetadata] = None
     auth_metadata: Optional[AuthMetadata] = None
+
+
+# Transaction-related classes temporarily disabled to fix recursion issue
+# Will need to be restored with proper forward reference handling
+
+
+class Location(BaseModel):
+    address: Optional[str] = None
+    city: Optional[str] = None
+    region: Optional[str] = None
+    postal_code: Optional[str] = None
+    country: Optional[str] = None
+    lat: Optional[float] = None
+    lon: Optional[float] = None
+    store_number: Optional[str] = None
+
+
+class PersonalFinanceCategory(BaseModel):
+    """
+    Plaid's personal finance category taxonomy for the transaction.
+    """
+
+    primary: str
+    detailed: str
+    confidence: Optional[str] = None
+
+
+class Counterparty(BaseModel):
+    name: str
+    entity_id: Optional[str] = None
+    type: CounterpartyType
+    website: Optional[str] = None
+    logo_url: Optional[str] = None
+    confidence_level: Optional[ConfidenceLevel] = None
+    account_numbers: Optional[AccountNumbers] = None
+    merchant_entity_id: Optional[str] = None
+
+
+class SystemMetadata(BaseModel):
+    """
+    Internal metadata for tracking the document's lifecycle in Cosmos DB.
+    This is NOT part of the Plaid API response.
+    """
+
+    created_at: datetime
+    updated_at: datetime
+    is_removed: bool
+    source_sync_cursor: str
+
+
+class TransactionDocument(BaseModel):
+    """
+    A production-grade Pydantic model for a Plaid transaction stored in Cosmos DB.
+    This model reflects the flattened, enriched, and metadata-tracked document structure.
+    """
+
+    # --- Core Identifiers & Partitioning ---
+    id: str = Field(
+        ...,
+        description="The unique document ID in Cosmos DB (e.g., 'user-12345-transaction-abc').",
+    )
+    user_id: str = Field(
+        ...,
+        alias="userId",
+        description="The Partition Key for the Cosmos DB container.",
+    )
+    type: Literal["transaction"] = Field(
+        ...,
+        description="The document type, for co-locating different data in one container.",
+    )
+
+    # --- Plaid-Specific Foreign Keys ---
+    plaid_transaction_id: str = Field(..., alias="plaidTransactionId")
+    plaid_account_id: str = Field(..., alias="plaidAccountId")
+    plaid_item_id: str = Field(..., alias="plaidItemId")
+
+    # --- System Metadata ---
+    meta: SystemMetadata = Field(
+        ...,
+        alias="_meta",
+        description="Internal metadata for document lifecycle tracking.",
+    )
+
+    # --- Primary Transaction Data ---
+    description: str = Field(
+        ...,
+        description="The clean merchant name or transaction description for display.",
+    )
+    amount: float = Field(
+        ...,
+        description="Transaction amount. Positive for outflows (debits), negative for inflows (credits).",
+    )
+    currency: str = Field(..., description="The ISO-4217 currency code.")
+    date: DateType = Field(
+        ..., description="The date the transaction posted (YYYY-MM-DD)."
+    )
+    authorized_date: Optional[DateType] = Field(
+        None,
+        alias="authorizedDate",
+        description="The date the transaction was authorized.",
+    )
+    is_pending: bool = Field(
+        ...,
+        alias="isPending",
+        description="True if the transaction is pending or unsettled.",
+    )
+
+    # --- Enrichment & Categorization Data ---
+    category: PersonalFinanceCategory
+    payment_channel: str = Field(
+        ...,
+        alias="paymentChannel",
+        description="The channel used to make a payment (e.g., 'in store', 'online').",
+    )
+    location: Optional[Location] = None
+    counterparties: List[Counterparty]
+
+    # --- Reconciliation & Auxiliary Data ---
+    pending_transaction_id: Optional[str] = Field(None, alias="pendingTransactionId")
+    original_description: Optional[str] = Field(
+        None,
+        alias="originalDescription",
+        description="The raw description from the financial institution.",
+    )
+
+    # --- Future-Proofing Raw Data ---
+    raw_plaid_data: Transaction | TransactionsUpdateResponse | RemovedTransaction = (
+        Field(
+            ...,
+            alias="_rawPlaidData",
+            description="The complete, unaltered JSON object from Plaid for this transaction.",
+        )
+    )
+
+    class Config:
+        # This allows the model to be created from a dictionary that has extra fields,
+        # which can be useful if Plaid adds new properties to their API.
+        extra = "ignore"
+
+
+class TransactionsUpdateStatusEnum(str, Enum):
+    TRANSACTIONS_UPDATE_STATUS_UNKNOWN = "TRANSACTIONS_UPDATE_STATUS_UNKNOWN"
+    NOT_READY = "NOT_READY"
+    INITIAL_UPDATE_COMPLETE = "INITIAL_UPDATE_COMPLETE"
+    HISTORICAL_UPDATE_COMPLETE = "HISTORICAL_UPDATE_COMPLETE"
+
+    class Config:
+        extra = "ignore"
+
+
+class HolderCategory(str, Enum):
+    BUSINESS = "business"
+    PERSONAL = "personal"
+    UNRECOGNIZED = "unrecognized"
+
+    class Config:
+        extra = "ignore"
+
+
+class AccountNumberFormat(str, Enum):
+    VALID = "valid"
+    INVALID = "invalid"
+    UNKNOWN = "unknown"
+
+    class Config:
+        extra = "ignore"
+
+
+class TransactionType(str, Enum):
+    DIGITAL = "digital"
+    PLACE = "place"
+    SPECIAL = "special"
+    UNRESOLVED = "unresolved"
+
+
+class PaymentChannel(str, Enum):
+    ONLINE = "online"
+    IN_STORE = "in store"
+    OTHER = "other"
+
+    class Config:
+        extra = "ignore"
+
+
+class ConfidenceLevel(str, Enum):
+    VERY_HIGH = "VERY_HIGH"
+    HIGH = "HIGH"
+    MEDIUM = "MEDIUM"
+    LOW = "LOW"
+    UNKNOWN = "UNKNOWN"
+
+    class Config:
+        extra = "ignore"
+
+
+class TransactionCode(str, Enum):
+    ADJUSTMENT = "adjustment"
+    ATM = "atm"
+    BANK_CHARGE = "bank charge"
+    BILL_PAYMENT = "bill payment"
+    CASH = "cash"
+    CASHBACK = "cashback"
+    CHEQUE = "cheque"
+    DIRECT_DEBIT = "direct debit"
+    INTEREST = "interest"
+    PURCHASE = "purchase"
+    STANDING_ORDER = "standing order"
+    TRANSFER = "transfer"
+
+    class Config:
+        extra = "ignore"
+
+
+class CounterpartyType(str, Enum):
+    MERCHANT = "merchant"
+    FINANCIAL_INSTITUTION = "financial_institution"
+    PAYMENT_APP = "payment_app"
+    MARKETPLACE = "marketplace"
+    PAYMENT_TERMINAL = "payment_terminal"
+    INCOME_SOURCE = "income_source"
+
+    class Config:
+        extra = "ignore"
+
+
+class PaymentMeta(BaseModel):
+    reference_number: Optional[str] = None
+    ppd_id: Optional[str] = None
+    payee: Optional[str] = None
+    by_order_of: Optional[str] = None
+    payer: Optional[str] = None
+    payment_method: Optional[str] = None
+    payment_processor: Optional[str] = None
+    reason: Optional[str] = None
+
+
+class International(BaseModel):
+    iban: Optional[str] = Field(None, min_length=15, max_length=34)
+    bic: Optional[str] = Field(None, min_length=8, max_length=11)
+
+
+class Bacs(BaseModel):
+    account: Optional[str] = None
+    sort_code: Optional[str] = None
+
+
+class AccountNumbers(BaseModel):
+    bacs: Optional[Bacs] = None
+    international: Optional[International] = None
+
+
+class Transaction(BaseModel):
+    account_id: str
+    amount: float
+    iso_currency_code: Optional[str] = None
+    unofficial_currency_code: Optional[str] = None
+    check_number: Optional[str] = None
+    date: DateType
+    location: Location
+    name: str  # Deprecated field
+    merchant_name: Optional[str] = None
+    original_description: Optional[str] = None
+    payment_meta: PaymentMeta
+    pending: bool
+    pending_transaction_id: Optional[str] = None
+    account_owner: Optional[str] = None
+    transaction_id: str
+    transaction_type: Optional[TransactionType] = None  # Deprecated field
+    logo_url: Optional[str] = None
+    website: Optional[str] = None
+    authorized_date: Optional[DateType] = None
+    authorized_datetime: Optional[datetime] = None
+    datetime: Optional[datetime] = None
+    payment_channel: PaymentChannel
+    personal_finance_category: Optional[PersonalFinanceCategory] = None
+    transaction_code: Optional[TransactionCode] = None
+    personal_finance_category_icon_url: Optional[str] = None
+    counterparties: List[Counterparty]
+
+
+class RemovedTransaction(BaseModel):
+    transaction_id: str
+    account_id: str
+
+
+class TransactionsUpdateResponse(BaseModel):
+    """
+    A Pydantic model representing the response for transaction updates from the API.
+    """
+
+    transactions_update_status: TransactionsUpdateStatusEnum
+    accounts: List[Account]
+    added: List[Transaction]
+    modified: List[Transaction]
+    removed: List[RemovedTransaction]
+    next_cursor: str
+    has_more: bool

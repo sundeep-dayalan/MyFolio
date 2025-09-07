@@ -106,7 +106,6 @@ async def get_accounts(
     except Exception as e:
         return {
             "accounts": [],
-            "total_balance": 0,
             "message": f"No connected accounts: {str(e)}",
         }
 
