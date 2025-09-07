@@ -1,6 +1,7 @@
 from inspect import _void
 from typing import List, Dict, Any, Optional
 
+from fastapi import Depends
 from plaid.api import plaid_api
 from plaid.model.transactions_sync_request import TransactionsSyncRequest
 from plaid.model.transactions_get_request import TransactionsGetRequest
@@ -33,6 +34,8 @@ import base64
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+
+from ..dependencies import get_current_user
 
 from ..exceptions import BankNotFoundError, DatabaseError, PlaidApiException
 from .az_key_vault_service import (
@@ -270,6 +273,8 @@ class PlaidService:
             stored_token = await self._store_access_token(
                 user_id, access_token, item_id, bank_info
             )
+
+            await self.sync_accounts_for_item(item_id, user_id)
 
             # Immediately sync account data so accounts are available right away
             # try:
@@ -668,14 +673,15 @@ class PlaidService:
 
     async def sync_accounts_for_item(
         self,
-        user_id: str,
         item_id: str,
+        user_id: str,
         account_ids: Optional[List[str]] = None,
     ) -> None:
         """
         Fetches the latest account and balance data from Plaid for a specific item
         and updates the database with the new information.
         """
+
         logger.info(f"Starting account sync for user {user_id}, item {item_id}")
 
         try:
