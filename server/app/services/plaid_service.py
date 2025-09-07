@@ -259,11 +259,6 @@ class PlaidService:
             access_token = response["access_token"]
             item_id = response["item_id"]
 
-            # # Get institution info
-            # institution_info = await self._get_institution_info_by_item(
-            #     user_id, access_token
-            # )
-
             item_request = ItemGetRequest(access_token=access_token)
             # Use .to_dict() for reliable Pydantic validation
             item_response_dict = client.item_get(item_request).to_dict()
@@ -275,29 +270,6 @@ class PlaidService:
             )
 
             await self.sync_accounts_for_item(item_id, user_id)
-
-            # Immediately sync account data so accounts are available right away
-            # try:
-            #     logger.info(f"🔄 Syncing account data immediately for item {item_id}")
-            #     await self.get_accounts_with_balances(user_id, use_cached_db_data=False)
-            #     logger.info(f"✅ Account data synced successfully for item {item_id}")
-            # except Exception as e:
-            #     logger.error(f"❌ Failed to sync account data for item {item_id}: {e}")
-            #     # Re-raise the exception so connection fails if we can't get account data
-            #     raise Exception(
-            #         f"Bank connection failed - unable to fetch account data: {str(e)}"
-            #     )
-
-            # # Start transaction sync in the background (non-blocking)
-            # try:
-            #     logger.info(f"🚀 Starting transaction sync for item {item_id}")
-            #     await self._sync_transactions_for_stored_item(user_id, item_id)
-            #     logger.info(f"✅ Transaction sync completed for item {item_id}")
-            # except Exception as e:
-            #     logger.error(
-            #         f"❌ Background transaction sync failed for item {item_id}: {e}"
-            #     )
-            # Don't fail the exchange if transaction sync fails
 
             logger.info(
                 f"Successfully exchanged and stored token for user {user_id}, item_id: {item_id}"

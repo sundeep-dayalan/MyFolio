@@ -8,20 +8,20 @@ from pydantic import BaseModel, Field
 class SyncStatus(str, Enum):
     """Represents the standardized status of a synchronization task."""
 
-    PENDING = "pending"
-    SYNCING = "syncing"
-    COMPLETED = "completed"
-    ERROR = "error"
+    PENDING = "PENDING"
+    SYNCING = "SYNCING"
+    COMPLETED = "COMPLETED"
+    ERROR = "ERROR"
 
 
 class SyncInitiatorType(str, Enum):
     """Represents who or what triggered a synchronization task."""
 
     USER = (
-        "user"  # Triggered by a direct user action (e.g., clicking a 'refresh' button)
+        "USER"  # Triggered by a direct user action (e.g., clicking a 'refresh' button)
     )
-    SYSTEM = "system"  # Triggered by an automated background job
-    WEBHOOK = "webhook"  # Triggered by an incoming Plaid webhook
+    SYSTEM = "SYSTEM"  # Triggered by an automated background job
+    WEBHOOK = "WEBHOOK"  # Triggered by an incoming Plaid webhook
 
 
 class SyncInfo(BaseModel):
