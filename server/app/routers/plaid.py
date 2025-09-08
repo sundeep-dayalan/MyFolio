@@ -149,14 +149,14 @@ async def get_plaid_items(
 
 
 @router.delete("/bank/{bank_id}")
-async def revoke_plaid_item(
+async def delete_bank(
     bank_id: str,
     user_id: str = Depends(get_current_user),
     plaid_service: PlaidService = Depends(get_plaid_service),
 ):
     """Revoke access to a specific Plaid item."""
     try:
-        success = await plaid_service.revoke_item_access(user_id, bank_id)
+        success = await plaid_service.delete_bank(user_id, bank_id)
         if success:
             return {"message": "Item revoked successfully"}
         else:
