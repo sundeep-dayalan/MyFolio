@@ -346,9 +346,9 @@ export const PlaidService = {
     }
   },
 
-  async revokeItem(itemId: string): Promise<{ message: string }> {
+  async revokeItem(itemId: string): Promise<{ message: string; success_count: number }> {
     try {
-      const response = await fetch(`${API_BASE}/plaid/bank/${itemId}`, {
+      const response = await fetch(`${API_BASE}/plaid/bank?bank_ids=${encodeURIComponent(itemId)}`, {
         method: 'DELETE',
         headers: getHeaders(),
         credentials: 'include',
@@ -364,20 +364,48 @@ export const PlaidService = {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      const data = (await response.json()) as { message: string };
+      const data = (await response.json()) as { message: string; success_count: number };
       return data;
     } catch (error) {
       throw new Error('Failed to revoke bank connection');
     }
   },
 
-  async revokeAllItems(): Promise<{ message: string; revoked_count: number }> {
+  async revokeAllItems(): Promise<{ message: string; success_count: number }> {
     try {
-      const response = await fetch(`${API_BASE}/plaid/tokens/revoke-all`, {
+      console.log('revokeAllItems: Starting...');
+      // First get all bank items to extract their IDs
+      const itemsData = await PlaidService.getPlaidItems();
+      console.log('revokeAllItems: Got items data:', itemsData);
+      const bankIds: string[] = [];
+
+      // Extract bank IDs from the response
+      if (itemsData.banks) {
+        bankIds.push(...itemsData.banks.map(bank => bank.item.item_id));
+        console.log('revokeAllItems: Extracted bank IDs from banks field:', bankIds);
+      } else if (itemsData.items) {
+        // Fallback for legacy response structure
+        bankIds.push(...itemsData.items.map(item => item.item_id));
+        console.log('revokeAllItems: Extracted bank IDs from items field:', bankIds);
+      }
+
+      if (bankIds.length === 0) {
+        console.log('revokeAllItems: No bank IDs found');
+        return { message: 'No bank connections found to revoke', success_count: 0 };
+      }
+
+      // Create query string with all bank IDs
+      const queryParams = bankIds.map(id => `bank_ids=${encodeURIComponent(id)}`).join('&');
+      const url = `${API_BASE}/plaid/bank?${queryParams}`;
+      console.log('revokeAllItems: Making DELETE request to:', url);
+      
+      const response = await fetch(url, {
         method: 'DELETE',
         headers: getHeaders(),
         credentials: 'include',
       });
+
+      console.log('revokeAllItems: Response status:', response.status);
 
       if (response.status === 401) {
         localStorage.removeItem('authToken');
@@ -386,12 +414,16 @@ export const PlaidService = {
       }
 
       if (!response.ok) {
+        const errorText = await response.text();
+        console.error('revokeAllItems: HTTP error response:', errorText);
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      const data = (await response.json()) as { message: string; revoked_count: number };
+      const data = (await response.json()) as { message: string; success_count: number };
+      console.log('revokeAllItems: Success response:', data);
       return data;
     } catch (error) {
+      console.error('revokeAllItems: Error:', error);
       throw new Error('Failed to revoke all bank connections');
     }
   },

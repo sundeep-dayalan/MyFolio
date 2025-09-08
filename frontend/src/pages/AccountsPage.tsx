@@ -143,8 +143,11 @@ const AccountsPage: React.FC = () => {
   };
 
   const handleUnlinkAllBanks = async () => {
+    console.log('handleUnlinkAllBanks called');
     try {
-      await revokeAllItemsMutation.mutateAsync();
+      console.log('Attempting to revoke all items...');
+      const result = await revokeAllItemsMutation.mutateAsync();
+      console.log('Successfully revoked all items:', result);
       setShowConfirmDialog(null);
     } catch (error) {
       console.error('Failed to unlink all banks:', error);
