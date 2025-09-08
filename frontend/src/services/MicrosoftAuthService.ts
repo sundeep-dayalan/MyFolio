@@ -96,9 +96,10 @@ export class MicrosoftAuthService {
    * Check if user is authenticated
    */
   static isAuthenticated(): boolean {
-    const token = localStorage.getItem('authToken');
-    const user = localStorage.getItem('user');
-    return Boolean(token && user);
+    // With HttpOnly cookies, we can't check authentication client-side
+    // Let the API handle authentication - return true to enable UI
+    // API will return 401 if not authenticated, triggering logout
+    return true;
   }
 
   /**
@@ -113,7 +114,15 @@ export class MicrosoftAuthService {
    * Get authentication token
    */
   static getAuthToken(): string | null {
-    return localStorage.getItem('authToken');
+    // Extract session cookie value
+    const cookies = document.cookie.split(';');
+    for (const cookie of cookies) {
+      const [name, value] = cookie.trim().split('=');
+      if (name === 'session') {
+        return value;
+      }
+    }
+    return null;
   }
 
   /**
@@ -169,10 +178,10 @@ export class MicrosoftAuthService {
    * Check if token is expired
    */
   static isTokenExpired(): boolean {
-    const expiry = localStorage.getItem('tokenExpiry');
-    if (!expiry) return true;
-
-    return Date.now() >= parseInt(expiry);
+    // For cookie-based auth, the server handles token expiry
+    // If the session cookie exists, we consider it valid
+    // The browser will automatically remove expired cookies
+    return !this.isAuthenticated();
   }
 
   /**

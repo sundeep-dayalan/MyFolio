@@ -984,6 +984,16 @@ setup_secrets() {
         local secret_name=$(echo "$secret_pair" | cut -d: -f1)
         local secret_value=$(echo "$secret_pair" | cut -d: -f2-)
 
+        # Only preserve secrets that affect encrypted data (session-secret-key)
+        if [[ "$secret_name" == "session-secret-key" ]]; then
+            # Check if secret already exists
+            if az keyvault secret show --vault-name "$KEY_VAULT_NAME" --name "$secret_name" --output none >/dev/null 2>&1; then
+                print_status "Secret '$secret_name' already exists, skipping creation to preserve encrypted data"
+                continue
+            fi
+        fi
+
+        # Create or update all other secrets (client-id, client-secret, tenant-id, etc.)
         if retry_az_command 3 5 "Set secret $secret_name" \
             az keyvault secret set \
             --vault-name "$KEY_VAULT_NAME" \
@@ -996,31 +1006,36 @@ setup_secrets() {
         fi
     done
 
-    print_status "Creating cryptographic key for encryption and JWT signing..."
+    print_status "Checking cryptographic key for encryption and JWT signing..."
 
-    # Create single key for both encryption and JWT signing operations
-    if retry_az_command 3 10 "Create cryptographic key secrets-encryption-key" \
-        az keyvault key create \
-        --vault-name "$KEY_VAULT_NAME" \
-        --name "secrets-encryption-key" \
-        --kty RSA \
-        --size 2048 \
-        --ops encrypt decrypt sign verify \
-        --protection software \
-        --output none; then
-        print_success "Successfully created cryptographic key: 'secrets-encryption-key'"
-    else
-        print_warning "Key creation failed, attempting to update existing key operations..."
-        # Update existing key to include sign/verify operations
+    # Check if key already exists
+    if az keyvault key show --vault-name "$KEY_VAULT_NAME" --name "secrets-encryption-key" --output none >/dev/null 2>&1; then
+        print_status "Cryptographic key 'secrets-encryption-key' already exists, skipping creation to preserve encrypted data"
+        # Update existing key to ensure it has all required operations
         if retry_az_command 3 5 "Update key operations for secrets-encryption-key" \
             az keyvault key set-attributes \
             --vault-name "$KEY_VAULT_NAME" \
             --name "secrets-encryption-key" \
             --ops encrypt decrypt sign verify \
             --output none; then
-            print_success "Successfully updated key operations for 'secrets-encryption-key'"
+            print_success "Successfully verified/updated key operations for 'secrets-encryption-key'"
         else
-            print_error "Failed to create or update cryptographic key. Manual intervention may be required."
+            print_warning "Failed to update key operations, but key exists and may still work"
+        fi
+    else
+        # Create single key for both encryption and JWT signing operations
+        if retry_az_command 3 10 "Create cryptographic key secrets-encryption-key" \
+            az keyvault key create \
+            --vault-name "$KEY_VAULT_NAME" \
+            --name "secrets-encryption-key" \
+            --kty RSA \
+            --size 2048 \
+            --ops encrypt decrypt sign verify \
+            --protection software \
+            --output none; then
+            print_success "Successfully created cryptographic key: 'secrets-encryption-key'"
+        else
+            print_error "Failed to create cryptographic key. Manual intervention may be required."
         fi
     fi
     

@@ -96,7 +96,7 @@ export const useItemsQuery = (enabled: boolean = true) => {
 export const useRevokeItemMutation = () => {
   const queryClient = useQueryClient();
 
-  return useMutation<{ message: string }, Error, string>({
+  return useMutation<{ message: string; success_count: number }, Error, string>({
     mutationFn: PlaidService.revokeItem,
     onSuccess: (data, itemId) => {
       console.log(`Successfully revoked item ${itemId}:`, data);
@@ -114,7 +114,7 @@ export const useRevokeItemMutation = () => {
 export const useRevokeAllItemsMutation = () => {
   const queryClient = useQueryClient();
 
-  return useMutation<{ message: string; revoked_count: number }, Error>({
+  return useMutation<{ message: string; success_count: number }, Error>({
     mutationFn: PlaidService.revokeAllItems,
     onSuccess: (data) => {
       console.log('Successfully revoked all items:', data);

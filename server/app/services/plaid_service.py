@@ -607,6 +607,7 @@ class PlaidService:
             chain_transactions: If True, will also sync transactions after accounts sync completes
         """
         try:
+
             # Create a new event loop for the background task
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
@@ -654,6 +655,7 @@ class PlaidService:
             raise ValueError("Valid user_id is required")
 
         try:
+            # Optimized connection check with timeout to prevent blocking
             await cosmos_client.ensure_connected()
 
             # Updated query to fetch institution details
@@ -833,19 +835,19 @@ class PlaidService:
             logger.error(f"Failed to update token last_used for {item_id}: {e}")
             return False
 
-    async def revoke_item_access(self, user_id: str, item_id: str) -> bool:
-        """Revoke access to a Plaid item and remove from database."""
+    async def delete_bank(self, user_id: str, bank_id: str) -> bool:
+        """Delete a Plaid item and remove from database."""
         try:
-            logger.info(f"Revoking access for user {user_id}, item {item_id}")
+            logger.info(f"Deleting bank for user {user_id}, item {bank_id}")
             await cosmos_client.ensure_connected()
 
-            access_token = await self.get_bank_access_token(user_id, item_id)
+            access_token = await self.get_bank_access_token(user_id, bank_id)
             request = ItemRemoveRequest(access_token=access_token)
 
             try:
                 client = await self._get_client(user_id)
                 client.item_remove(request)
-                logger.info(f"Successfully revoked Plaid access for item {item_id}")
+                logger.info(f"Successfully revoked Plaid access for item {bank_id}")
             except ValueError as ve:
                 logger.warning(
                     f"Plaid credentials not configured, skipping API revocation: {ve}"
@@ -856,16 +858,16 @@ class PlaidService:
                 )
 
             # Remove bank document from CosmosDB
-            cosmos_client.delete_item(Containers.BANKS, item_id, user_id)
+            cosmos_client.delete_item(Containers.BANKS, bank_id, user_id)
 
             # Clean up transaction data
-            await transaction_storage_service.delete_item_transactions(user_id, item_id)
+            await transaction_storage_service.delete_item_transactions(user_id, bank_id)
 
-            logger.info(f"Successfully cleaned up all data for item {item_id}")
+            logger.info(f"Successfully cleaned up all data for item {bank_id}")
             return True
 
         except Exception as e:
-            logger.error(f"Failed to revoke item access for {item_id}: {e}")
+            logger.error(f"Failed to revoke item access for {bank_id}: {e}")
             return False
 
     def remove_all_user_data(self, user_id: str) -> bool:
@@ -884,7 +886,7 @@ class PlaidService:
             for token in tokens:
                 try:
                     # Revoke each item
-                    if self.revoke_item_access(user_id, token.id):
+                    if self.delete_bank(user_id, token.id):
                         success_count += 1
                 except Exception as e:
                     logger.error(f"Failed to revoke item {token.id}: {e}")

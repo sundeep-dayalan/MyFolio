@@ -4,7 +4,9 @@ Plaid integration routes.
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
+
+from ..exceptions import BankDeleteError, ValidationError
 from ..services.plaid_service import PlaidService
 from ..dependencies import get_current_user, get_plaid_service
 from ..utils.logger import get_logger
@@ -112,7 +114,7 @@ async def refresh_accounts(
     user_id: str = Depends(get_current_user),
     plaid_service: PlaidService = Depends(get_plaid_service),
 ):
-    """Force refresh account balances from Plaid API, update Cosmos DB, and return latest."""
+    """Force refresh account balances from Plaid API, update DB, and return latest."""
     try:
         result = await plaid_service.get_accounts_with_balances(
             user_id, use_cached_db_data=False
@@ -148,41 +150,53 @@ async def get_plaid_items(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.delete("/bank/{bank_id}")
-async def revoke_plaid_item(
-    bank_id: str,
+@router.delete("/bank")
+async def delete_bank(
+    bank_ids: List[str] = Query(None, description="Additional bank IDs to delete"),
     user_id: str = Depends(get_current_user),
     plaid_service: PlaidService = Depends(get_plaid_service),
 ):
-    """Revoke access to a specific Plaid item."""
+    """Revoke access to one or multiple Plaid items."""
+    all_bank_ids = []
+    if bank_ids:
+        all_bank_ids = bank_ids
+
+    if not all_bank_ids:
+        raise ValidationError("No bank IDs provided for deletion")
+
     try:
-        success = await plaid_service.revoke_item_access(user_id, bank_id)
-        if success:
-            return {"message": "Item revoked successfully"}
+        logger.info(f"Deleting banks: {all_bank_ids} for user {user_id}")
+        success_count = 0
+        failed_banks = []
+
+        for current_bank_id in all_bank_ids:
+            try:
+                success = await plaid_service.delete_bank(user_id, current_bank_id)
+                if success:
+                    success_count += 1
+                else:
+                    failed_banks.append(current_bank_id)
+            except Exception as e:
+                logger.error(f"Failed to delete bank {current_bank_id}: {str(e)}")
+                failed_banks.append(current_bank_id)
+
+        if failed_banks:
+            return {
+                "message": (
+                    f"Partially completed: {success_count} items revoked, "
+                    f"{len(failed_banks)} failed"
+                ),
+                "success_count": success_count,
+                "failed_count": len(failed_banks),
+                "failed_banks": failed_banks,
+            }
         else:
-            raise HTTPException(status_code=400, detail="Failed to revoke item")
+            return {
+                "message": f"All {success_count} items revoked successfully",
+                "success_count": success_count,
+            }
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@router.delete("/tokens/revoke-all")
-def revoke_all_tokens(
-    user_id: str = Depends(get_current_user),
-    plaid_service: PlaidService = Depends(get_plaid_service),
-):
-    """Revoke all tokens for the current user."""
-    try:
-        success = plaid_service.remove_all_user_data(user_id)
-        return {
-            "message": (
-                "All user data removed successfully"
-                if success
-                else "Failed to remove user data"
-            ),
-            "success": success,
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise BankDeleteError(detail=str(e))
 
 
 @router.get("/transactions")
@@ -245,8 +259,8 @@ async def force_refresh_transactions(
     plaid_service: PlaidService = Depends(get_plaid_service),
 ):
     """
-    Force refresh transactions for a specific item/bank by clearing all existing data
-    and performing a complete resync. This is an async operation that returns immediately.
+    Force refresh transactions for a specific item/bank by clearing all data
+    and performing a complete resync. This is an async operation.
     """
     try:
         result = await plaid_service.force_refresh_transactions(user_id, item_id)
@@ -297,7 +311,7 @@ async def get_transactions_paginated(
         None, description="Filter by primary personal finance category"
     ),
 ):
-    """Get paginated transactions from Cosmos DB with comprehensive filtering and sorting."""
+    """Get paginated transactions from Cosmos DB with filtering and sorting."""
     try:
         await cosmos_client.ensure_connected()
         # Get paginated transactions with all filters
@@ -364,7 +378,7 @@ def get_transactions_count(
 
 
 @router.get("/transactions/test")
-async def get_transactions_count(
+async def test_transactions(
     user_id: str = Depends(get_current_user),
     plaid_service: PlaidService = Depends(get_plaid_service),
 ):

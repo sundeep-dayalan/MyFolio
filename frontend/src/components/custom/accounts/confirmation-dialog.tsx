@@ -54,7 +54,10 @@ export function ConfirmationDialog({
             </Button>
             <Button
               variant="destructive"
-              onClick={onConfirm}
+              onClick={() => {
+                console.log('Confirmation button clicked');
+                onConfirm();
+              }}
               disabled={isLoading}
             >
               {isLoading ? 'Disconnecting...' : 'Yes, Disconnect'}

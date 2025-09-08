@@ -333,13 +333,6 @@ export const SecretsSection: React.FC = () => {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              {!MicrosoftAuthService.isAuthenticated() && (
-                <Alert>
-                  <AlertDescription>
-                    You need to be logged in to manage Plaid configuration.
-                  </AlertDescription>
-                </Alert>
-              )}
 
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -393,8 +386,7 @@ export const SecretsSection: React.FC = () => {
                     disabled={
                       saveState !== 'idle' ||
                       !formData.plaid_client_id ||
-                      !formData.plaid_secret ||
-                      !MicrosoftAuthService.isAuthenticated()
+                      !formData.plaid_secret
                     }
                   >
                     {saveState !== 'idle' && <Spinner className="mr-2 h-4 w-4" />}
