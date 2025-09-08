@@ -19,8 +19,25 @@ export interface PlaidAccount {
   type: string;
 }
 
-export interface PlaidAccountsResponse {
+export interface InstitutionDetail {
+  name: string;
+  logo?: string;
+  status: string;
+  total_balance: number;
+  account_count: number;
   accounts: PlaidAccount[];
+  last_account_sync?: {
+    last_sync?: string;
+    status?: string;
+  };
+}
+
+export interface PlaidAccountsResponse {
+  institutions: InstitutionDetail[];
+  accounts_count: number;
+  banks_count: number;
+  // Legacy fields for backward compatibility during transition
+  accounts?: PlaidAccount[];
 }
 
 export interface PlaidTransaction {
@@ -52,29 +69,19 @@ export interface PlaidTransactionsResponse {
   transactions: PlaidTransaction[];
 }
 
-const getAuthHeaders = async (): Promise<HeadersInit> => {
-  const token = AzureAuthService.getAuthToken();
-
-  if (!token) {
-    throw new Error('Authentication token required. Please log in.');
-  }
-
-  // Refresh token if needed
-  await AzureAuthService.refreshTokenIfNeeded();
-
+const getHeaders = (): HeadersInit => {
   return {
     'Content-Type': 'application/json',
-    Authorization: `Bearer ${token}`,
   };
 };
 
 export const AzurePlaidService = {
   async createLinkToken(products: string[] = ['transactions', 'accounts']): Promise<string> {
     try {
-      const headers = await getAuthHeaders();
       const response = await fetch(`${API_BASE}/plaid/create_link_token`, {
         method: 'POST',
-        headers,
+        headers: getHeaders(),
+        credentials: 'include',
         body: JSON.stringify({ products }),
       });
 
@@ -97,12 +104,15 @@ export const AzurePlaidService = {
     }
   },
 
-  async exchangePublicToken(publicToken: string): Promise<{ item_id: string; accounts: PlaidAccount[] }> {
+  async exchangePublicToken(
+    publicToken: string,
+  ): Promise<{ item_id: string; accounts: PlaidAccount[] }> {
     try {
-      const headers = await getAuthHeaders();
+      const headers = getHeaders();
       const response = await fetch(`${API_BASE}/plaid/exchange_public_token`, {
         method: 'POST',
         headers,
+        credentials: 'include',
         body: JSON.stringify({ public_token: publicToken }),
       });
 
@@ -125,41 +135,14 @@ export const AzurePlaidService = {
     }
   },
 
-  async getAccounts(): Promise<PlaidAccountsResponse> {
-    try {
-      const headers = await getAuthHeaders();
-      const response = await fetch(`${API_BASE}/plaid/accounts`, {
-        method: 'GET',
-        headers,
-      });
-
-      if (response.status === 401) {
-        AzureAuthService.clearAuthData();
-        window.location.href = '/login';
-        throw new Error('Authentication required. Redirecting to login.');
-      }
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || `HTTP error! status: ${response.status}`);
-      }
-
-      const data = await response.json();
-      return data;
-    } catch (error) {
-      console.error('Failed to fetch accounts:', error);
-      throw new Error('Failed to fetch accounts');
-    }
-  },
-
   async getTransactions(
     startDate?: string,
     endDate?: string,
     count: number = 500,
-    offset: number = 0
+    offset: number = 0,
   ): Promise<PlaidTransactionsResponse> {
     try {
-      const headers = await getAuthHeaders();
+      const headers = getHeaders();
       const params = new URLSearchParams({
         count: count.toString(),
         offset: offset.toString(),
@@ -171,6 +154,7 @@ export const AzurePlaidService = {
       const response = await fetch(`${API_BASE}/plaid/transactions?${params.toString()}`, {
         method: 'GET',
         headers,
+        credentials: 'include',
       });
 
       if (response.status === 401) {
@@ -195,7 +179,7 @@ export const AzurePlaidService = {
   async getTransactionsByDateRange(
     startDate: string,
     endDate: string,
-    count: number = 500
+    count: number = 500,
   ): Promise<PlaidTransactionsResponse> {
     return this.getTransactions(startDate, endDate, count, 0);
   },
@@ -203,23 +187,97 @@ export const AzurePlaidService = {
   async getRecentTransactions(days: number = 30): Promise<PlaidTransactionsResponse> {
     const endDate = new Date().toISOString().split('T')[0];
     const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-    
+
     return this.getTransactions(startDate, endDate);
   },
 
   // Legacy method for backward compatibility with existing PlaidService
   async getBalance(): Promise<PlaidAccount[]> {
     const accountsResponse = await this.getAccounts();
-    return accountsResponse.accounts;
+    return accountsResponse.accounts || [];
+  },
+
+  async getTransactionsPaginated(
+    page: number = 1,
+    pageSize: number = 20,
+    filters?: {
+      accountId?: string;
+      itemId?: string;
+      status?: 'posted' | 'pending' | 'removed';
+      isPending?: boolean;
+      paymentChannel?: 'online' | 'in store' | 'other';
+      dateFrom?: string;
+      dateTo?: string;
+      minAmount?: number;
+      maxAmount?: number;
+      currency?: string;
+      searchTerm?: string;
+      category?: string;
+    },
+    sortBy?: string,
+    sortOrder?: 'asc' | 'desc',
+  ): Promise<any> {
+    try {
+      const queryParams = new URLSearchParams({
+        page: page.toString(),
+        pageSize: pageSize.toString(),
+      });
+
+      if (sortBy) queryParams.append('sortBy', sortBy);
+      if (sortOrder) queryParams.append('sortOrder', sortOrder);
+      if (filters?.accountId) queryParams.append('accountId', filters.accountId);
+      if (filters?.itemId) queryParams.append('itemId', filters.itemId);
+      if (filters?.status) queryParams.append('status', filters.status);
+      if (filters?.isPending !== undefined)
+        queryParams.append('isPending', filters.isPending.toString());
+      if (filters?.paymentChannel) queryParams.append('paymentChannel', filters.paymentChannel);
+      if (filters?.dateFrom) queryParams.append('dateFrom', filters.dateFrom);
+      if (filters?.dateTo) queryParams.append('dateTo', filters.dateTo);
+      if (filters?.minAmount !== undefined)
+        queryParams.append('minAmount', filters.minAmount.toString());
+      if (filters?.maxAmount !== undefined)
+        queryParams.append('maxAmount', filters.maxAmount.toString());
+      if (filters?.currency) queryParams.append('currency', filters.currency);
+      if (filters?.searchTerm) queryParams.append('searchTerm', filters.searchTerm);
+      if (filters?.category) queryParams.append('category', filters.category);
+
+      const headers = getHeaders();
+      const response = await fetch(
+        `${API_BASE}/plaid/transactions/paginated?${queryParams.toString()}`,
+        {
+          method: 'GET',
+          headers,
+          credentials: 'include',
+        },
+      );
+
+      if (response.status === 401) {
+        AzureAuthService.clearAuthData();
+        window.location.href = '/login';
+        throw new Error('Authentication required. Redirecting to login.');
+      }
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || `HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error('Failed to fetch paginated transactions:', error);
+      throw new Error('Failed to fetch paginated transactions');
+    }
   },
 
   // Health check method
   async checkConnection(): Promise<boolean> {
     try {
-      const headers = await getAuthHeaders();
+      const headers = getHeaders();
       const response = await fetch(`${API_BASE}/health`, {
         method: 'GET',
         headers,
+        credentials: 'include',
       });
       return response.ok;
     } catch (error) {

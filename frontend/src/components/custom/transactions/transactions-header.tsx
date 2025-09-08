@@ -25,8 +25,8 @@ interface TransactionsHeaderProps {
   onForceRefreshBank?: (bankName: string) => Promise<void>;
   isForceRefreshing?: boolean;
   errorMessage?: string;
-  transactionType: 'added' | 'modified' | 'removed' | 'all';
-  onTransactionTypeChange: (type: 'added' | 'modified' | 'removed' | 'all') => void;
+  transactionType: 'posted' | 'pending' | 'removed' | 'all';
+  onTransactionTypeChange: (type: 'posted' | 'pending' | 'removed' | 'all') => void;
 }
 
 export const TransactionsHeader: React.FC<TransactionsHeaderProps> = ({
@@ -62,7 +62,7 @@ export const TransactionsHeader: React.FC<TransactionsHeaderProps> = ({
             </PopoverTrigger>
             <PopoverContent className="w-[160px] p-0" align="end">
               <div className="p-1">
-                {(['added', 'modified', 'removed', 'all'] as const).map((type) => (
+                {(['posted', 'pending', 'removed', 'all'] as const).map((type) => (
                   <button
                     key={type}
                     className={cn(

@@ -10,17 +10,29 @@ import {
   IconTrendingUp,
   IconUnlink,
 } from '@tabler/icons-react';
-import type { PlaidAccount } from '@/services/PlaidService';
+import type { PlaidAccount, InstitutionDetail } from '@/services/PlaidService';
 
 interface AccountsDisplayProps {
-  accounts: PlaidAccount[];
+  institutions?: InstitutionDetail[];
+  // Legacy prop for backward compatibility
+  accounts?: PlaidAccount[];
   onUnlinkBank: (bankName: string, itemId?: string) => void;
   getItemIdForBank: (bankName: string) => string | null;
   isRevoking: boolean;
 }
 
-export function AccountsDisplay({ accounts, onUnlinkBank, getItemIdForBank, isRevoking }: AccountsDisplayProps) {
+export function AccountsDisplay({ institutions, accounts, onUnlinkBank, getItemIdForBank, isRevoking }: AccountsDisplayProps) {
   const [viewMode, setViewMode] = useState<'all' | 'by-bank'>('all');
+
+  // Convert new institutions format to legacy accounts format for backward compatibility
+  const allAccounts = institutions 
+    ? institutions.flatMap(institution => 
+        institution.accounts.map(account => ({
+          ...account,
+          institution_name: institution.name
+        }))
+      )
+    : accounts || [];
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('en-US', {
@@ -56,7 +68,7 @@ export function AccountsDisplay({ accounts, onUnlinkBank, getItemIdForBank, isRe
     return grouped;
   };
 
-  if (accounts.length === 0) {
+  if (allAccounts.length === 0) {
     return (
       <div className="px-4 lg:px-6">
         <Card>
@@ -86,7 +98,7 @@ export function AccountsDisplay({ accounts, onUnlinkBank, getItemIdForBank, isRe
 
         <TabsContent value="all" className="space-y-4">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {accounts.map((account) => {
+            {allAccounts.map((account) => {
               const IconComponent = getAccountIcon(account.type, account.subtype);
               return (
                 <Card key={account.account_id} className="shadow-xs">
@@ -133,7 +145,97 @@ export function AccountsDisplay({ accounts, onUnlinkBank, getItemIdForBank, isRe
         </TabsContent>
 
         <TabsContent value="by-bank" className="space-y-6">
-          {Object.entries(groupAccountsByBank(accounts)).map(([bankName, bankAccounts]) => {
+          {institutions ? (
+            institutions.map((institution) => (
+              <Card key={institution.name} className="shadow-xs">
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-3">
+                      <div className="p-2 bg-primary/10 rounded-lg">
+                        <IconBuildingBank className="h-5 w-5 text-primary" />
+                      </div>
+                      <div>
+                        <CardTitle className="text-lg">{institution.name}</CardTitle>
+                        <CardDescription>
+                          {institution.account_count} account{institution.account_count !== 1 ? 's' : ''}
+                        </CardDescription>
+                      </div>
+                    </div>
+                    <div className="flex items-center space-x-4">
+                      <div className="text-right">
+                        <p className="text-sm text-muted-foreground">Total Balance</p>
+                        <p className="text-lg font-semibold text-green-600">
+                          {formatCurrency(institution.total_balance)}
+                        </p>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          console.log('Unlink button clicked for:', institution.name);
+                          const itemId = getItemIdForBank(institution.name);
+                          console.log('ItemId found:', itemId);
+                          if (itemId) {
+                            onUnlinkBank(institution.name, itemId);
+                          } else {
+                            console.error('No itemId found for bank:', institution.name);
+                            // Still call onUnlinkBank without itemId to show dialog
+                            onUnlinkBank(institution.name);
+                          }
+                        }}
+                        disabled={isRevoking}
+                      >
+                        <IconUnlink className="h-4 w-4 mr-2" />
+                        Unlink
+                      </Button>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+                    {institution.accounts.map((account) => {
+                      const IconComponent = getAccountIcon(account.type, account.subtype);
+                      return (
+                        <Card key={account.account_id} className="shadow-sm border-muted/40">
+                          <CardHeader className="pb-3">
+                            <div className="flex items-center space-x-3">
+                              <div className="p-1.5 bg-primary/10 rounded">
+                                <IconComponent className="h-4 w-4 text-primary" />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <CardTitle className="text-sm truncate">
+                                  {account.name}
+                                </CardTitle>
+                                <CardDescription className="text-xs capitalize">
+                                  {account.subtype || account.type}
+                                  {account.mask && ` •••• ${account.mask}`}
+                                </CardDescription>
+                              </div>
+                            </div>
+                          </CardHeader>
+                          <CardContent className="space-y-2">
+                            <div className="flex justify-between items-center text-xs">
+                              <span className="text-muted-foreground">Available</span>
+                              <span className="font-medium">
+                                {formatCurrency(account.balances.available || 0)}
+                              </span>
+                            </div>
+                            <div className="flex justify-between items-center text-xs">
+                              <span className="text-muted-foreground">Current</span>
+                              <span className="font-semibold text-green-600">
+                                {formatCurrency(account.balances.current || 0)}
+                              </span>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                </CardContent>
+              </Card>
+            ))
+          ) : (
+            Object.entries(groupAccountsByBank(allAccounts)).map(([bankName, bankAccounts]) => {
             const bankTotal = bankAccounts.reduce(
               (sum, acc) => sum + (acc.balances.current || 0),
               0,
@@ -165,9 +267,15 @@ export function AccountsDisplay({ accounts, onUnlinkBank, getItemIdForBank, isRe
                         variant="outline"
                         size="sm"
                         onClick={() => {
+                          console.log('Unlink button clicked for:', bankName);
                           const itemId = getItemIdForBank(bankName);
+                          console.log('ItemId found:', itemId);
                           if (itemId) {
                             onUnlinkBank(bankName, itemId);
+                          } else {
+                            console.error('No itemId found for bank:', bankName);
+                            // Still call onUnlinkBank without itemId to show dialog
+                            onUnlinkBank(bankName);
                           }
                         }}
                         disabled={isRevoking}
@@ -221,7 +329,8 @@ export function AccountsDisplay({ accounts, onUnlinkBank, getItemIdForBank, isRe
                 </CardContent>
               </Card>
             );
-          })}
+          })
+          )}
         </TabsContent>
       </Tabs>
     </div>

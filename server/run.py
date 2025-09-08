@@ -5,7 +5,7 @@ Application entry point.
 import uvicorn
 
 from app.main import app
-from server.app.settings import settings
+from app.settings import settings
 
 
 if __name__ == "__main__":

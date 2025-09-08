@@ -2,10 +2,10 @@
 Plaid-related constants.
 """
 
+
 # Plaid Environments
 class PlaidEnvironments:
     SANDBOX = "sandbox"
-    DEVELOPMENT = "development" 
     PRODUCTION = "production"
 
 
@@ -62,13 +62,19 @@ class PlaidApiErrors:
 class PlaidErrorMessages:
     INVALID_CLIENT_ID_MSG = "Invalid Plaid Client ID. Please check your credentials."
     INVALID_SECRET_MSG = "Invalid Plaid Secret. Please check your credentials."
-    UNAUTHORIZED_MSG = "Invalid credentials. Please verify your Plaid Client ID and Secret."
+    UNAUTHORIZED_MSG = (
+        "Invalid credentials. Please verify your Plaid Client ID and Secret."
+    )
     INVALID_CREDENTIALS_MSG = "Invalid Plaid credentials. Please verify your Client ID and Secret are correct."
     API_ERROR_MSG = "Unable to validate credentials with Plaid API. Please try again."
-    BAD_REQUEST_MSG = "Invalid Plaid credentials. Please check your Client ID and Secret."
-    GENERIC_ERROR_MSG = "Credential validation failed. Please verify your Plaid credentials."
-    
-    
+    BAD_REQUEST_MSG = (
+        "Invalid Plaid credentials. Please check your Client ID and Secret."
+    )
+    GENERIC_ERROR_MSG = (
+        "Credential validation failed. Please verify your Plaid credentials."
+    )
+
+
 # Default Currency
 class Currency:
     USD = "USD"
@@ -78,5 +84,5 @@ class Currency:
 class PlaidResponseFields:
     TRANSACTIONS = "transactions"
     STATUS = "status"
-    SUCCESS = "success" 
+    SUCCESS = "success"
     COMPLETED = "completed"

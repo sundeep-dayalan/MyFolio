@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useContext } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { MicrosoftAuthService } from '../services/MicrosoftAuthService';
+import { AuthContext } from '../context/AuthContext';
 import { Spinner } from '@/components/ui/spinner';
+import { config } from '../config/env';
 
 export const OAuthCallback: React.FC = () => {
   const [loading, setLoading] = useState(true);
@@ -9,6 +10,7 @@ export const OAuthCallback: React.FC = () => {
   const [debugInfo, setDebugInfo] = useState<string>('');
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const authContext = useContext(AuthContext);
 
   useEffect(() => {
     const handleCallback = async () => {
@@ -28,69 +30,52 @@ export const OAuthCallback: React.FC = () => {
 
         console.log('OAuth Callback Debug:', debugMessage);
 
-        // Check if this is the direct callback format (success, token, user)
+        // Check for success/error parameters from backend redirect
         const success = searchParams.get('success');
-        const token = searchParams.get('token');
-        const userParam = searchParams.get('user');
+        const errorParam = searchParams.get('error');
 
-        if (success === 'true' && token && userParam) {
-          // Direct callback format - backend already processed OAuth
-          try {
-            const userData = JSON.parse(decodeURIComponent(userParam));
-
-            // Store authentication data directly
-            localStorage.setItem('authToken', token);
-            localStorage.setItem('user', JSON.stringify(userData));
-
-            console.log('Direct OAuth callback successful, redirecting to /home');
-            navigate('/home', { replace: true });
-            return;
-          } catch (parseError) {
-            console.error('Failed to parse user data:', parseError);
-            setError('Invalid user data received');
-            setTimeout(() => navigate('/login', { replace: true }), 3000);
-            return;
-          }
-        }
-
-        if (success === 'false') {
-          // Direct callback with error
-          const errorParam = searchParams.get('error');
-          setError(errorParam ? decodeURIComponent(errorParam) : 'Authentication failed');
+        if (success === 'false' || errorParam) {
+          // Authentication failed
+          const errorMessage = errorParam ? decodeURIComponent(errorParam) : 'Authentication failed';
+          setError(errorMessage);
           setTimeout(() => navigate('/login', { replace: true }), 3000);
           return;
         }
 
-        // Process Microsoft OAuth callback
-        const result = await MicrosoftAuthService.handleOAuthCallback(searchParams);
+        // If we reach here, the backend should have set the HttpOnly session cookie
+        // We need to verify by calling the /session/me endpoint
+        const response = await fetch(`${config.apiBaseUrl}/auth/oauth/microsoft/session/me`, {
+          method: 'GET',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
 
-        if (result.success) {
-          // Authentication successful, redirect to home
+        if (response.ok) {
+          const userData = await response.json();
+          // Update the auth context with the user data
+          if (authContext) {
+            authContext.setUser(userData);
+          }
+          console.log('OAuth callback successful, redirecting to /home');
           navigate('/home', { replace: true });
         } else {
-          // Authentication failed, show error
-          setError(result.error || 'Authentication failed');
-
-          // Redirect to login page after showing error
-          setTimeout(() => {
-            navigate('/login', { replace: true });
-          }, 3000);
+          // Session validation failed
+          setError('Authentication session could not be established');
+          setTimeout(() => navigate('/login', { replace: true }), 3000);
         }
       } catch (err) {
         console.error('OAuth callback error:', err);
         setError('An unexpected error occurred during authentication');
-
-        // Redirect to login page after showing error
-        setTimeout(() => {
-          navigate('/login', { replace: true });
-        }, 3000);
+        setTimeout(() => navigate('/login', { replace: true }), 3000);
       } finally {
         setLoading(false);
       }
     };
 
     handleCallback();
-  }, [searchParams, navigate]);
+  }, [searchParams, navigate, authContext]);
 
   if (loading) {
     return (

@@ -58,7 +58,6 @@ export function TransactionsDataTable({ columns, initialRequest }: DataTableProp
       sortBy: sorting.length > 0 ? sorting[0].id : undefined,
       sortOrder:
         sorting.length > 0 ? (sorting[0].desc ? ('desc' as const) : ('asc' as const)) : undefined,
-      transactionType: initialRequest.transactionType, // Include transaction type
       filters: {
         searchTerm: globalFilter || undefined,
         ...initialRequest.filters, // Include any preset filters
@@ -66,7 +65,7 @@ export function TransactionsDataTable({ columns, initialRequest }: DataTableProp
     };
 
     return request;
-  }, [pagination, sorting, globalFilter, initialRequest.filters, initialRequest.transactionType]);
+  }, [pagination, sorting, globalFilter, initialRequest.filters]);
 
   // Fetch data using the API request
   const { data, isLoading, error } = useTransactionsPaginatedQuery(apiRequest);

@@ -6,10 +6,11 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
 from typing import Dict, Any, Optional
 from ..services.plaid_service import PlaidService
-from ..dependencies import get_current_user_id
+from ..dependencies import get_current_user, get_plaid_service
 from ..utils.logger import get_logger
 from ..constants import ApiRoutes, ApiTags
 from ..services.transaction_storage_service import transaction_storage_service
+from ..database import cosmos_client
 
 logger = get_logger(__name__)
 
@@ -51,13 +52,9 @@ class PaginatedTransactionsResponse(BaseModel):
     transactionType: str  # Added to show which type was queried
 
 
-def get_plaid_service() -> PlaidService:
-    return PlaidService()
-
-
 @router.post("/create_link_token")
 async def create_link_token(
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(get_current_user),
     plaid_service: PlaidService = Depends(get_plaid_service),
 ):
     """Create a Plaid link token for the current user."""
@@ -74,29 +71,17 @@ async def create_link_token(
 async def exchange_public_token(
     request: ExchangeTokenRequest,
     background_tasks: BackgroundTasks,
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(get_current_user),
     plaid_service: PlaidService = Depends(get_plaid_service),
 ):
     """Exchange public token for an access token and store securely."""
     try:
         result = await plaid_service.exchange_public_token(
-            user_id, request.public_token
+            user_id, request.public_token, background_tasks
         )
 
         # Convert to dict for response
         result_dict = result.model_dump() if hasattr(result, "model_dump") else result
-
-        # Add the long-running sync as a background task
-        # The sync method will get the encrypted token from CosmosDB storage
-        if result_dict.get("item_id"):
-            logger.info(
-                f"Scheduling background task for initial transaction sync for item {result_dict['item_id']}"
-            )
-            background_tasks.add_task(
-                plaid_service._sync_transactions_for_stored_item,
-                user_id=user_id,
-                item_id=result_dict["item_id"],
-            )
 
         # Remove sensitive data from response
         if "access_token" in result_dict:
@@ -106,28 +91,25 @@ async def exchange_public_token(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.get("/accounts")
+@router.get("/account")
 async def get_accounts(
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(get_current_user),
     plaid_service: PlaidService = Depends(get_plaid_service),
 ):
-    """Fetch all account balances for the current user from Cosmos DB only (never hits Plaid API)."""
+    """Fetch all account balances for the current user from Cosmos DB only."""
     try:
-        result = await plaid_service.get_accounts_with_balances(
-            user_id, use_cached_db_data=True
-        )
+        result = await plaid_service.get_accounts(user_id)
         return result
     except Exception as e:
         return {
             "accounts": [],
-            "total_balance": 0,
             "message": f"No connected accounts: {str(e)}",
         }
 
 
-@router.post("/accounts/refresh")
+@router.post("/account/refresh")
 async def refresh_accounts(
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(get_current_user),
     plaid_service: PlaidService = Depends(get_plaid_service),
 ):
     """Force refresh account balances from Plaid API, update Cosmos DB, and return latest."""
@@ -140,9 +122,9 @@ async def refresh_accounts(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.get("/accounts/data-info")
+@router.get("/account/data-info")
 def get_accounts_data_info(
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(get_current_user),
     plaid_service: PlaidService = Depends(get_plaid_service),
 ):
     """Get information about stored account data (last updated, age, etc.)."""
@@ -154,41 +136,27 @@ def get_accounts_data_info(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.get("/balance")
-async def get_balance_legacy(
-    user_id: str = Depends(get_current_user_id),
-    plaid_service: PlaidService = Depends(get_plaid_service),
-):
-    """Legacy endpoint - redirects to /accounts for backward compatibility."""
-    try:
-        result = await plaid_service.get_accounts_with_balances(user_id)
-        return {"accounts": result.get("accounts", [])}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@router.get("/items")
-def get_plaid_items(
-    user_id: str = Depends(get_current_user_id),
+@router.get("/bank")
+async def get_plaid_items(
+    user_id: str = Depends(get_current_user),
     plaid_service: PlaidService = Depends(get_plaid_service),
 ):
     """Get summary of user's connected Plaid items (institutions)."""
     try:
-        items = plaid_service.get_user_plaid_items(user_id)
-        return {"items": items}
+        return await plaid_service.get_banks(user_id)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.delete("/items/{item_id}")
+@router.delete("/bank/{bank_id}")
 async def revoke_plaid_item(
-    item_id: str,
-    user_id: str = Depends(get_current_user_id),
+    bank_id: str,
+    user_id: str = Depends(get_current_user),
     plaid_service: PlaidService = Depends(get_plaid_service),
 ):
     """Revoke access to a specific Plaid item."""
     try:
-        success = await plaid_service.revoke_item_access(user_id, item_id)
+        success = await plaid_service.revoke_item_access(user_id, bank_id)
         if success:
             return {"message": "Item revoked successfully"}
         else:
@@ -199,7 +167,7 @@ async def revoke_plaid_item(
 
 @router.delete("/tokens/revoke-all")
 def revoke_all_tokens(
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(get_current_user),
     plaid_service: PlaidService = Depends(get_plaid_service),
 ):
     """Revoke all tokens for the current user."""
@@ -220,7 +188,7 @@ def revoke_all_tokens(
 @router.get("/transactions")
 def get_transactions(
     days: int = 30,
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(get_current_user),
     plaid_service: PlaidService = Depends(get_plaid_service),
 ):
     """Fetch transactions for the current user across all accounts."""
@@ -235,7 +203,7 @@ def get_transactions(
 def get_transactions_by_account(
     account_id: str,
     days: int = 30,
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(get_current_user),
     plaid_service: PlaidService = Depends(get_plaid_service),
 ):
     """Fetch transactions for a specific account."""
@@ -253,7 +221,7 @@ def get_transactions_by_account(
 )
 async def refresh_transactions(
     item_id: str,
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(get_current_user),
     plaid_service: PlaidService = Depends(get_plaid_service),
 ):
     """
@@ -273,7 +241,7 @@ async def refresh_transactions(
 )
 async def force_refresh_transactions(
     item_id: str,
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(get_current_user),
     plaid_service: PlaidService = Depends(get_plaid_service),
 ):
     """
@@ -288,55 +256,51 @@ async def force_refresh_transactions(
 
 
 @router.get("/transactions/paginated", response_model=PaginatedTransactionsResponse)
-def get_transactions_paginated(
-    page: int = Query(1, ge=1, description="Page number (1-indexed)"),
+async def get_transactions_paginated(
+    user_id: str = Depends(get_current_user),
+    # Pagination & Sorting Parameters
+    page: int = Query(1, ge=1, description="Page number, defaults to 1"),
     pageSize: int = Query(
-        20, ge=1, le=100, description="Number of transactions per page"
+        20, ge=1, le=100, description="Number of items per page, defaults to 20"
     ),
-    sortBy: str = Query("date", description="Field to sort by"),
-    sortOrder: str = Query("desc", regex="^(asc|desc)$", description="Sort order"),
-    transactionType: str = Query(
-        "added",
-        regex="^(added|modified|removed|all)$",
-        description="Type of transactions to fetch",
+    sortBy: str = Query("date", description="Field to sort by: date, amount"),
+    sortOrder: str = Query("desc", description="Sort order: asc or desc"),
+    # Core Identity Filters
+    accountId: Optional[str] = Query(None, description="Filter by specific account ID"),
+    itemId: Optional[str] = Query(
+        None, description="Filter by specific item ID (bank connection)"
     ),
-    accountId: Optional[str] = Query(None, description="Filter by account ID"),
-    itemId: Optional[str] = Query(None, description="Filter by item ID (bank)"),
-    institutionName: Optional[str] = Query(
-        None, description="Filter by institution name"
+    # State & Type Filters
+    status: Optional[str] = Query(
+        None, description="Filter by status: posted, pending, removed"
     ),
-    category: Optional[str] = Query(None, description="Filter by category"),
+    isPending: Optional[bool] = Query(
+        None,
+        description="Filter by pending status (true for pending, false for posted)",
+    ),
+    paymentChannel: Optional[str] = Query(
+        None, description="Filter by payment channel: online, in store, other"
+    ),
+    # Date & Financial Filters
     dateFrom: Optional[str] = Query(None, description="Start date filter (YYYY-MM-DD)"),
     dateTo: Optional[str] = Query(None, description="End date filter (YYYY-MM-DD)"),
-    searchTerm: Optional[str] = Query(
-        None, description="Search term for name/merchant"
+    minAmount: Optional[float] = Query(None, description="Minimum transaction amount"),
+    maxAmount: Optional[float] = Query(None, description="Maximum transaction amount"),
+    currency: Optional[str] = Query(
+        None, description="Filter by currency code (e.g., USD)"
     ),
-    user_id: str = Depends(get_current_user_id),
+    # Content & Category Filters
+    searchTerm: Optional[str] = Query(
+        None, description="Search term for description and counterparty names"
+    ),
+    category: Optional[str] = Query(
+        None, description="Filter by primary personal finance category"
+    ),
 ):
-    """Get paginated transactions from Firestore with filtering and sorting."""
+    """Get paginated transactions from Cosmos DB with comprehensive filtering and sorting."""
     try:
-        logger.info(
-            f"Getting paginated {transactionType} transactions for user {user_id}, page {page}"
-        )
-
-        # Build filters dictionary
-        filters = {}
-        if accountId:
-            filters["account_id"] = accountId
-        if itemId:
-            filters["item_id"] = itemId
-        if institutionName:
-            filters["institution_name"] = institutionName
-        if category:
-            filters["category"] = category
-        if dateFrom:
-            filters["date_from"] = dateFrom
-        if dateTo:
-            filters["date_to"] = dateTo
-        if searchTerm:
-            filters["search_term"] = searchTerm
-
-        # Get paginated transactions with transaction type
+        await cosmos_client.ensure_connected()
+        # Get paginated transactions with all filters
         (
             transactions,
             total_count,
@@ -349,8 +313,18 @@ def get_transactions_paginated(
             page_size=pageSize,
             sort_by=sortBy,
             sort_order=sortOrder,
-            filters=filters if filters else None,
-            transaction_type=transactionType,
+            account_id=accountId,
+            item_id=itemId,
+            status=status,
+            is_pending=isPending,
+            payment_channel=paymentChannel,
+            date_from=dateFrom,
+            date_to=dateTo,
+            min_amount=minAmount,
+            max_amount=maxAmount,
+            currency=currency,
+            search_term=searchTerm,
+            category=category,
         )
 
         return PaginatedTransactionsResponse(
@@ -361,7 +335,8 @@ def get_transactions_paginated(
             totalPages=total_pages,
             hasNextPage=has_next,
             hasPreviousPage=has_previous,
-            transactionType=transactionType,
+            # Use status as transaction type for backward compatibility
+            transactionType=status or "all",
         )
 
     except Exception as e:
@@ -374,12 +349,36 @@ def get_transactions_paginated(
 
 @router.get("/transactions/count")
 def get_transactions_count(
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(get_current_user),
 ):
     """Get total count of transactions for the current user."""
     try:
         count = transaction_storage_service.get_user_transactions_count(user_id)
         return {"count": count}
+
+    except Exception as e:
+        logger.error(
+            f"Failed to get transaction count for user {user_id}: {e}", exc_info=True
+        )
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/transactions/test")
+async def get_transactions_count(
+    user_id: str = Depends(get_current_user),
+    plaid_service: PlaidService = Depends(get_plaid_service),
+):
+    """Get total count of transactions for the current user."""
+    try:
+        await cosmos_client.ensure_connected()
+        # count = await plaid_service.sync_transactions(
+        #     "J8aRXNqzQzt3nBxDdkzvhJvGEyqm6kcdQEKva", user_id
+        # )
+        # return {"count": count}
+
+        await transaction_storage_service.delete_item_transactions(
+            user_id, "qLJQGxdEqbukrbpyQvlxS1K3vPQ5ZBTdByg4p"
+        )
 
     except Exception as e:
         logger.error(

@@ -7,18 +7,15 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 
-from ..models.user import UserResponse
 from ..services.auth_service import AuthService
 from ..services.user_service import UserService
 from ..exceptions import AuthenticationError, ValidationError
 from ..utils.logger import get_logger
 from ..constants import ApiRoutes, ApiTags
-from ..database import cosmos_client
 from ..settings import settings
 
 logger = get_logger(__name__)
 router = APIRouter(prefix=ApiRoutes.AUTH_PREFIX, tags=[ApiTags.MICROSOFT_OAUTH])
-
 
 
 @router.get("")
@@ -42,8 +39,21 @@ async def microsoft_oauth_login(
         logger.info(f"Generated Microsoft OAuth state: {oauth_state}")
         logger.info(f"Redirecting to Microsoft OAuth URL: {auth_url}")
 
-        # Redirect to Microsoft's authorization server
-        return RedirectResponse(url=auth_url, status_code=302)
+        # Create redirect response
+        response = RedirectResponse(url=auth_url, status_code=302)
+
+        # Store state in secure HTTP-only cookie for CSRF protection
+        response.set_cookie(
+            key="oauth_state",
+            value=oauth_state,
+            max_age=600,  # 10 minutes - enough for OAuth flow
+            httponly=True,
+            secure=True,  # Only over HTTPS
+            samesite="lax",  # CSRF protection
+            path="/",
+        )
+
+        return response
 
     except Exception as e:
         logger.error(f"Error initiating Microsoft OAuth: {str(e)}")
@@ -52,6 +62,7 @@ async def microsoft_oauth_login(
 
 @router.get("/callback")
 async def microsoft_oauth_callback(
+    request: Request,
     code: Optional[str] = Query(None, description="Authorization code from Microsoft"),
     state: Optional[str] = Query(None, description="State parameter for security"),
     error: Optional[str] = Query(None, description="Error from Microsoft OAuth"),
@@ -79,8 +90,19 @@ async def microsoft_oauth_callback(
             react_error_url = f"{settings.frontend_url}/auth/callback?success=false&error={urllib.parse.quote('Authorization code is required')}"
             return RedirectResponse(url=react_error_url, status_code=302)
 
-        if not state:
-            logger.warning("State parameter is missing - continuing anyway")
+        # Critical: Validate state parameter for CSRF protection
+        oauth_state_cookie = request.cookies.get("oauth_state")
+        if not state or not oauth_state_cookie:
+            logger.error("State parameter or oauth_state cookie is missing")
+            react_error_url = f"{settings.frontend_url}/auth/callback?success=false&error={urllib.parse.quote('Invalid OAuth state - possible CSRF attack')}"
+            return RedirectResponse(url=react_error_url, status_code=302)
+
+        if state != oauth_state_cookie:
+            logger.error(
+                f"State parameter mismatch: received {state}, expected {oauth_state_cookie}"
+            )
+            react_error_url = f"{settings.frontend_url}/auth/callback?success=false&error={urllib.parse.quote('Invalid OAuth state - possible CSRF attack')}"
+            return RedirectResponse(url=react_error_url, status_code=302)
 
         logger.info(
             f"Processing Microsoft OAuth callback - code: {code[:10]}..., state: {state}"
@@ -94,13 +116,38 @@ async def microsoft_oauth_callback(
         # Process OAuth callback
         user, token = await auth_service.process_microsoft_oauth_callback(code, state)
 
-        # Redirect back to React app with success parameters
-        user_data = urllib.parse.quote(user.model_dump_json())
-        react_callback_url = f"{settings.frontend_url}/auth/callback?success=true&token={token.access_token}&user={user_data}"
+        # Create secure session response
+        response = RedirectResponse(
+            url=f"{settings.frontend_url}/auth/callback?success=true", status_code=302
+        )
+
+        # Set secure HTTP-only session cookie (only token needed)
+        response.set_cookie(
+            key="session",
+            value=token.access_token,
+            max_age=token.expires_in,
+            httponly=True,
+            secure=True,  # Only over HTTPS
+            samesite="lax",  # CSRF protection
+            path="/",
+        )
+
+        # Clear the oauth_state cookie after successful validation
+        response.set_cookie(
+            key="oauth_state",
+            value="",
+            max_age=0,  # Expire immediately
+            httponly=True,
+            secure=True,
+            samesite="lax",
+            path="/",
+        )
 
         logger.info(f"Microsoft OAuth callback successful for user: {user.id}")
-        logger.info(f"Redirecting to: {react_callback_url}")
-        return RedirectResponse(url=react_callback_url, status_code=302)
+        logger.info(
+            f"Session cookies set, redirecting to: {settings.frontend_url}/auth/callback?success=true"
+        )
+        return response
 
     except AuthenticationError as e:
         logger.error(f"Authentication error in Microsoft OAuth callback: {str(e)}")
@@ -117,6 +164,91 @@ async def microsoft_oauth_callback(
         # Redirect to React app with error
         react_error_url = f"{settings.frontend_url}/auth/callback?success=false&error={urllib.parse.quote('OAuth callback failed')}"
         return RedirectResponse(url=react_error_url, status_code=302)
+
+
+@router.get("/session/me")
+async def get_current_user(request: Request):
+    """
+    Get current authenticated user details.
+    This endpoint is optimized for frequent calls (app initialization, etc.)
+    """
+    try:
+        session_token = request.cookies.get("session")
+
+        if not session_token:
+            raise HTTPException(status_code=401, detail="No active session")
+
+        # Decode JWT token to get user data
+        try:
+            from ..services.az_key_vault_service import AzureKeyVaultService
+
+            # Decode and validate the JWT token
+            payload = AzureKeyVaultService.verify_token(session_token)
+
+            if not payload:
+                raise Exception("Token verification failed - invalid or expired token")
+
+            # Return only user data (no token for security)
+            user_data = {
+                "id": payload.get("sub"),
+                "email": payload.get("email"),
+                "name": payload.get("name"),
+            }
+
+            return user_data
+
+        except Exception as token_error:
+            logger.error(f"Token validation failed in /me endpoint: {str(token_error)}")
+            raise HTTPException(status_code=401, detail="Invalid or expired session")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Session /me validation error: {str(e)}")
+        raise HTTPException(status_code=401, detail="Invalid session")
+
+
+@router.post("/logout")
+async def logout():
+    """
+    Logout user by clearing session cookies and optionally ending Microsoft session.
+    """
+    try:
+        # Create logout response
+        logout_data = {"message": "Logged out successfully"}
+
+        from fastapi.responses import JSONResponse
+
+        json_response = JSONResponse(content=logout_data)
+
+        # Clear session cookie
+        json_response.set_cookie(
+            key="session",
+            value="",
+            max_age=0,
+            httponly=True,
+            secure=True,
+            samesite="lax",
+            path="/",
+        )
+
+        # Also clear any remaining oauth_state cookie
+        json_response.set_cookie(
+            key="oauth_state",
+            value="",
+            max_age=0,
+            httponly=True,
+            secure=True,
+            samesite="lax",
+            path="/",
+        )
+
+        logger.info("User logged out, session cookies cleared")
+        return json_response
+
+    except Exception as e:
+        logger.error(f"Logout error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Logout failed")
 
 
 @router.get("/status")

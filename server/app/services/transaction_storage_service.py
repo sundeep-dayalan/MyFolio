@@ -1,265 +1,200 @@
-from typing import Dict, Any, List, Optional, Tuple
-from azure.cosmos.exceptions import CosmosResourceNotFoundError, CosmosHttpResponseError
+import asyncio
+from typing import List, Optional, Tuple, Dict, Any
+from datetime import datetime, timezone
+from azure.cosmos import ContainerProxy
+from azure.cosmos.exceptions import CosmosResourceNotFoundError
+import math
+
 from ..database import cosmos_client
 from ..utils.logger import get_logger
-from ..constants import Containers, DocumentFields
-from datetime import datetime, timedelta, timezone
-import math
-import uuid
+from ..constants import Containers
+from ..models.plaid import TransactionDocument
 
 logger = get_logger(__name__)
 
 
 class TransactionStorageService:
-    """Service for managing stored transaction data in CosmosDB."""
+    """
+    A modern, efficient service for managing transaction documents in Cosmos DB.
+
+    This service uses asyncio.gather to execute concurrent upsert and patch
+    operations, which is the recommended pattern for high-throughput writes
+    in the azure-cosmos v4+ SDK.
+    """
 
     def __init__(self):
         self.container_name = Containers.TRANSACTIONS
+        self._container: Optional[ContainerProxy] = None
 
-    def store_transactions_batch(
-        self,
-        user_id: str,
-        item_id: str,
-        transactions: List[Dict[str, Any]],
-        transaction_type: str = "added",
-    ) -> bool:
+    def _get_container(self) -> ContainerProxy:
+        """Lazily initializes and returns the Cosmos container client."""
+        if self._container is None:
+            self._container = cosmos_client.get_container(self.container_name)
+        return self._container
+
+    async def upsert_transactions(self, documents: List[TransactionDocument]) -> None:
         """
-        Stores a batch of transaction data in CosmosDB.
+        Upserts a batch of transaction documents sequentially with proper error handling.
+        This handles both newly added and modified transactions seamlessly.
+
+        Args:
+            documents: A list of TransactionDocument Pydantic models.
+        """
+        if not documents:
+            return
+
+        logger.info(f"Preparing to upsert {len(documents)} transaction documents.")
+        container = self._get_container()
+
+        success_count = 0
+        errors = []
+
+        for doc in documents:
+            try:
+                # Use mode='json' to properly serialize datetime objects to ISO strings
+                doc_data = doc.model_dump(mode="json", by_alias=True, exclude_none=True)
+                container.upsert_item(body=doc_data)
+                success_count += 1
+            except Exception as e:
+                error_msg = f"Failed to upsert document {doc.id}: {e}"
+                logger.error(error_msg)
+                errors.append(error_msg)
+
+        logger.info(
+            f"Successfully upserted {success_count}/{len(documents)} documents."
+        )
+
+        if errors:
+            logger.error(f"Encountered {len(errors)} errors during upsert operation")
+            # Still raise an exception if there were failures, but don't fail completely
+            if success_count == 0:
+                raise Exception(
+                    f"All upsert operations failed. First error: {errors[0]}"
+                )
+            elif len(errors) > len(documents) / 2:  # More than 50% failed
+                raise Exception(
+                    f"Too many upsert failures ({len(errors)}/{len(documents)}). First error: {errors[0]}"
+                )
+
+    async def soft_delete_transactions(
+        self, user_id: str, transaction_ids: List[str], sync_cursor: str
+    ) -> None:
+        """
+        Soft-deletes a batch of transactions by setting the '_meta.isRemoved' flag
+        using concurrent patch operations.
+
+        Args:
+            user_id: The partition key for the documents.
+            transaction_ids: A list of Plaid transaction IDs to soft-delete.
+            sync_cursor: The Plaid sync cursor that triggered this deletion.
+        """
+        if not transaction_ids:
+            return
+
+        logger.info(
+            f"Preparing to concurrently soft-delete {len(transaction_ids)} transactions for user '{user_id}'."
+        )
+        container = self._get_container()
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        patch_operations = [
+            {"op": "set", "path": "/_meta/isRemoved", "value": True},
+            {"op": "set", "path": "/_meta/updatedAt", "value": now_iso},
+            {"op": "set", "path": "/_meta/sourceSyncCursor", "value": sync_cursor},
+        ]
+
+        # Create a list of awaitable tasks for each patch operation
+        tasks = [
+            container.patch_item(
+                item=f"user-{user_id}-transaction-{tx_id}",
+                partition_key=user_id,
+                patch_operations=patch_operations,
+            )
+            for tx_id in transaction_ids
+        ]
+
+        try:
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            success_count = 0
+            for result in results:
+                if isinstance(result, CosmosResourceNotFoundError):
+                    # This can happen in rare race conditions; usually safe to ignore
+                    logger.warning(
+                        f"Attempted to soft-delete a transaction that was not found: {result}"
+                    )
+                elif isinstance(result, Exception):
+                    logger.error(f"An individual patch in the batch failed: {result}")
+                else:
+                    success_count += 1
+
+            logger.info(
+                f"Concurrently soft-deleted {success_count}/{len(transaction_ids)} documents."
+            )
+            if success_count < len(transaction_ids):
+                # Log or raise an exception based on whether this is a critical failure
+                logger.error(
+                    "One or more transactions failed to soft-delete in the batch."
+                )
+
+        except Exception as e:
+            logger.error(f"Concurrent soft-delete operation failed: {e}", exc_info=True)
+            raise
+
+    async def delete_item_transactions(self, user_id: str, item_id: str) -> int:
+        """
+        Performs a HARD delete of all transactions associated with a Plaid item.
+        This is a destructive operation intended for user data cleanup (e.g., GDPR).
 
         Args:
             user_id: The ID of the user.
-            item_id: The Plaid Item ID the transactions belong to.
-            transactions: A list of cleaned & normalized transaction dictionaries.
-            transaction_type: The type of transactions ("added", "modified", or "removed")
+            item_id: The Plaid Item ID to delete transactions for.
 
         Returns:
-            True if the batch write was successful, False otherwise.
+            The number of documents deleted.
         """
-        if not transactions:
-            logger.info(
-                f"No {transaction_type} transactions to store for user {user_id}, item {item_id}."
-            )
-            return True
+        logger.warning(
+            f"Performing HARD delete for all transactions of user '{user_id}', item '{item_id}'."
+        )
+        container = self._get_container()
 
-        try:
-            logger.info(
-                f"Storing batch of {len(transactions)} {transaction_type} transactions for user {user_id}, item {item_id}"
-            )
+        query = (
+            "SELECT c.id FROM c WHERE c.userId = @userId AND c.plaidItemId = @itemId"
+        )
+        parameters = [
+            {"name": "@userId", "value": user_id},
+            {"name": "@itemId", "value": item_id},
+        ]
 
-            # Store each transaction individually in CosmosDB
-            success_count = 0
-            for tx_data in transactions:
-                transaction_id = tx_data.get("transaction_id")
-                if not transaction_id:
-                    logger.warning("Skipping transaction with no ID.")
-                    continue
+        docs_to_delete = cosmos_client.query_items(
+            self.container_name, query, parameters, user_id
+        )
 
-                # Create document with required CosmosDB fields
-                tx_doc = {
-                    "id": f"{user_id}_{item_id}_{transaction_id}_{transaction_type}",  # Unique doc ID
-                    "userId": user_id,  # Partition key
-                    "transaction_id": transaction_id,
-                    "item_id": item_id,
-                    "transaction_type": transaction_type,
-                    "sync_timestamp": datetime.utcnow().isoformat(),
-                    **tx_data,
-                }
+        if not docs_to_delete:
+            logger.info(f"No transactions found to delete for item '{item_id}'.")
+            return 0
 
-                try:
-                    cosmos_client.create_item(self.container_name, tx_doc, user_id)
-                    success_count += 1
-                except CosmosHttpResponseError as e:
-                    if e.status_code == 409:  # Conflict - document exists, try update
-                        try:
-                            cosmos_client.update_item(
-                                self.container_name, tx_doc["id"], user_id, tx_doc
-                            )
-                            success_count += 1
-                        except Exception as update_e:
-                            logger.error(
-                                f"Failed to update transaction {transaction_id}: {update_e}"
-                            )
-                    else:
-                        logger.error(
-                            f"Failed to store transaction {transaction_id}: {e}"
-                        )
+        # Delete items sequentially since bulk operations are not available in this SDK version
+        deleted_count = 0
+        errors = []
 
-            logger.info(
-                f"Successfully stored {success_count}/{len(transactions)} {transaction_type} transactions for item {item_id}"
-            )
-            return success_count == len(transactions)
+        for doc in docs_to_delete:
+            try:
+                container.delete_item(item=doc["id"], partition_key=user_id)
+                deleted_count += 1
+            except Exception as e:
+                error_msg = f"Failed to delete document {doc['id']}: {e}"
+                logger.error(error_msg)
+                errors.append(error_msg)
 
-        except Exception as e:
-            logger.error(
-                f"Failed to store {transaction_type} transaction data batch for user {user_id}, item {item_id}: {e}",
-                exc_info=True,
-            )
-            return False
+        logger.info(
+            f"Successfully hard-deleted {deleted_count}/{len(docs_to_delete)} transactions for item '{item_id}'."
+        )
 
-    def store_added_transactions_batch(
-        self, user_id: str, item_id: str, transactions: List[Dict[str, Any]]
-    ) -> bool:
-        """Store added transactions in the 'added' collection."""
-        return self.store_transactions_batch(user_id, item_id, transactions, "added")
+        if errors:
+            logger.warning(f"Encountered {len(errors)} errors during deletion")
 
-    def store_modified_transactions_batch(
-        self, user_id: str, item_id: str, transactions: List[Dict[str, Any]]
-    ) -> bool:
-        """Store modified transactions in the 'modified' collection."""
-        return self.store_transactions_batch(user_id, item_id, transactions, "modified")
-
-    def store_removed_transactions_batch(
-        self, user_id: str, item_id: str, transactions: List[Dict[str, Any]]
-    ) -> bool:
-        """Store removed transactions in the 'removed' collection."""
-        return self.store_transactions_batch(user_id, item_id, transactions, "removed")
-
-    def delete_all_user_transactions(self, user_id: str) -> bool:
-        """
-        Deletes all transaction data for a specific user.
-        """
-        try:
-            logger.info(f"Deleting all transaction data for user {user_id}")
-
-            if not cosmos_client.is_connected:
-                logger.error("CosmosDB not connected - cannot delete transaction data")
-                return False
-
-            # Query all transactions for the user
-            query = "SELECT c.id FROM c WHERE c.userId = @userId"
-            parameters = [{"name": "@userId", "value": user_id}]
-
-            transactions = cosmos_client.query_items(
-                self.container_name, query, parameters, user_id
-            )
-
-            deleted_count = 0
-            for tx in transactions:
-                try:
-                    cosmos_client.delete_item(self.container_name, tx["id"], user_id)
-                    deleted_count += 1
-                except Exception as e:
-                    logger.warning(f"Failed to delete transaction {tx['id']}: {e}")
-
-            logger.info(
-                f"Successfully deleted {deleted_count} transactions for user {user_id}"
-            )
-            return True
-
-        except Exception as e:
-            logger.error(
-                f"Failed to delete all transaction data for user {user_id}: {e}",
-                exc_info=True,
-            )
-            return False
-
-    def delete_item_transactions(self, user_id: str, item_id: str) -> bool:
-        """
-        Deletes all transaction data for a specific item.
-
-        Args:
-            user_id: The ID of the user
-            item_id: The Plaid Item ID to delete transactions for
-
-        Returns:
-            True if deletion was successful, False otherwise
-        """
-        try:
-            logger.info(f"Deleting transactions for user {user_id}, item {item_id}")
-
-            if not cosmos_client.is_connected:
-                logger.error("CosmosDB not connected - cannot delete transaction data")
-                return False
-
-            # Query all transactions for the user and item
-            query = (
-                "SELECT c.id FROM c WHERE c.userId = @userId AND c.item_id = @itemId"
-            )
-            parameters = [
-                {"name": "@userId", "value": user_id},
-                {"name": "@itemId", "value": item_id},
-            ]
-
-            transactions = cosmos_client.query_items(
-                self.container_name, query, parameters, user_id
-            )
-
-            deleted_count = 0
-            for tx in transactions:
-                try:
-                    cosmos_client.delete_item(self.container_name, tx["id"], user_id)
-                    deleted_count += 1
-                except Exception as e:
-                    logger.warning(f"Failed to delete transaction {tx['id']}: {e}")
-
-            logger.info(
-                f"Successfully deleted {deleted_count} transactions for item {item_id}"
-            )
-            return True
-
-        except Exception as e:
-            logger.error(
-                f"Failed to delete transaction data for user {user_id}, item {item_id}: {e}",
-                exc_info=True,
-            )
-            return False
-
-    def delete_transaction(
-        self, user_id: str, item_id: str, transaction_id: str
-    ) -> bool:
-        """
-        Deletes a specific transaction document.
-
-        Args:
-            user_id: The ID of the user
-            item_id: The Plaid Item ID
-            transaction_id: The specific transaction ID to delete
-
-        Returns:
-            True if deletion was successful, False otherwise
-        """
-        try:
-            logger.info(
-                f"Deleting transaction {transaction_id} for user {user_id}, item {item_id}"
-            )
-
-            if not cosmos_client.is_connected:
-                logger.error("CosmosDB not connected - cannot delete transaction")
-                return False
-
-            # Query for all versions of this transaction (added, modified, removed)
-            query = "SELECT c.id FROM c WHERE c.userId = @userId AND c.item_id = @itemId AND c.transaction_id = @transactionId"
-            parameters = [
-                {"name": "@userId", "value": user_id},
-                {"name": "@itemId", "value": item_id},
-                {"name": "@transactionId", "value": transaction_id},
-            ]
-
-            transactions = cosmos_client.query_items(
-                self.container_name, query, parameters, user_id
-            )
-
-            deleted_count = 0
-            for tx in transactions:
-                try:
-                    cosmos_client.delete_item(self.container_name, tx["id"], user_id)
-                    deleted_count += 1
-                except Exception as e:
-                    logger.warning(
-                        f"Failed to delete transaction version {tx['id']}: {e}"
-                    )
-
-            logger.info(
-                f"Successfully deleted {deleted_count} versions of transaction {transaction_id}"
-            )
-            return deleted_count > 0
-
-        except Exception as e:
-            logger.error(
-                f"Failed to delete transaction {transaction_id} for user {user_id}, item {item_id}: {e}",
-                exc_info=True,
-            )
-            return False
+        return deleted_count
 
     def get_transactions_paginated(
         self,
@@ -268,491 +203,208 @@ class TransactionStorageService:
         page_size: int = 20,
         sort_by: str = "date",
         sort_order: str = "desc",
-        filters: Optional[Dict[str, Any]] = None,
-        transaction_type: str = "added",
+        account_id: Optional[str] = None,
+        item_id: Optional[str] = None,
+        status: Optional[str] = None,
+        is_pending: Optional[bool] = None,
+        payment_channel: Optional[str] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        min_amount: Optional[float] = None,
+        max_amount: Optional[float] = None,
+        currency: Optional[str] = None,
+        search_term: Optional[str] = None,
+        category: Optional[str] = None,
     ) -> Tuple[List[Dict[str, Any]], int, int, bool, bool]:
         """
-        Get transactions with pagination and filtering from CosmosDB.
-
-        Args:
-            user_id: The ID of the user
-            page: Page number (1-indexed)
-            page_size: Number of transactions per page
-            sort_by: Field to sort by (date, amount, name, etc.)
-            sort_order: "asc" or "desc"
-            filters: Optional filters dict
-            transaction_type: Type of transactions to fetch ("added", "modified", "removed", "all")
+        Get paginated transactions with comprehensive filtering and sorting.
 
         Returns:
             Tuple of (transactions, total_count, total_pages, has_next, has_previous)
         """
+        # Build the WHERE clause conditions
+        conditions = ["c.userId = @userId"]
+        parameters = [
+            {"name": "@userId", "value": user_id},
+        ]
+        
+        # Only add type filter if we're filtering by transaction type
+        # Some documents might not have the 'type' field
+        if hasattr(self, '_require_type_filter') and self._require_type_filter:
+            conditions.append("c.type = 'transaction'")
+        
+        logger.info(f"Starting transaction query for user '{user_id}' with base conditions: {conditions}")
+        
+        # First, let's do a broad query to see what's in the container
+        broad_query = "SELECT TOP 5 c.userId, c.type, c.id FROM c"
+        broad_result = list(cosmos_client.query_items(self.container_name, broad_query, [], user_id))
+        logger.info(f"Container sample data: {broad_result}")
+        
+        # Then test query for this specific user
+        test_query = f"SELECT TOP 5 c.id, c.userId FROM c WHERE c.userId = @userId"
+        test_result = list(cosmos_client.query_items(self.container_name, test_query, parameters, user_id))
+        logger.info(f"Test query found {len(test_result)} documents for user '{user_id}'")
+        if test_result:
+            logger.info(f"Sample documents: {test_result[:3]}")
+        
+        # If no data at all, return empty result immediately
+        if not test_result:
+            logger.warning(f"No documents found for user '{user_id}' in container {self.container_name}")
+            return [], 0, 1, False, False
+
+        # Core Identity Filters
+        if account_id:
+            conditions.append("c.plaidAccountId = @accountId")
+            parameters.append({"name": "@accountId", "value": account_id})
+
+        if item_id:
+            conditions.append("c.plaidItemId = @itemId")
+            parameters.append({"name": "@itemId", "value": item_id})
+
+        # State & Type Filters
+        if status:
+            if status == "pending":
+                conditions.append("c.isPending = true")
+            elif status == "posted":
+                conditions.append("c.isPending = false")
+            elif status == "removed":
+                conditions.append("c._meta.isRemoved = true")
+        else:
+            # By default, exclude removed transactions if the field exists
+            # Use IS_DEFINED to check if the field exists first
+            conditions.append("(NOT IS_DEFINED(c._meta.isRemoved) OR c._meta.isRemoved = false)")
+
+        # Separate isPending filter (can be used in combination with status)
+        if is_pending is not None:
+            conditions.append("c.isPending = @isPending")
+            parameters.append({"name": "@isPending", "value": is_pending})
+
+        if payment_channel:
+            conditions.append("c.paymentChannel = @paymentChannel")
+            parameters.append({"name": "@paymentChannel", "value": payment_channel})
+
+        # Date & Financial Filters
+        if date_from:
+            conditions.append("c.date >= @dateFrom")
+            parameters.append({"name": "@dateFrom", "value": date_from})
+
+        if date_to:
+            conditions.append("c.date <= @dateTo")
+            parameters.append({"name": "@dateTo", "value": date_to})
+
+        if min_amount is not None:
+            conditions.append("c.amount >= @minAmount")
+            parameters.append({"name": "@minAmount", "value": min_amount})
+
+        if max_amount is not None:
+            conditions.append("c.amount <= @maxAmount")
+            parameters.append({"name": "@maxAmount", "value": max_amount})
+
+        if currency:
+            conditions.append("c.currency = @currency")
+            parameters.append({"name": "@currency", "value": currency})
+
+        # Content & Category Filters
+        if search_term:
+            conditions.append(
+                "(CONTAINS(LOWER(c.description), LOWER(@searchTerm)) OR ARRAY_LENGTH(ARRAY(SELECT VALUE cp FROM cp IN c.counterparties WHERE CONTAINS(LOWER(cp.name), LOWER(@searchTerm)))) > 0)"
+            )
+            parameters.append({"name": "@searchTerm", "value": search_term})
+
+        if category:
+            conditions.append("c.category.primary = @category")
+            parameters.append({"name": "@category", "value": category})
+
+        # Build the complete WHERE clause
+        where_clause = " AND ".join(conditions)
+
+        # Sorting
+        sort_field_map = {
+            "date": "c.date",
+            "amount": "c.amount",
+        }
+        sort_field = sort_field_map.get(sort_by, "c.date")
+        sort_direction = "ASC" if sort_order.lower() == "asc" else "DESC"
+
+        # Count query for pagination
+        count_query = f"SELECT VALUE COUNT(1) FROM c WHERE {where_clause}"
+
+        logger.info(f"Count query: {count_query}")
+        logger.info(f"Parameters: {parameters}")
+
         try:
-            logger.info(
-                f"Getting paginated {transaction_type} transactions for user {user_id}, page {page}"
-            )
-
-            if not cosmos_client.is_connected:
-                logger.error("CosmosDB not connected - cannot get transactions")
-                return [], 0, 0, False, False
-
-            # Build base query
-            query_parts = ["SELECT * FROM c WHERE c.userId = @userId"]
-            parameters = [{"name": "@userId", "value": user_id}]
-
-            # Add transaction type filter
-            if transaction_type != "all":
-                query_parts.append("AND c.transaction_type = @transactionType")
-                parameters.append(
-                    {"name": "@transactionType", "value": transaction_type}
+            # Get total count
+            count_result = list(
+                cosmos_client.query_items(
+                    self.container_name, count_query, parameters, user_id
                 )
-
-            # Add filters
-            if filters:
-                if filters.get("item_id"):
-                    query_parts.append("AND c.item_id = @itemId")
-                    parameters.append({"name": "@itemId", "value": filters["item_id"]})
-
-                if filters.get("account_id"):
-                    query_parts.append("AND c.account_id = @accountId")
-                    parameters.append(
-                        {"name": "@accountId", "value": filters["account_id"]}
-                    )
-
-                if filters.get("date_from"):
-                    query_parts.append("AND c.date >= @dateFrom")
-                    parameters.append(
-                        {"name": "@dateFrom", "value": filters["date_from"]}
-                    )
-
-                if filters.get("date_to"):
-                    query_parts.append("AND c.date <= @dateTo")
-                    parameters.append({"name": "@dateTo", "value": filters["date_to"]})
-
-                if filters.get("category"):
-                    query_parts.append("AND ARRAY_CONTAINS(c.category, @category)")
-                    parameters.append(
-                        {"name": "@category", "value": filters["category"]}
-                    )
-
-            # Add sorting
-            sort_direction = "DESC" if sort_order.lower() == "desc" else "ASC"
-            if sort_by == "date":
-                query_parts.append(f"ORDER BY c.date {sort_direction}")
-            elif sort_by == "amount":
-                query_parts.append(f"ORDER BY c.amount {sort_direction}")
-            elif sort_by == "name":
-                query_parts.append(f"ORDER BY c.name {sort_direction}")
-            else:
-                query_parts.append(f"ORDER BY c.{sort_by} {sort_direction}")
-
-            query = " ".join(query_parts)
-
-            # Get all matching transactions
-            all_transactions = cosmos_client.query_items(
-                self.container_name, query, parameters, user_id
             )
-
-            # Apply search term filter (CosmosDB doesn't have good full-text search)
-            if filters and filters.get("search_term"):
-                search_term = filters["search_term"].lower()
-                filtered_transactions = []
-                for tx in all_transactions:
-                    searchable_text = f"{tx.get('name', '')} {tx.get('merchant_name', '')} {tx.get('account_name', '')}".lower()
-                    if search_term in searchable_text:
-                        filtered_transactions.append(tx)
-                all_transactions = filtered_transactions
+            total_count = count_result[0] if count_result else 0
+            
+            logger.info(f"Total count result: {total_count}")
 
             # Calculate pagination
-            total_count = len(all_transactions)
             total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
             offset = (page - 1) * page_size
-            has_previous = page > 1
             has_next = page < total_pages
+            has_previous = page > 1
 
-            # Get the page of results
-            page_transactions = all_transactions[offset : offset + page_size]
+            # Main query with pagination
+            main_query = f"""
+                SELECT * FROM c 
+                WHERE {where_clause} 
+                ORDER BY {sort_field} {sort_direction}
+                OFFSET {offset} LIMIT {page_size}
+            """
+            
+            logger.info(f"Main query: {main_query}")
+
+            # Execute main query
+            transactions = list(
+                cosmos_client.query_items(
+                    self.container_name, main_query, parameters, user_id
+                )
+            )
+            
+            logger.info(f"Raw transactions count: {len(transactions)}")
+            if transactions:
+                logger.info(f"First transaction keys: {list(transactions[0].keys()) if transactions[0] else 'None'}")
 
             logger.info(
-                f"Retrieved {len(page_transactions)} transactions for page {page} (total: {total_count})"
+                f"Retrieved {len(transactions)} transactions for user {user_id}, "
+                f"page {page}/{total_pages}, total: {total_count}"
             )
-            return page_transactions, total_count, total_pages, has_next, has_previous
+
+            return transactions, total_count, total_pages, has_next, has_previous
 
         except Exception as e:
             logger.error(
                 f"Failed to get paginated transactions for user {user_id}: {e}",
                 exc_info=True,
             )
-            return [], 0, 0, False, False
-
-    def _get_item_ids_by_institution(
-        self, user_id: str, institution_name: str
-    ) -> List[str]:
-        """
-        Get item IDs that belong to a specific institution.
-        This queries the plaid_tokens container to find items for the given institution.
-        """
-        try:
-            # Query plaid_tokens container for items with matching institution
-            query = "SELECT c.item_id FROM c WHERE c.userId = @userId AND c.institution_name = @institutionName"
-            parameters = [
-                {"name": "@userId", "value": user_id},
-                {"name": "@institutionName", "value": institution_name},
-            ]
-
-            tokens = cosmos_client.query_items(
-                "plaid_tokens", query, parameters, user_id
-            )
-            matching_item_ids = [token["item_id"] for token in tokens]
-
-            logger.info(
-                f"Found {len(matching_item_ids)} items for institution '{institution_name}'"
-            )
-            return matching_item_ids
-
-        except Exception as e:
-            logger.error(
-                f"Failed to get item IDs for institution {institution_name}: {e}"
-            )
-            return []
+            raise
 
     def get_user_transactions_count(self, user_id: str) -> int:
-        """
-        Get the total count of transactions for a user.
+        """Get the total count of transactions for a user."""
+        query = (
+            "SELECT VALUE COUNT(1) FROM c WHERE c.userId = @userId "
+            "AND c.type = 'transaction' AND c._meta.isRemoved = false"
+        )
+        parameters = [{"name": "@userId", "value": user_id}]
 
-        Args:
-            user_id: The ID of the user
-
-        Returns:
-            Total number of transactions
-        """
         try:
-            if not cosmos_client.is_connected:
-                logger.error("CosmosDB not connected - cannot get transaction count")
-                return 0
-
-            # Query to count all transactions for the user
-            query = "SELECT VALUE COUNT(1) FROM c WHERE c.userId = @userId"
-            parameters = [{"name": "@userId", "value": user_id}]
-
-            results = cosmos_client.query_items(
-                self.container_name, query, parameters, user_id
+            result = list(
+                cosmos_client.query_items(
+                    self.container_name, query, parameters, user_id
+                )
             )
-
-            return results[0] if results else 0
-
+            return result[0] if result else 0
         except Exception as e:
             logger.error(
                 f"Failed to get transaction count for user {user_id}: {e}",
                 exc_info=True,
             )
-            return 0
-
-    def get_last_sync_cursor(self, user_id: str, item_id: str) -> Optional[str]:
-        """Get the last sync cursor for an item."""
-        try:
-            # Get from plaid_tokens container
-            doc_id = f"{user_id}_{item_id}"
-            result = cosmos_client.get_item("plaid_tokens", doc_id, user_id)
-            
-            if result and DocumentFields.TRANSACTIONS in result:
-                return result[DocumentFields.TRANSACTIONS].get("last_cursor")
-            
-            return None
-            
-        except Exception as e:
-            logger.error(f"Failed to get sync cursor for {item_id}: {e}")
-            return None
-
-    def update_sync_cursor(self, user_id: str, item_id: str, cursor: str) -> bool:
-        """Update the sync cursor for an item."""
-        try:
-            doc_id = f"{user_id}_{item_id}"
-            update_data = {
-                "transactions.last_cursor": cursor,
-                "transactions.last_sync_at": datetime.now(timezone.utc).isoformat()
-            }
-            
-            cosmos_client.update_item("plaid_tokens", doc_id, user_id, update_data)
-            logger.info(f"Updated sync cursor for item {item_id}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Failed to update sync cursor for {item_id}: {e}")
-            return False
-
-    def clear_item_transactions(self, user_id: str, item_id: str) -> bool:
-        """Clear all transactions for a specific item."""
-        try:
-            logger.info(f"Clearing transactions for item {item_id}")
-            
-            # Query all transactions for this item
-            query = "SELECT c.id FROM c WHERE c.userId = @userId AND c.item_id = @itemId"
-            parameters = [
-                {"name": "@userId", "value": user_id},
-                {"name": "@itemId", "value": item_id}
-            ]
-            
-            results = cosmos_client.query_items(
-                self.container_name, query, parameters, user_id
-            )
-            
-            # Delete each transaction
-            deleted_count = 0
-            for result in results:
-                try:
-                    cosmos_client.delete_item(
-                        self.container_name, result["id"], user_id
-                    )
-                    deleted_count += 1
-                except Exception as e:
-                    logger.error(f"Failed to delete transaction {result['id']}: {e}")
-            
-            logger.info(f"Cleared {deleted_count} transactions for item {item_id}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Failed to clear transactions for item {item_id}: {e}")
-            return False
-
-    def get_user_transactions(self, user_id: str, days: int = 30) -> List[Dict[str, Any]]:
-        """Get all transactions for a user in the last N days."""
-        try:
-            # Calculate date filter
-            cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
-            cutoff_date_str = cutoff_date.isoformat()
-            
-            query = """
-                SELECT * FROM c 
-                WHERE c.userId = @userId 
-                AND c.date >= @cutoffDate
-                ORDER BY c.date DESC
-            """
-            
-            parameters = [
-                {"name": "@userId", "value": user_id},
-                {"name": "@cutoffDate", "value": cutoff_date_str}
-            ]
-            
-            results = cosmos_client.query_items(
-                self.container_name, query, parameters, user_id
-            )
-            
-            logger.info(f"Retrieved {len(results)} transactions for user {user_id}")
-            return results
-            
-        except Exception as e:
-            logger.error(f"Failed to get transactions for user {user_id}: {e}")
-            return []
-
-    def get_account_transactions(
-        self, user_id: str, account_id: str, days: int = 30
-    ) -> List[Dict[str, Any]]:
-        """Get transactions for a specific account in the last N days."""
-        try:
-            # Calculate date filter
-            cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
-            cutoff_date_str = cutoff_date.isoformat()
-            
-            query = """
-                SELECT * FROM c 
-                WHERE c.userId = @userId 
-                AND c.account_id = @accountId
-                AND c.date >= @cutoffDate
-                ORDER BY c.date DESC
-            """
-            
-            parameters = [
-                {"name": "@userId", "value": user_id},
-                {"name": "@accountId", "value": account_id},
-                {"name": "@cutoffDate", "value": cutoff_date_str}
-            ]
-            
-            results = cosmos_client.query_items(
-                self.container_name, query, parameters, user_id
-            )
-            
-            logger.info(f"Retrieved {len(results)} transactions for account {account_id}")
-            return results
-            
-        except Exception as e:
-            logger.error(f"Failed to get transactions for account {account_id}: {e}")
-            return []
-
-    def handle_removed_transactions(
-        self, user_id: str, item_id: str, removed_transactions: List[Dict]
-    ) -> bool:
-        """Handle removed transactions from Plaid sync."""
-        try:
-            logger.info(f"Handling {len(removed_transactions)} removed transactions")
-            
-            removed_count = 0
-            for removed_txn in removed_transactions:
-                transaction_id = removed_txn.get("transaction_id")
-                if not transaction_id:
-                    continue
-                
-                # Find and delete the transaction (try different type suffixes)
-                for suffix in ["added", "modified", "removed"]:
-                    doc_id = f"{user_id}_{item_id}_{transaction_id}_{suffix}"
-                    try:
-                        cosmos_client.delete_item(self.container_name, doc_id, user_id)
-                        removed_count += 1
-                        break  # Found and removed, stop trying other suffixes
-                    except CosmosResourceNotFoundError:
-                        # Transaction doesn't exist, try next suffix
-                        continue
-                    except Exception as e:
-                        logger.error(f"Failed to remove transaction {transaction_id}: {e}")
-                        break
-            
-            logger.info(f"Handled {removed_count} removed transactions")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Failed to handle removed transactions: {e}")
-            return False
-
-    def store_transactions(
-        self, user_id: str, item_id: str, transactions: List[Dict], transaction_type: str
-    ) -> bool:
-        """Store transactions from Plaid sync."""
-        try:
-            logger.info(f"💾 STORING TRANSACTIONS: {len(transactions)} {transaction_type} transactions for item {item_id}")
-            
-            if not cosmos_client.is_connected:
-                logger.error("❌ CosmosDB not connected - cannot store transactions")
-                return False
-                
-            stored_count = 0
-            for i, txn in enumerate(transactions):
-                try:
-                    # Convert Plaid Transaction object to dict if needed
-                    if hasattr(txn, 'to_dict'):
-                        txn_dict = txn.to_dict()
-                    elif hasattr(txn, '__dict__'):
-                        txn_dict = txn.__dict__
-                    else:
-                        txn_dict = txn
-                    
-                    # Extract transaction data from the dict
-                    transaction_id = txn_dict.get("transaction_id") or getattr(txn, 'transaction_id', None)
-                    account_id = txn_dict.get("account_id") or getattr(txn, 'account_id', None)
-                    
-                    logger.info(f"Processing transaction {i+1}/{len(transactions)}: {transaction_id}")
-                    logger.debug(f"Transaction type: {type(txn)}")
-                    
-                    if not transaction_id or not account_id:
-                        logger.warning(f"❌ Skipping transaction {i+1} with missing ID or account_id: {transaction_id}, {account_id}")
-                        logger.debug(f"Transaction has attributes: {[attr for attr in dir(txn) if not attr.startswith('_')]}")
-                        continue
-                    
-                    # Create document ID (just use transaction_id as primary key)
-                    doc_id = f"{transaction_id}_{transaction_type}"
-                    
-                    # Helper function to safely get value from Plaid object or dict
-                    def get_txn_value(key, default=None):
-                        """Get value from Plaid transaction object or dict."""
-                        try:
-                            if hasattr(txn, key):
-                                return getattr(txn, key)
-                            elif isinstance(txn_dict, dict):
-                                return txn_dict.get(key, default)
-                            else:
-                                return default
-                        except:
-                            return default
-                    
-                    # Clean and convert Plaid data to JSON-serializable format
-                    def clean_value(value):
-                        """Convert any non-JSON serializable values to strings."""
-                        try:
-                            if value is None:
-                                return None
-                            elif hasattr(value, 'value'):  # Enum
-                                return value.value
-                            elif hasattr(value, 'to_dict'):  # Plaid object
-                                return clean_value(value.to_dict())
-                            elif isinstance(value, datetime):
-                                return value.isoformat()
-                            elif hasattr(value, 'isoformat'):  # datetime.date objects
-                                return value.isoformat()
-                            elif isinstance(value, (list, tuple)):
-                                return [clean_value(item) for item in value]
-                            elif isinstance(value, dict):
-                                return {k: clean_value(v) for k, v in value.items()}
-                            else:
-                                return value
-                        except:
-                            return str(value) if value is not None else None
-                    
-                    # Prepare transaction document with cleaned data
-                    transaction_doc = {
-                        "id": doc_id,
-                        "userId": user_id,  # Partition key
-                        "item_id": item_id,
-                        "transaction_id": transaction_id,
-                        "account_id": account_id,
-                        "transaction_type": transaction_type,
-                        "amount": clean_value(get_txn_value("amount")),
-                        "date": clean_value(get_txn_value("date")),
-                        "authorized_date": clean_value(get_txn_value("authorized_date")),
-                        "name": clean_value(get_txn_value("name")),
-                        "merchant_name": clean_value(get_txn_value("merchant_name")),
-                        "category": clean_value(get_txn_value("category", [])),
-                        "category_id": clean_value(get_txn_value("category_id")),
-                        "iso_currency_code": clean_value(get_txn_value("iso_currency_code")),
-                        "unofficial_currency_code": clean_value(get_txn_value("unofficial_currency_code")),
-                        "location": clean_value(get_txn_value("location", {})),
-                        "payment_meta": clean_value(get_txn_value("payment_meta", {})),
-                        "account_owner": clean_value(get_txn_value("account_owner")),
-                        "transaction_code": clean_value(get_txn_value("transaction_code")),
-                        "personal_finance_category": clean_value(get_txn_value("personal_finance_category", {})),
-                        "created_at": datetime.now(timezone.utc).isoformat(),
-                        "plaid_data": clean_value(txn_dict)  # Store full cleaned Plaid data
-                    }
-                    
-                    logger.debug(f"Prepared transaction document with {len(transaction_doc)} fields")
-                    
-                    # Store in CosmosDB (upsert)
-                    logger.info(f"📝 Storing transaction {transaction_id} with doc_id: {doc_id}")
-                    try:
-                        cosmos_client.create_item(self.container_name, transaction_doc, user_id)
-                        logger.info(f"✅ Created new transaction document: {doc_id}")
-                    except CosmosHttpResponseError as e:
-                        if e.status_code == 409:  # Document exists, update it
-                            # Get existing document to preserve created_at
-                            try:
-                                existing_doc = cosmos_client.get_item(
-                                    self.container_name, doc_id, user_id
-                                )
-                                if existing_doc and "created_at" in existing_doc:
-                                    transaction_doc["created_at"] = existing_doc["created_at"]
-                            except Exception as get_error:
-                                logger.warning(f"Could not get existing transaction for created_at: {get_error}")
-                            
-                            # Add last_updated timestamp
-                            transaction_doc["last_updated"] = datetime.now(timezone.utc).isoformat()
-                            
-                            cosmos_client.update_item(
-                                self.container_name, doc_id, user_id, transaction_doc
-                            )
-                            logger.info(f"✅ Updated existing transaction document: {doc_id}")
-                        else:
-                            logger.error(f"❌ CosmosDB error for transaction {transaction_id}: {e}")
-                            raise
-                    
-                    stored_count += 1
-                    
-                except Exception as e:
-                    logger.error(f"❌ Failed to store transaction {transaction_id}: {e}", exc_info=True)
-                    continue
-            
-            logger.info(f"🎉 TRANSACTION STORAGE COMPLETE: {stored_count}/{len(transactions)} {transaction_type} transactions stored successfully")
-            return stored_count > 0
-            
-        except Exception as e:
-            logger.error(f"Failed to store transactions: {e}")
-            return False
+            raise
 
 
 # Global instance to be imported by other services

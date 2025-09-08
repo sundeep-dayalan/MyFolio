@@ -10,7 +10,7 @@ from .az_key_vault_service import AzureKeyVaultService
 
 from ..constants.auth import Providers
 
-from ..models.user import MicrosoftUserInfo, Token, UserResponse, UserCreate, UserUpdate
+from ..models.user import MicrosoftUserInfo, UserCreate, UserUpdate
 from ..exceptions import AuthenticationError
 from ..utils.logger import get_logger
 from ..settings import settings
@@ -55,9 +55,7 @@ class AuthService:
         """Generate Microsoft Entra ID OAuth authorization URL."""
         return self.microsoft_oauth.generate_auth_url(state)
 
-    async def process_microsoft_oauth_callback(
-        self, code: str, state: str
-    ) -> Tuple[UserResponse, Token]:
+    async def process_microsoft_oauth_callback(self, code: str, state: str):
         """Process Microsoft Entra ID OAuth callback and authenticate user."""
         try:
             # Exchange code for tokens
@@ -65,8 +63,10 @@ class AuthService:
 
             # Verify ID token and get user info
             id_token = tokens.get("id_token")
-            graph_user_data = None  # Initialize to handle both ID token and Graph API flows
-            
+            graph_user_data = (
+                None  # Initialize to handle both ID token and Graph API flows
+            )
+
             if not id_token:
                 # Fallback to access token to get user info from Graph API
                 access_token = tokens.get("access_token")
@@ -95,7 +95,7 @@ class AuthService:
                 microsoft_user_info = (
                     await self.microsoft_oauth.verify_and_get_user_info(id_token)
                 )
-                
+
                 # Even with ID token, get raw user data from Graph API for storage
                 access_token = tokens.get("access_token")
                 if access_token:
@@ -106,7 +106,9 @@ class AuthService:
                             )
                         )
                     except Exception as e:
-                        logger.warning(f"Failed to get Graph user data for storage: {e}")
+                        logger.warning(
+                            f"Failed to get Graph user data for storage: {e}"
+                        )
                         graph_user_data = None
 
             # Try to get user from database
@@ -168,25 +170,3 @@ class AuthService:
         except Exception as e:
             logger.error(f"Error during Microsoft OAuth callback: {str(e)}")
             raise AuthenticationError("Microsoft OAuth authentication failed")
-
-    async def verify_access_token(self, token: str) -> Optional[UserResponse]:
-        """Verify access token and return user if valid."""
-        try:
-            payload = AzureKeyVaultService.verify_token(token)
-            if not payload:
-                return None
-
-            user_id = payload.get("sub")
-            if not user_id:
-                return None
-
-            # Get user from database
-            user = await self.user_service.get_user_by_id(user_id)
-            if not user or not user.is_active:
-                return None
-
-            return user
-
-        except Exception as e:
-            logger.warning(f"Token verification failed: {str(e)}")
-            return None

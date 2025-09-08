@@ -34,7 +34,7 @@ function ActionsCell({ transaction }: { transaction: Transaction }) {
         <DropdownMenuContent align="end">
           <DropdownMenuLabel>Actions</DropdownMenuLabel>
           <DropdownMenuItem
-            onClick={() => navigator.clipboard.writeText(transaction.transaction_id)}
+            onClick={() => navigator.clipboard.writeText(transaction.plaidTransactionId)}
           >
             Copy transaction ID
           </DropdownMenuItem>
@@ -131,7 +131,7 @@ export const columns: ColumnDef<Transaction>[] = [
     cell: ({ row }) => <div className="font-medium">{formatDate(row.getValue('date'))}</div>,
   },
   {
-    accessorKey: 'name',
+    accessorKey: 'description',
     header: ({ column }) => {
       return (
         <Button
@@ -145,14 +145,14 @@ export const columns: ColumnDef<Transaction>[] = [
     },
     cell: ({ row }) => {
       const transaction = row.original;
-      const institutionName = transaction.institution_name || 'Unknown Bank';
-      const logoUrl = transaction.logo_url;
+      const counterpartyName = transaction.counterparties?.[0]?.name;
+      const counterpartyLogo = transaction.counterparties?.[0]?.logoUrl;
 
       return (
         <div className="flex items-center space-x-3">
           <Avatar className="h-8 w-8">
-            {logoUrl ? (
-              <AvatarImage src={logoUrl} alt={institutionName} />
+            {counterpartyLogo ? (
+              <AvatarImage src={counterpartyLogo} alt={counterpartyName || 'Transaction'} />
             ) : (
               <div className="h-full w-full bg-slate-100 flex items-center justify-center">
                 <svg
@@ -182,9 +182,9 @@ export const columns: ColumnDef<Transaction>[] = [
             </AvatarFallback>
           </Avatar>
           <div>
-            <div className="font-medium">{transaction.name || 'Unknown Transaction'}</div>
-            {transaction.merchant_name && transaction.merchant_name !== transaction.name && (
-              <div className="text-sm text-muted-foreground">{transaction.merchant_name}</div>
+            <div className="font-medium">{transaction.description || 'Unknown Transaction'}</div>
+            {counterpartyName && counterpartyName !== transaction.description && (
+              <div className="text-sm text-muted-foreground">{counterpartyName}</div>
             )}
           </div>
         </div>
@@ -196,39 +196,26 @@ export const columns: ColumnDef<Transaction>[] = [
     header: 'Category',
     cell: ({ row }) => {
       const transaction = row.original;
-      const personalFinanceCategory = transaction.personal_finance_category?.primary;
-      const categoryIconUrl = transaction.personal_finance_category_icon_url;
-      const categories = row.getValue('category') as string[] | null | undefined;
-
-      // Use personal finance category if available, otherwise fall back to legacy category
-      const primaryCategory =
-        personalFinanceCategory ||
-        (categories && Array.isArray(categories) && categories.length > 0
-          ? categories[0]
-          : 'Other');
+      const primaryCategory = transaction.category?.primary || 'Other';
 
       return (
         <div className="flex items-center space-x-2">
           <Avatar className="h-6 w-6">
-            {categoryIconUrl ? (
-              <AvatarImage src={categoryIconUrl} alt={primaryCategory} />
-            ) : (
-              <div className="h-full w-full bg-slate-100 flex items-center justify-center">
-                <svg
-                  className="h-3 w-3 text-slate-600"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"
-                  />
-                </svg>
-              </div>
-            )}
+            <div className="h-full w-full bg-slate-100 flex items-center justify-center">
+              <svg
+                className="h-3 w-3 text-slate-600"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"
+                />
+              </svg>
+            </div>
             <AvatarFallback className="text-xs bg-slate-100 text-slate-600">
               <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path
@@ -241,14 +228,14 @@ export const columns: ColumnDef<Transaction>[] = [
             </AvatarFallback>
           </Avatar>
           <Badge variant="outline" className="capitalize">
-            {(primaryCategory || 'Other').replace(/_/g, ' ').toLowerCase()}
+            {primaryCategory.replace(/_/g, ' ').toLowerCase()}
           </Badge>
         </div>
       );
     },
   },
   {
-    accessorKey: 'account_name',
+    accessorKey: 'plaidAccountId',
     header: ({ column }) => {
       return (
         <Button
@@ -262,13 +249,12 @@ export const columns: ColumnDef<Transaction>[] = [
     },
     cell: ({ row }) => {
       const transaction = row.original;
-      const institutionName = transaction.institution_name || 'Unknown Bank';
-      const accountName = transaction.account_name || 'Unknown Account';
+      const accountId = transaction.plaidAccountId;
 
       return (
         <div>
-          <div className="font-medium">{accountName}</div>
-          <div className="text-sm text-muted-foreground">{institutionName}</div>
+          <div className="font-medium text-xs">{accountId.slice(-4)}</div>
+          <div className="text-sm text-muted-foreground">Account</div>
         </div>
       );
     },
@@ -300,10 +286,10 @@ export const columns: ColumnDef<Transaction>[] = [
     },
   },
   {
-    accessorKey: 'pending',
+    accessorKey: 'isPending',
     header: 'Status',
     cell: ({ row }) => {
-      const pending = row.getValue('pending') as boolean;
+      const pending = row.getValue('isPending') as boolean;
       return (
         <Badge variant={pending ? 'secondary' : 'default'}>{pending ? 'Pending' : 'Posted'}</Badge>
       );
