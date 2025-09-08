@@ -49,7 +49,7 @@ async def microsoft_oauth_login(
             max_age=600,  # 10 minutes - enough for OAuth flow
             httponly=True,
             secure=True,  # Only over HTTPS
-            samesite="lax",  # CSRF protection
+            samesite="none",  # Allow cross-domain for production
             path="/",
         )
 
@@ -128,7 +128,7 @@ async def microsoft_oauth_callback(
             max_age=token.expires_in,
             httponly=True,
             secure=True,  # Only over HTTPS
-            samesite="lax",  # CSRF protection
+            samesite="none",  # Allow cross-domain for production
             path="/",
         )
 
@@ -139,7 +139,7 @@ async def microsoft_oauth_callback(
             max_age=0,  # Expire immediately
             httponly=True,
             secure=True,
-            samesite="lax",
+            samesite="none",
             path="/",
         )
 
@@ -228,7 +228,7 @@ async def logout():
             max_age=0,
             httponly=True,
             secure=True,
-            samesite="lax",
+            samesite="none",
             path="/",
         )
 
@@ -239,7 +239,7 @@ async def logout():
             max_age=0,
             httponly=True,
             secure=True,
-            samesite="lax",
+            samesite="none",
             path="/",
         )
 
