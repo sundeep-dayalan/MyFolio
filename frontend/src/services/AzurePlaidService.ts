@@ -135,34 +135,6 @@ export const AzurePlaidService = {
     }
   },
 
-  async getAccounts(): Promise<PlaidAccountsResponse> {
-    try {
-      const headers = getHeaders();
-      const response = await fetch(`${API_BASE}/plaid/account`, {
-        method: 'GET',
-        headers,
-        credentials: 'include',
-      });
-
-      if (response.status === 401) {
-        AzureAuthService.clearAuthData();
-        window.location.href = '/login';
-        throw new Error('Authentication required. Redirecting to login.');
-      }
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || `HTTP error! status: ${response.status}`);
-      }
-
-      const data = await response.json();
-      return data;
-    } catch (error) {
-      console.error('Failed to fetch accounts:', error);
-      throw new Error('Failed to fetch accounts');
-    }
-  },
-
   async getTransactions(
     startDate?: string,
     endDate?: string,
@@ -243,7 +215,7 @@ export const AzurePlaidService = {
       category?: string;
     },
     sortBy?: string,
-    sortOrder?: 'asc' | 'desc'
+    sortOrder?: 'asc' | 'desc',
   ): Promise<any> {
     try {
       const queryParams = new URLSearchParams({
@@ -256,22 +228,28 @@ export const AzurePlaidService = {
       if (filters?.accountId) queryParams.append('accountId', filters.accountId);
       if (filters?.itemId) queryParams.append('itemId', filters.itemId);
       if (filters?.status) queryParams.append('status', filters.status);
-      if (filters?.isPending !== undefined) queryParams.append('isPending', filters.isPending.toString());
+      if (filters?.isPending !== undefined)
+        queryParams.append('isPending', filters.isPending.toString());
       if (filters?.paymentChannel) queryParams.append('paymentChannel', filters.paymentChannel);
       if (filters?.dateFrom) queryParams.append('dateFrom', filters.dateFrom);
       if (filters?.dateTo) queryParams.append('dateTo', filters.dateTo);
-      if (filters?.minAmount !== undefined) queryParams.append('minAmount', filters.minAmount.toString());
-      if (filters?.maxAmount !== undefined) queryParams.append('maxAmount', filters.maxAmount.toString());
+      if (filters?.minAmount !== undefined)
+        queryParams.append('minAmount', filters.minAmount.toString());
+      if (filters?.maxAmount !== undefined)
+        queryParams.append('maxAmount', filters.maxAmount.toString());
       if (filters?.currency) queryParams.append('currency', filters.currency);
       if (filters?.searchTerm) queryParams.append('searchTerm', filters.searchTerm);
       if (filters?.category) queryParams.append('category', filters.category);
 
       const headers = getHeaders();
-      const response = await fetch(`${API_BASE}/plaid/transactions/paginated?${queryParams.toString()}`, {
-        method: 'GET',
-        headers,
-        credentials: 'include',
-      });
+      const response = await fetch(
+        `${API_BASE}/plaid/transactions/paginated?${queryParams.toString()}`,
+        {
+          method: 'GET',
+          headers,
+          credentials: 'include',
+        },
+      );
 
       if (response.status === 401) {
         AzureAuthService.clearAuthData();
